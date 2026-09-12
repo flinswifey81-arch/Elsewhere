@@ -6,9 +6,10 @@ import com.example.domain.provider.*
 import com.example.domain.repository.SettingsRepository
 import com.squareup.moshi.Moshi
 import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
-import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -21,18 +22,23 @@ import java.util.UUID
 class OpenRouterModelProvider(
     private val client: OkHttpClient,
     private val moshi: Moshi,
-    private val settingsRepository: SettingsRepository
+    private val apiKeyProvider: suspend () -> String?
 ) : ModelProvider {
+
+    constructor(
+        client: OkHttpClient,
+        moshi: Moshi,
+        settingsRepository: SettingsRepository
+    ) : this(client, moshi, settingsRepository::getApiKey)
 
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
 
-    override suspend fun getModels(): List<OpenRouterModel> {
-        val apiKey = settingsRepository.getApiKey()
-            ?: throw IllegalStateException("API key not configured")
+    override suspend fun getModels(): List<OpenRouterModel> = withContext(Dispatchers.IO) {
+        val apiKey = apiKeyProvider() ?: throw IllegalStateException("API key not configured")
 
         val request = Request.Builder()
             .url("https://openrouter.ai/api/v1/models")
-            .header("Authorization", "Bearer \$apiKey")
+            .header("Authorization", "Bearer $apiKey")
             .header("HTTP-Referer", "https://github.com/google/ai-studio")
             .header("X-Title", "Elsewhere")
             .get()
@@ -40,14 +46,14 @@ class OpenRouterModelProvider(
 
         client.newCall(request).execute().use { response ->
             if (!response.isSuccessful) {
-                throw IOException("Unexpected code \$response")
+                throw IOException("Unexpected code ${response.code}")
             }
             val body = response.body?.string() ?: ""
             val adapter = moshi.adapter(Map::class.java)
             val parsed = adapter.fromJson(body)
             val data = parsed?.get("data") as? List<Map<String, Any>> ?: emptyList()
             
-            return data.map { item ->
+            data.map { item ->
                 val pricing = item["pricing"] as? Map<String, Any>
                 OpenRouterModel(
                     id = item["id"]?.toString() ?: "",
@@ -60,13 +66,20 @@ class OpenRouterModelProvider(
         }
     }
 
-    override suspend fun getEndpoints(modelId: String): List<ProviderEndpoint> {
-        val apiKey = settingsRepository.getApiKey()
-            ?: throw IllegalStateException("API key not configured")
+    override suspend fun getEndpoints(modelId: String): List<ProviderEndpoint> = withContext(Dispatchers.IO) {
+        val apiKey = apiKeyProvider() ?: throw IllegalStateException("API key not configured")
             
         val request = Request.Builder()
-            .url("https://openrouter.ai/api/v1/models/\$modelId/endpoints")
-            .header("Authorization", "Bearer \$apiKey")
+            .url(
+                HttpUrl.Builder()
+                    .scheme("https")
+                    .host("openrouter.ai")
+                    .addPathSegments("api/v1/models")
+                    .addPathSegment(modelId)
+                    .addPathSegment("endpoints")
+                    .build()
+            )
+            .header("Authorization", "Bearer $apiKey")
             .header("HTTP-Referer", "https://github.com/google/ai-studio")
             .header("X-Title", "Elsewhere")
             .get()
@@ -75,15 +88,15 @@ class OpenRouterModelProvider(
         client.newCall(request).execute().use { response ->
             if (!response.isSuccessful) {
                 // If it 404s, some models might not support this API endpoint.
-                if (response.code == 404) return emptyList()
-                throw IOException("Unexpected code \$response")
+                if (response.code == 404) return@use emptyList()
+                throw IOException("Unexpected code ${response.code}")
             }
             val body = response.body?.string() ?: ""
             val adapter = moshi.adapter(Map::class.java)
             val parsed = adapter.fromJson(body)
             val data = parsed?.get("data") as? List<Map<String, Any>> ?: emptyList()
             
-            return data.map { item ->
+            data.map { item ->
                 ProviderEndpoint(
                     name = item["name"]?.toString() ?: item["identifier"]?.toString() ?: "Unknown",
                     identifier = item["identifier"]?.toString() ?: ""
@@ -96,7 +109,7 @@ class OpenRouterModelProvider(
         messages: List<RoleplayMessage>,
         options: GenerationOptions
     ): Flow<StreamEvent> = callbackFlow {
-        val apiKey = settingsRepository.getApiKey()
+        val apiKey = apiKeyProvider()
         if (apiKey.isNullOrEmpty()) {
             trySend(StreamEvent.Error(IllegalStateException("API key not configured")))
             close()
@@ -133,7 +146,7 @@ class OpenRouterModelProvider(
 
         val request = Request.Builder()
             .url("https://openrouter.ai/api/v1/chat/completions")
-            .header("Authorization", "Bearer \$apiKey")
+            .header("Authorization", "Bearer $apiKey")
             .header("HTTP-Referer", "https://github.com/google/ai-studio")
             .header("X-Title", "Elsewhere")
             .post(jsonBody.toRequestBody(jsonMediaType))
@@ -199,7 +212,7 @@ class OpenRouterModelProvider(
                     trySend(StreamEvent.Error(t))
                 } else if (response != null && !response.isSuccessful) {
                     val err = response.body?.string() ?: "Unknown error"
-                    trySend(StreamEvent.Error(IOException("HTTP \${response.code}: \$err")))
+                    trySend(StreamEvent.Error(IOException("HTTP ${response.code}: $err")))
                 } else {
                     trySend(StreamEvent.Error(IOException("Unknown streaming failure")))
                 }

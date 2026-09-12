@@ -38,7 +38,6 @@ class DefaultAppContainer(private val context: Context) : AppContainer {
     private val database: AppDatabase by lazy {
         Room.databaseBuilder(context, AppDatabase::class.java, "elsewhere_database")
             .addMigrations(AppDatabase.MIGRATION_1_2)
-            .fallbackToDestructiveMigration()
             .build()
     }
 

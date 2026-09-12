@@ -3,15 +3,14 @@ package com.example
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.example.domain.repository.ApiKeyRepository
 import com.example.domain.repository.AppearanceRepository
-import com.example.domain.repository.SettingsRepository
 import com.example.ui.screens.SettingsScreen
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
-import android.content.Context
 
 @RunWith(AndroidJUnit4::class)
 @Config(manifest = Config.NONE)
@@ -20,10 +19,24 @@ class SettingsFunctionalTest {
     @get:Rule
     val composeTestRule = createComposeRule()
 
+    private class InMemoryApiKeyRepository : ApiKeyRepository {
+        private var key: String? = null
+
+        override suspend fun saveApiKey(apiKey: String) {
+            key = apiKey
+        }
+
+        override suspend fun getApiKey(): String? = key
+
+        override suspend fun deleteApiKey() {
+            key = null
+        }
+    }
+
     @Test
     fun testSettingsFunctionalControls() {
         val context = RuntimeEnvironment.getApplication()
-        val settingsRepository = SettingsRepository(context)
+        val settingsRepository = InMemoryApiKeyRepository()
         val appearanceRepository = AppearanceRepository(context)
         
         composeTestRule.setContent {
@@ -46,6 +59,8 @@ class SettingsFunctionalTest {
         composeTestRule.waitForIdle()
         
         // Model & API
+        composeTestRule.onNodeWithTag("settings_list")
+            .performScrollToNode(hasText("Model & API"))
         composeTestRule.onNodeWithText("Model & API").assertExists()
         
         // Since isLoaded is async, we wait for it

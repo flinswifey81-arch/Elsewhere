@@ -12,14 +12,14 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.example.domain.repository.AppearanceSettings
 import com.example.domain.repository.AppearanceRepository
-import com.example.domain.repository.SettingsRepository
+import com.example.domain.repository.ApiKeyRepository
 import kotlinx.coroutines.launch
 import com.example.domain.repository.ThemeMode
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun SettingsScreen(
-    settingsRepository: SettingsRepository,
+    settingsRepository: ApiKeyRepository,
     appearanceRepository: AppearanceRepository,
     modifier: Modifier = Modifier
 ) {
@@ -49,7 +49,7 @@ fun SettingsScreen(
         containerColor = MaterialTheme.colorScheme.background
     ) { padding ->
         LazyColumn(
-            modifier = Modifier.fillMaxSize().padding(padding),
+            modifier = Modifier.fillMaxSize().padding(padding).testTag("settings_list"),
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(24.dp)
         ) {

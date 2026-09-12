@@ -12,7 +12,13 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
-class SettingsRepository(private val context: Context) {
+interface ApiKeyRepository {
+    suspend fun saveApiKey(apiKey: String)
+    suspend fun getApiKey(): String?
+    suspend fun deleteApiKey()
+}
+
+class SettingsRepository(private val context: Context) : ApiKeyRepository {
     
     private val keyAlias = "openrouter_api_key_alias"
     private val androidKeyStore = "AndroidKeyStore"
@@ -42,7 +48,7 @@ class SettingsRepository(private val context: Context) {
         return keyGenerator.generateKey()
     }
 
-    suspend fun saveApiKey(apiKey: String) = withContext(Dispatchers.IO) {
+    override suspend fun saveApiKey(apiKey: String) = withContext(Dispatchers.IO) {
         val cipher = Cipher.getInstance(transformation)
         cipher.init(Cipher.ENCRYPT_MODE, getSecretKey())
         
@@ -58,7 +64,7 @@ class SettingsRepository(private val context: Context) {
         }
     }
 
-    suspend fun getApiKey(): String? = withContext(Dispatchers.IO) {
+    override suspend fun getApiKey(): String? = withContext(Dispatchers.IO) {
         val file = File(context.filesDir, fileName)
         if (!file.exists()) return@withContext null
         
@@ -85,7 +91,7 @@ class SettingsRepository(private val context: Context) {
         }
     }
 
-    suspend fun deleteApiKey() = withContext(Dispatchers.IO) {
+    override suspend fun deleteApiKey() = withContext(Dispatchers.IO) {
         val file = File(context.filesDir, fileName)
         if (file.exists()) {
             file.delete()
