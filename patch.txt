@@ -1,0 +1,27 @@
+                // Advanced Generation Params
+                Text("Generation Parameters", style = MaterialTheme.typography.titleMedium)
+                
+                Text("Temperature: ${uiState.settings?.temperature?.toString() ?: "Default"}", style = MaterialTheme.typography.bodyMedium)
+                Slider(
+                    value = uiState.settings?.temperature ?: 1.0f,
+                    onValueChange = { viewModel.onTemperatureChanged(it) },
+                    valueRange = 0f..2f,
+                    steps = 19
+                )
+                Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                    Button(onClick = { viewModel.onTemperatureChanged(null) }) { Text("Reset Temp") }
+                }
+
+                Text("Top P: ${uiState.settings?.topP?.toString() ?: "Default"}", style = MaterialTheme.typography.bodyMedium)
+                Slider(
+                    value = uiState.settings?.topP ?: 1.0f,
+                    onValueChange = { viewModel.onTopPChanged(it) },
+                    valueRange = 0f..1f,
+                    steps = 9
+                )
+                Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                    Button(onClick = { viewModel.onTopPChanged(null) }) { Text("Reset Top P") }
+                }
+
+                HorizontalDivider()
+

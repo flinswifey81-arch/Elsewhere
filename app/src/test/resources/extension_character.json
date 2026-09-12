@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "character_id": "ext-char-1",
+  "display_name": "Ext Char",
+  "character_name": "Ext",
+  "aliases": [],
+  "custom_future_section": {
+    "magic_power": 9000,
+    "enabled": true
+  },
+  "some_unknown_string": "hello"
+}

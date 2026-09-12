@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "character_id": "rich-char-1",
+  "display_name": "Rich Character (Swordmaster)",
+  "character_name": "Lyra",
+  "aliases": ["The Blade", "Lyra of the North"],
+  "identity": {
+    "age": "28",
+    "pronouns": "she/her"
+  },
+  "personality": {
+    "summary": "Stoic but kind."
+  }
+}

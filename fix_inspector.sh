@@ -1,0 +1,9 @@
+#!/bin/bash
+sed -i '/var isLoading/i \
+    var totalMessages by remember { mutableStateOf(0) }\n    var includedMessages by remember { mutableStateOf(0) }\n    var modelId by remember { mutableStateOf("") }\n    var routingMode by remember { mutableStateOf("") }\n' app/src/main/java/com/example/ui/screens/ContextInspectorScreen.kt
+
+sed -i 's/val priorHistory = history.dropLast(1)/val priorHistory = history.dropLast(1)\n                val trimmed = priorHistory.takeLast(40)\n                totalMessages = history.size\n                includedMessages = trimmed.size + 1\n                modelId = settings.selectedModelId ?: "Default"\n                routingMode = settings.providerRoutingMode.name/g' app/src/main/java/com/example/ui/screens/ContextInspectorScreen.kt
+
+sed -i '/items(compiledMessages) { msg ->/i \
+                item {\n                    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {\n                        Column(modifier = Modifier.padding(16.dp).fillMaxWidth()) {\n                            Text("Settings Overview", style = MaterialTheme.typography.titleMedium)\n                            Spacer(Modifier.height(8.dp))\n                            Text("Model: $modelId", style = MaterialTheme.typography.bodySmall)\n                            Text("Routing Mode: $routingMode", style = MaterialTheme.typography.bodySmall)\n                            Text("Total Messages: $totalMessages", style = MaterialTheme.typography.bodySmall)\n                            Text("Included in Context: $includedMessages", style = MaterialTheme.typography.bodySmall)\n                            Text("Omitted from Context: ${totalMessages - includedMessages}", style = MaterialTheme.typography.bodySmall)\n                        }\n                    }\n                }' app/src/main/java/com/example/ui/screens/ContextInspectorScreen.kt
+

@@ -1,0 +1,216 @@
+package com.example.data.remote
+
+import com.example.data.model.GenerationMetadataEntity
+import com.example.data.model.ProviderRoutingMode
+import com.example.domain.provider.*
+import com.example.domain.repository.SettingsRepository
+import com.squareup.moshi.Moshi
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.first
+import okhttp3.*
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.sse.EventSource
+import okhttp3.sse.EventSourceListener
+import okhttp3.sse.EventSources
+import java.io.IOException
+import java.util.UUID
+
+class OpenRouterModelProvider(
+    private val client: OkHttpClient,
+    private val moshi: Moshi,
+    private val settingsRepository: SettingsRepository
+) : ModelProvider {
+
+    private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
+
+    override suspend fun getModels(): List<OpenRouterModel> {
+        val apiKey = settingsRepository.getApiKey()
+            ?: throw IllegalStateException("API key not configured")
+
+        val request = Request.Builder()
+            .url("https://openrouter.ai/api/v1/models")
+            .header("Authorization", "Bearer \$apiKey")
+            .header("HTTP-Referer", "https://github.com/google/ai-studio")
+            .header("X-Title", "Elsewhere")
+            .get()
+            .build()
+
+        client.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                throw IOException("Unexpected code \$response")
+            }
+            val body = response.body?.string() ?: ""
+            val adapter = moshi.adapter(Map::class.java)
+            val parsed = adapter.fromJson(body)
+            val data = parsed?.get("data") as? List<Map<String, Any>> ?: emptyList()
+            
+            return data.map { item ->
+                val pricing = item["pricing"] as? Map<String, Any>
+                OpenRouterModel(
+                    id = item["id"]?.toString() ?: "",
+                    name = item["name"]?.toString() ?: "",
+                    contextLength = (item["context_length"] as? Number)?.toInt() ?: 0,
+                    pricingPrompt = pricing?.get("prompt")?.toString() ?: "0",
+                    pricingCompletion = pricing?.get("completion")?.toString() ?: "0"
+                )
+            }
+        }
+    }
+
+    override suspend fun getEndpoints(modelId: String): List<ProviderEndpoint> {
+        val apiKey = settingsRepository.getApiKey()
+            ?: throw IllegalStateException("API key not configured")
+            
+        val request = Request.Builder()
+            .url("https://openrouter.ai/api/v1/models/\$modelId/endpoints")
+            .header("Authorization", "Bearer \$apiKey")
+            .header("HTTP-Referer", "https://github.com/google/ai-studio")
+            .header("X-Title", "Elsewhere")
+            .get()
+            .build()
+
+        client.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                // If it 404s, some models might not support this API endpoint.
+                if (response.code == 404) return emptyList()
+                throw IOException("Unexpected code \$response")
+            }
+            val body = response.body?.string() ?: ""
+            val adapter = moshi.adapter(Map::class.java)
+            val parsed = adapter.fromJson(body)
+            val data = parsed?.get("data") as? List<Map<String, Any>> ?: emptyList()
+            
+            return data.map { item ->
+                ProviderEndpoint(
+                    name = item["name"]?.toString() ?: item["identifier"]?.toString() ?: "Unknown",
+                    identifier = item["identifier"]?.toString() ?: ""
+                )
+            }
+        }
+    }
+
+    override fun streamResponse(
+        messages: List<RoleplayMessage>,
+        options: GenerationOptions
+    ): Flow<StreamEvent> = callbackFlow {
+        val apiKey = settingsRepository.getApiKey()
+        if (apiKey.isNullOrEmpty()) {
+            trySend(StreamEvent.Error(IllegalStateException("API key not configured")))
+            close()
+            return@callbackFlow
+        }
+
+        val requestBodyMap = mutableMapOf<String, Any>(
+            "model" to options.modelId,
+            "stream" to true,
+            "messages" to messages.map { msg ->
+                val m = mutableMapOf("role" to msg.role.name.lowercase(), "content" to msg.content)
+                if (msg.name != null) m["name"] = msg.name
+                m
+            }
+        )
+
+        options.maxTokens?.let { requestBodyMap["max_tokens"] = it }
+        options.temperature?.let { requestBodyMap["temperature"] = it }
+        options.topP?.let { requestBodyMap["top_p"] = it }
+        if (options.stopSequences.isNotEmpty()) {
+            requestBodyMap["stop"] = options.stopSequences
+        }
+
+        if (options.routing.mode != ProviderRoutingMode.AUTO) {
+            val providerConfig = mutableMapOf<String, Any>()
+            providerConfig["allow_fallbacks"] = options.routing.allowFallback
+            if (options.routing.preferredEndpoints.isNotEmpty()) {
+                providerConfig["order"] = options.routing.preferredEndpoints
+            }
+            requestBodyMap["provider"] = providerConfig
+        }
+
+        val jsonBody = moshi.adapter(Map::class.java).toJson(requestBodyMap)
+
+        val request = Request.Builder()
+            .url("https://openrouter.ai/api/v1/chat/completions")
+            .header("Authorization", "Bearer \$apiKey")
+            .header("HTTP-Referer", "https://github.com/google/ai-studio")
+            .header("X-Title", "Elsewhere")
+            .post(jsonBody.toRequestBody(jsonMediaType))
+            .build()
+
+        val startTime = System.currentTimeMillis()
+        var finalMetadata: GenerationMetadataEntity? = null
+        var currentMessageId = UUID.randomUUID().toString() // Generate a dummy ID, UI should map it
+
+        val listener = object : EventSourceListener() {
+            override fun onEvent(eventSource: EventSource, id: String?, type: String?, data: String) {
+                if (data == "[DONE]") {
+                    // Normal finish, wait for closed
+                    return
+                }
+                try {
+                    val parsed = moshi.adapter(Map::class.java).fromJson(data)
+                    
+                    val choices = parsed?.get("choices") as? List<Map<String, Any>>
+                    val delta = choices?.firstOrNull()?.get("delta") as? Map<String, Any>
+                    val content = delta?.get("content") as? String
+                    
+                    if (content != null) {
+                        trySend(StreamEvent.Content(content))
+                    }
+                    
+                    val usage = parsed?.get("usage") as? Map<String, Any>
+                    if (usage != null) {
+                        val promptTokens = (usage["prompt_tokens"] as? Number)?.toInt()
+                        val completionTokens = (usage["completion_tokens"] as? Number)?.toInt()
+                        val totalTokens = (usage["total_tokens"] as? Number)?.toInt()
+                        
+                        val providerStr = parsed["provider"]?.toString() ?: "Unknown"
+                        val finishReason = choices?.firstOrNull()?.get("finish_reason") as? String
+
+                        val requestedModel = options.modelId
+                        val resolvedModel = parsed["model"] as? String
+
+                        finalMetadata = GenerationMetadataEntity(
+                            messageId = currentMessageId, // Will be updated by caller
+                            requestedModelId = requestedModel,
+                            resolvedModelId = resolvedModel,
+                            promptTokens = promptTokens,
+                            completionTokens = completionTokens,
+                            totalTokens = totalTokens,
+                            finishReason = finishReason,
+                            provider = providerStr,
+                            generationTimeMs = System.currentTimeMillis() - startTime
+                        )
+                    }
+                } catch (e: Exception) {
+                    // Ignore malformed chunks
+                }
+            }
+
+            override fun onClosed(eventSource: EventSource) {
+                trySend(StreamEvent.Done(finalMetadata))
+                close()
+            }
+
+            override fun onFailure(eventSource: EventSource, t: Throwable?, response: Response?) {
+                if (t != null) {
+                    trySend(StreamEvent.Error(t))
+                } else if (response != null && !response.isSuccessful) {
+                    val err = response.body?.string() ?: "Unknown error"
+                    trySend(StreamEvent.Error(IOException("HTTP \${response.code}: \$err")))
+                } else {
+                    trySend(StreamEvent.Error(IOException("Unknown streaming failure")))
+                }
+                close()
+            }
+        }
+
+        val eventSource = EventSources.createFactory(client).newEventSource(request, listener)
+
+        awaitClose {
+            eventSource.cancel()
+        }
+    }
+}

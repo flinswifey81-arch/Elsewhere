@@ -1,0 +1,3 @@
+#!/bin/bash
+sed -i 's/fun compileSoloContext(/fun compileSoloContext(\n        isContinuation: Boolean = false,/g' app/src/main/java/com/example/domain/compiler/ContextCompilerV1.kt
+sed -i 's/        messages.add(RoleplayMessage(role = role, content = currentMessage.content, name = currentMessage.speakerDisplayNameSnapshot))\n\n        return messages/        messages.add(RoleplayMessage(role = role, content = currentMessage.content, name = currentMessage.speakerDisplayNameSnapshot))\n\n        if (isContinuation) {\n            messages.add(RoleplayMessage(role = Role.SYSTEM, content = "Continue the previous message. Do not repeat what you have already said."))\n        }\n\n        return messages/g' app/src/main/java/com/example/domain/compiler/ContextCompilerV1.kt

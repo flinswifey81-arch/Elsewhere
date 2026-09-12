@@ -1,0 +1,2 @@
+#!/bin/bash
+sed -i 's/    suspend fun insertGenerationMetadata/    fun getVariants(variantGroupId: String): kotlinx.coroutines.flow.Flow<List<com.example.data.model.MessageEntity>> = messageDao.getVariants(variantGroupId)\n\n    suspend fun setPrimaryVariant(variantGroupId: String, messageId: String) {\n        messageDao.clearPrimaryVariants(variantGroupId)\n        messageDao.setPrimaryVariant(messageId)\n    }\n\n    suspend fun insertGenerationMetadata/g' app/src/main/java/com/example/domain/repository/MessageRepository.kt
