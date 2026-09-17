@@ -6,6 +6,7 @@ import com.example.domain.provider.*
 import org.junit.Assert.*
 import org.junit.Test
 import java.util.UUID
+import com.example.ui.screens.isValidCustomLengths
 
 class Stage3SoloRoleplayTests {
 
@@ -145,5 +146,78 @@ class Stage3SoloRoleplayTests {
         assertEquals(Role.ASSISTANT, messages[2].role) // CHARACTER
         assertEquals(Role.SYSTEM, messages[3].role) // SYSTEM
         assertEquals(Role.USER, messages[4].role) // current (PERSONA)
+    }
+
+    @Test
+    fun `ContextCompiler includes durable memory and rolling summary before recent verbatim history`() {
+        val messages = ContextCompilerV1().compileSoloContext(
+            character = createChar("c1", "Char"),
+            persona = createPersona("p1", "Persona"),
+            chatHistory = listOf(
+                MessageEntity(chatId = "chat", speakerType = SpeakerType.PERSONA, speakerId = "p1", speakerDisplayNameSnapshot = "Persona", content = "Recent line", orderIndex = 2L)
+            ),
+            currentMessage = MessageEntity(chatId = "chat", speakerType = SpeakerType.PERSONA, speakerId = "p1", speakerDisplayNameSnapshot = "Persona", content = "Newest line", orderIndex = 3L),
+            responseProfile = ResponseLengthProfile.NORMAL,
+            customMin = null,
+            customTargetMax = null,
+            customHardMax = null,
+            durableMemories = listOf(
+                RoleplayMemoryEntity(chatId = "chat", characterId = "c1", category = MemoryCategory.PROMISE, content = "meet beneath the clock tower")
+            ),
+            rollingSummary = "Persona and Char escaped the winter court."
+        )
+
+        assertTrue(messages.first().content.contains("DURABLE ROLEPLAY MEMORY"))
+        assertTrue(messages.first().content.contains("meet beneath the clock tower"))
+        assertTrue(messages.first().content.contains("ROLLING CONVERSATION SUMMARY"))
+        assertTrue(messages.first().content.contains("escaped the winter court"))
+        assertEquals("Recent line", messages[1].content)
+        assertEquals("Newest line", messages[2].content)
+    }
+
+    @Test
+    fun `LOCK routing disables fallback and preserves selected endpoint`() {
+        val routing = ModelRouting.fromSettings(ProviderRoutingMode.LOCK, "provider/endpoint")
+
+        assertFalse(routing.allowFallback)
+        assertEquals(listOf("provider/endpoint"), routing.preferredEndpoints)
+    }
+
+    @Test
+    fun `ContextCompiler excludes inactive response variants`() {
+        val active = MessageEntity(
+            messageId = "active",
+            chatId = "chat",
+            speakerType = SpeakerType.CHARACTER,
+            speakerId = "c1",
+            speakerDisplayNameSnapshot = "Char",
+            content = "Chosen response",
+            orderIndex = 2L,
+            variantGroupId = "variants",
+            isPrimaryVariant = true
+        )
+        val inactive = active.copy(messageId = "inactive", content = "Rejected response", isPrimaryVariant = false)
+
+        val compiled = ContextCompilerV1().compileSoloContext(
+            character = createChar("c1", "Char"),
+            persona = createPersona("p1", "Persona"),
+            chatHistory = listOf(inactive, active),
+            currentMessage = MessageEntity(chatId = "chat", speakerType = SpeakerType.PERSONA, speakerId = "p1", speakerDisplayNameSnapshot = "Persona", content = "Next", orderIndex = 3L),
+            responseProfile = ResponseLengthProfile.NORMAL,
+            customMin = null,
+            customTargetMax = null,
+            customHardMax = null
+        )
+
+        assertTrue(compiled.any { it.content == "Chosen response" })
+        assertFalse(compiled.any { it.content == "Rejected response" })
+    }
+
+    @Test
+    fun `custom response lengths require positive ordered bounded values`() {
+        assertTrue(isValidCustomLengths(500, 1_000, 1_500))
+        assertFalse(isValidCustomLengths(1_000, 500, 1_500))
+        assertFalse(isValidCustomLengths(0, 1_000, 1_500))
+        assertFalse(isValidCustomLengths(500, 1_000, 20_001))
     }
 }

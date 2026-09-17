@@ -2,6 +2,8 @@ package com.example.domain.repository
 
 import com.example.data.CharacterDao
 import com.example.data.model.CharacterEntity
+import com.example.data.model.ManualCharacterFields
+import com.example.data.model.ManualCharacterFieldsCodec
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.Types
 import kotlinx.coroutines.flow.Flow
@@ -21,6 +23,49 @@ class CharacterRepository(
 
     suspend fun archiveCharacter(id: String) {
         characterDao.archiveCharacter(id)
+    }
+
+    fun getManualFields(character: CharacterEntity): ManualCharacterFields =
+        ManualCharacterFieldsCodec.toEditableFields(character)
+
+    fun getInitialMessage(character: CharacterEntity): String =
+        ManualCharacterFieldsCodec.readStored(character)?.initialMessage
+            ?: ManualCharacterFieldsCodec.toEditableFields(character).initialMessage
+
+    suspend fun createManualCharacter(fields: ManualCharacterFields): String {
+        val character = CharacterEntity(
+            displayName = fields.name,
+            characterName = fields.name,
+            aliases = emptyList(),
+            importSchemaVersion = 1,
+            identityJson = null,
+            appearanceJson = null,
+            personalityJson = null,
+            voiceJson = null,
+            behaviorJson = null,
+            backstoryJson = null,
+            knowledgeJson = null,
+            worldContextJson = null,
+            writingRulesJson = null,
+            examplesJson = null,
+            authorNotesJson = null,
+            extensionFieldsJson = ManualCharacterFieldsCodec.write(null, fields)
+        )
+        characterDao.insertCharacter(character)
+        return character.characterId
+    }
+
+    suspend fun updateManualCharacter(characterId: String, fields: ManualCharacterFields) {
+        val existing = getCharacterById(characterId)
+            ?: throw IllegalArgumentException("Character not found")
+        characterDao.updateCharacter(
+            existing.copy(
+                displayName = fields.name,
+                characterName = fields.name,
+                extensionFieldsJson = ManualCharacterFieldsCodec.write(existing.extensionFieldsJson, fields),
+                updatedAt = System.currentTimeMillis()
+            )
+        )
     }
 
     suspend fun duplicateCharacter(originalId: String, newDisplayName: String? = null): String {

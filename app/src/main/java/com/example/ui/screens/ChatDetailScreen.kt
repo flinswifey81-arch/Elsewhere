@@ -21,6 +21,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.data.model.MessageEntity
 import com.example.data.model.SpeakerType
 import com.example.di.AppContainer
+import com.example.ui.components.MarkdownText
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -42,7 +43,8 @@ fun ChatDetailScreen(
             messageRepository = appContainer.messageRepository,
             characterRepository = appContainer.characterRepository,
             personaRepository = appContainer.personaRepository,
-            modelProvider = appContainer.modelProvider
+            modelProvider = appContainer.modelProvider,
+            memoryRepository = appContainer.memoryRepository
         )
     )
 
@@ -119,7 +121,8 @@ fun ChatDetailScreen(
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(8.dp),
+                                    .padding(8.dp)
+                                    .imePadding(),
                                 horizontalArrangement = Arrangement.SpaceEvenly
                             ) {
                                 Button(onClick = { viewModel.keepPartial() }) {
@@ -130,6 +133,21 @@ fun ChatDetailScreen(
                                 }
                             }
                         } else {
+                            state.generationError?.let { error ->
+                                Surface(
+                                    color = MaterialTheme.colorScheme.errorContainer,
+                                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(error, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+                                        TextButton(onClick = viewModel::retryGeneration) { Text("Retry") }
+                                    }
+                                }
+                            }
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -264,7 +282,7 @@ fun MessageBubble(
             Surface(
                 shape = shape,
                 color = color,
-                modifier = Modifier.widthIn(max = 280.dp)
+                modifier = Modifier.fillMaxWidth(0.88f)
             ) {
                 if (isEditing) {
                     Column(modifier = Modifier.padding(8.dp)) {
@@ -286,8 +304,8 @@ fun MessageBubble(
                         }
                     }
                 } else {
-                    Text(
-                        text = message.content,
+                    MarkdownText(
+                        markdown = message.content,
                         color = textColor,
                         modifier = Modifier.padding(12.dp)
                     )
@@ -427,10 +445,10 @@ fun StreamingBubble(content: String, characterName: String) {
         Surface(
             shape = RoundedCornerShape(16.dp, 16.dp, 16.dp, 0.dp),
             color = MaterialTheme.colorScheme.surfaceVariant,
-            modifier = Modifier.widthIn(max = 280.dp)
+            modifier = Modifier.fillMaxWidth(0.88f)
         ) {
-            Text(
-                text = content,
+            MarkdownText(
+                markdown = content,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(12.dp)
             )

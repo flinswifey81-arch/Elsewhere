@@ -25,7 +25,8 @@ data class ChatSettingsUiState(
     val searchQuery: String = "",
     val endpoints: List<ProviderEndpoint> = emptyList(),
     val isFetchingModels: Boolean = false,
-    val isFetchingEndpoints: Boolean = false
+    val isFetchingEndpoints: Boolean = false,
+    val customLengthError: String? = null
 )
 
 class ChatSettingsViewModel(
@@ -122,13 +123,18 @@ class ChatSettingsViewModel(
     }
 
     fun onCustomLengthsChanged(min: Int, target: Int, max: Int) {
-        if (min <= target && target <= max) {
+        if (isValidCustomLengths(min, target, max)) {
             updateSettings { 
                 it.copy(
                     customMin = min,
                     customTargetMax = target,
                     customHardMax = max
                 ) 
+            }
+            _uiState.update { it.copy(customLengthError = null) }
+        } else {
+            _uiState.update {
+                it.copy(customLengthError = "Use positive values with minimum ≤ target ≤ hard maximum (up to 20,000 characters).")
             }
         }
     }
@@ -153,3 +159,6 @@ class ChatSettingsViewModel(
         }
     }
 }
+
+internal fun isValidCustomLengths(min: Int, target: Int, max: Int): Boolean =
+    min > 0 && min <= target && target <= max && max <= 20_000

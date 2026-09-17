@@ -154,7 +154,16 @@ class OpenRouterModelProvider(
 
         val startTime = System.currentTimeMillis()
         var finalMetadata: GenerationMetadataEntity? = null
-        var currentMessageId = UUID.randomUUID().toString() // Generate a dummy ID, UI should map it
+        val currentMessageId = UUID.randomUUID().toString() // Generate a dummy ID, UI should map it
+        var resolvedModelId: String? = null
+        var providerName: String? = null
+        var promptTokens: Int? = null
+        var completionTokens: Int? = null
+        var totalTokens: Int? = null
+        var reasoningTokens: Int? = null
+        var cachedTokens: Int? = null
+        var reportedCost: Double? = null
+        var finishReason: String? = null
 
         val listener = object : EventSourceListener() {
             override fun onEvent(eventSource: EventSource, id: String?, type: String?, data: String) {
@@ -166,34 +175,43 @@ class OpenRouterModelProvider(
                     val parsed = moshi.adapter(Map::class.java).fromJson(data)
                     
                     val choices = parsed?.get("choices") as? List<Map<String, Any>>
-                    val delta = choices?.firstOrNull()?.get("delta") as? Map<String, Any>
+                    val firstChoice = choices?.firstOrNull()
+                    val delta = firstChoice?.get("delta") as? Map<String, Any>
                     val content = delta?.get("content") as? String
                     
                     if (content != null) {
                         trySend(StreamEvent.Content(content))
                     }
                     
+                    (firstChoice?.get("finish_reason") as? String)?.let { finishReason = it }
+                    (parsed?.get("model") as? String)?.let { resolvedModelId = it }
+                    parsed?.get("provider")?.toString()?.let { providerName = it }
+
                     val usage = parsed?.get("usage") as? Map<String, Any>
                     if (usage != null) {
-                        val promptTokens = (usage["prompt_tokens"] as? Number)?.toInt()
-                        val completionTokens = (usage["completion_tokens"] as? Number)?.toInt()
-                        val totalTokens = (usage["total_tokens"] as? Number)?.toInt()
-                        
-                        val providerStr = parsed["provider"]?.toString() ?: "Unknown"
-                        val finishReason = choices?.firstOrNull()?.get("finish_reason") as? String
+                        (usage["prompt_tokens"] as? Number)?.toInt()?.let { promptTokens = it }
+                        (usage["completion_tokens"] as? Number)?.toInt()?.let { completionTokens = it }
+                        (usage["total_tokens"] as? Number)?.toInt()?.let { totalTokens = it }
+                        val completionDetails = usage["completion_tokens_details"] as? Map<String, Any>
+                        val promptDetails = usage["prompt_tokens_details"] as? Map<String, Any>
+                        (completionDetails?.get("reasoning_tokens") as? Number)?.toInt()?.let { reasoningTokens = it }
+                        (promptDetails?.get("cached_tokens") as? Number)?.toInt()?.let { cachedTokens = it }
+                        (usage["cost"] as? Number)?.toDouble()?.let { reportedCost = it }
+                    }
 
-                        val requestedModel = options.modelId
-                        val resolvedModel = parsed["model"] as? String
-
+                    if (finishReason != null || usage != null || resolvedModelId != null || providerName != null) {
                         finalMetadata = GenerationMetadataEntity(
                             messageId = currentMessageId, // Will be updated by caller
-                            requestedModelId = requestedModel,
-                            resolvedModelId = resolvedModel,
+                            requestedModelId = options.modelId,
+                            resolvedModelId = resolvedModelId,
                             promptTokens = promptTokens,
                             completionTokens = completionTokens,
                             totalTokens = totalTokens,
+                            reasoningTokens = reasoningTokens,
+                            cachedTokens = cachedTokens,
+                            reportedCost = reportedCost,
                             finishReason = finishReason,
-                            provider = providerStr,
+                            provider = providerName,
                             generationTimeMs = System.currentTimeMillis() - startTime
                         )
                     }
@@ -203,6 +221,9 @@ class OpenRouterModelProvider(
             }
 
             override fun onClosed(eventSource: EventSource) {
+                finalMetadata = finalMetadata?.copy(
+                    generationTimeMs = System.currentTimeMillis() - startTime
+                )
                 trySend(StreamEvent.Done(finalMetadata))
                 close()
             }

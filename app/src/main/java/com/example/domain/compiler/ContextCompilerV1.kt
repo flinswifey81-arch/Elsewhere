@@ -2,8 +2,11 @@ package com.example.domain.compiler
 
 import com.example.data.model.CharacterEntity
 import com.example.data.model.MessageEntity
+import com.example.data.model.ManualCharacterFieldsCodec
+import com.example.data.model.ManualPersonaFieldsCodec
 import com.example.data.model.PersonaEntity
 import com.example.data.model.ResponseLengthProfile
+import com.example.data.model.RoleplayMemoryEntity
 import com.example.data.model.SpeakerType
 import com.example.domain.provider.Role
 import com.example.domain.provider.RoleplayMessage
@@ -19,7 +22,10 @@ class ContextCompilerV1 {
         responseProfile: ResponseLengthProfile,
         customMin: Int?,
         customTargetMax: Int?,
-        customHardMax: Int?
+        customHardMax: Int?,
+        durableMemories: List<RoleplayMemoryEntity> = emptyList(),
+        rollingSummary: String? = null,
+        recentMessageLimit: Int = 24
     ): List<RoleplayMessage> {
         val messages = mutableListOf<RoleplayMessage>()
         
@@ -48,6 +54,29 @@ class ContextCompilerV1 {
             if (!character.worldContextJson.isNullOrBlank()) append("World Context:\n${character.worldContextJson}\n\n")
             if (!character.writingRulesJson.isNullOrBlank()) append("Writing Rules:\n${character.writingRulesJson}\n\n")
             if (!character.examplesJson.isNullOrBlank()) append("Examples:\n${character.examplesJson}\n\n")
+            ManualCharacterFieldsCodec.readStored(character)?.let { manual ->
+                if (manual.systemInstructions.isNotEmpty()) {
+                    append("--- CHARACTER SYSTEM INSTRUCTIONS ---\n")
+                    append(manual.systemInstructions)
+                    append("\n\n")
+                }
+                append("--- MANUAL CHARACTER DETAILS ---\n")
+                appendManualField("Name", manual.name)
+                appendManualField("Short Backstory", manual.shortBackstory)
+                appendManualField("Personality", manual.personality)
+                appendManualField("Tone", manual.tone)
+                appendManualField("Age", manual.age)
+                appendManualField("Birthday", manual.birthday)
+                appendManualField("Story", manual.story)
+                appendManualField("Likes", manual.likes)
+                appendManualField("Dislikes", manual.dislikes)
+                appendManualField("Conversational Goals", manual.conversationalGoals)
+                appendManualField("Conversational Examples", manual.conversationalExamples)
+                appendManualField("Appearance", manual.appearance)
+                appendManualField("Knowledge - Relationships", manual.knowledgeRelationships)
+                appendManualField("Knowledge - General", manual.knowledgeGeneral)
+                append('\n')
+            }
             // Intentionally excluding authorNotesJson
 
             // Persona details
@@ -56,7 +85,28 @@ class ContextCompilerV1 {
             if (!persona.appearanceJson.isNullOrBlank()) append("Appearance:\n${persona.appearanceJson}\n\n")
             if (!persona.personalityJson.isNullOrBlank()) append("Personality:\n${persona.personalityJson}\n\n")
             if (!persona.backgroundJson.isNullOrBlank()) append("Background:\n${persona.backgroundJson}\n\n")
+            ManualPersonaFieldsCodec.readStored(persona)?.backstoryInstructions
+                ?.takeIf { it.isNotEmpty() }
+                ?.let { instructions ->
+                    append("Backstory / Persona Instructions:\n")
+                    append(instructions)
+                    append("\n\n")
+                }
             // Intentionally excluding privateNotesJson
+
+            if (durableMemories.isNotEmpty()) {
+                append("--- DURABLE ROLEPLAY MEMORY ---\n")
+                durableMemories.forEach { memory ->
+                    append("- [${memory.category.name}] ${memory.content}\n")
+                }
+                append('\n')
+            }
+
+            if (!rollingSummary.isNullOrBlank()) {
+                append("--- ROLLING CONVERSATION SUMMARY ---\n")
+                append(rollingSummary)
+                append("\n\n")
+            }
             
             // Length Instruction
             append("--- LENGTH INSTRUCTION ---\n")
@@ -76,8 +126,8 @@ class ContextCompilerV1 {
         
         messages.add(RoleplayMessage(role = Role.SYSTEM, content = coreInstruction))
         
-        // Trimming Strategy: Keep max last N messages to prevent overflow
-        val trimmedHistory = chatHistory.takeLast(40) 
+        // Older messages are represented by the persisted rolling summary. Keep recent turns verbatim.
+        val trimmedHistory = chatHistory.filter { it.isPrimaryVariant }.takeLast(recentMessageLimit)
         
         for (msg in trimmedHistory) {
             val role = when (msg.speakerType) {
@@ -101,5 +151,9 @@ class ContextCompilerV1 {
         }
         
         return messages
+    }
+
+    private fun StringBuilder.appendManualField(label: String, value: String) {
+        if (value.isNotEmpty()) append("$label:\n$value\n")
     }
 }

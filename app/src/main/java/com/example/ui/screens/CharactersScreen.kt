@@ -8,7 +8,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -18,6 +20,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.example.data.model.CharacterEntity
+import com.example.data.model.ManualCharacterFields
 import com.example.domain.repository.CharacterRepository
 import kotlinx.coroutines.launch
 
@@ -36,6 +40,8 @@ fun CharactersScreen(
     var showPasteDialog by remember { mutableStateOf(false) }
     var pasteContent by remember { mutableStateOf("") }
     var importError by remember { mutableStateOf<String?>(null) }
+    var showEditor by remember { mutableStateOf(false) }
+    var editingCharacter by remember { mutableStateOf<CharacterEntity?>(null) }
     
     val launcher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
@@ -142,6 +148,36 @@ fun CharactersScreen(
         )
     }
 
+    if (showEditor) {
+        ManualCharacterEditor(
+            initialFields = editingCharacter?.let(repository::getManualFields) ?: ManualCharacterFields(),
+            isEditing = editingCharacter != null,
+            onCancel = {
+                showEditor = false
+                editingCharacter = null
+            },
+            onSave = { fields ->
+                coroutineScope.launch {
+                    try {
+                        val existing = editingCharacter
+                        if (existing == null) {
+                            repository.createManualCharacter(fields)
+                        } else {
+                            repository.updateManualCharacter(existing.characterId, fields)
+                        }
+                        showEditor = false
+                        editingCharacter = null
+                        importError = null
+                    } catch (e: Exception) {
+                        importError = e.localizedMessage ?: "Unable to save Character."
+                    }
+                }
+            },
+            modifier = modifier
+        )
+        return
+    }
+
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
@@ -153,14 +189,28 @@ fun CharactersScreen(
             )
         },
         floatingActionButton = {
-            ExtendedFloatingActionButton(
-                onClick = { showImportOptions = true },
-                icon = { Icon(Icons.Default.Add, contentDescription = null) },
-                text = { Text("Import JSON") },
-                containerColor = MaterialTheme.colorScheme.primaryContainer,
-                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                modifier = Modifier.testTag("import_character_fab")
-            )
+            Column(
+                horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                ExtendedFloatingActionButton(
+                    onClick = {
+                        editingCharacter = null
+                        showEditor = true
+                    },
+                    icon = { Icon(Icons.Default.Add, contentDescription = null) },
+                    text = { Text("New Character") },
+                    modifier = Modifier.testTag("new_character_fab")
+                )
+                ExtendedFloatingActionButton(
+                    onClick = { showImportOptions = true },
+                    icon = { Icon(Icons.Default.Add, contentDescription = null) },
+                    text = { Text("Import JSON") },
+                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                    modifier = Modifier.testTag("import_character_fab")
+                )
+            }
         },
         modifier = modifier.testTag("characters_screen")
     ) { padding ->
@@ -182,16 +232,19 @@ fun CharactersScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Text(
-                        text = "Import a character card (JSON) to start.",
+                        text = "Create a Character or import a character card (JSON) to start.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = { launcher.launch(arrayOf("application/json", "*/*")) }) {
-                            Text("Import JSON File")
+                        Button(onClick = {
+                            editingCharacter = null
+                            showEditor = true
+                        }) {
+                            Text("New Character")
                         }
-                        OutlinedButton(onClick = { showPasteDialog = true }) {
-                            Text("Paste JSON")
+                        OutlinedButton(onClick = { launcher.launch(arrayOf("application/json", "*/*")) }) {
+                            Text("Import JSON File")
                         }
                     }
                 }
@@ -267,10 +320,126 @@ fun CharactersScreen(
                                     )
                                 }
                             }
+                            IconButton(
+                                onClick = {
+                                    editingCharacter = character
+                                    showEditor = true
+                                },
+                                modifier = Modifier.testTag("edit_character_${character.characterId}")
+                            ) {
+                                Icon(Icons.Default.Edit, contentDescription = "Edit ${character.displayName}")
+                            }
                         }
                     }
                 }
             }
         }
     }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ManualCharacterEditor(
+    initialFields: ManualCharacterFields,
+    isEditing: Boolean,
+    onCancel: () -> Unit,
+    onSave: (ManualCharacterFields) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var fields by remember(initialFields) { mutableStateOf(initialFields) }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text(if (isEditing) "Edit Character" else "New Character") },
+                navigationIcon = {
+                    IconButton(onClick = onCancel) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                },
+                actions = {
+                    TextButton(
+                        onClick = { onSave(fields) },
+                        enabled = fields.name.isNotBlank(),
+                        modifier = Modifier.testTag("save_character")
+                    ) {
+                        Text("Save")
+                    }
+                }
+            )
+        },
+        modifier = modifier.testTag("manual_character_editor")
+    ) { padding ->
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().padding(padding),
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            item {
+                CharacterTextField("Name", fields.name, { fields = fields.copy(name = it) }, singleLine = true)
+            }
+            item {
+                CharacterTextField("Short Backstory", fields.shortBackstory, { fields = fields.copy(shortBackstory = it) })
+            }
+            item {
+                CharacterTextField("Initial Message", fields.initialMessage, { fields = fields.copy(initialMessage = it) })
+            }
+            item {
+                CharacterTextField("System Instructions", fields.systemInstructions, { fields = fields.copy(systemInstructions = it) })
+            }
+            item {
+                CharacterTextField("Personality", fields.personality, { fields = fields.copy(personality = it) })
+            }
+            item {
+                CharacterTextField("Tone", fields.tone, { fields = fields.copy(tone = it) })
+            }
+            item {
+                CharacterTextField("Age", fields.age, { fields = fields.copy(age = it) }, singleLine = true)
+            }
+            item {
+                CharacterTextField("Birthday", fields.birthday, { fields = fields.copy(birthday = it) }, singleLine = true)
+            }
+            item {
+                CharacterTextField("Story", fields.story, { fields = fields.copy(story = it) })
+            }
+            item {
+                CharacterTextField("Likes", fields.likes, { fields = fields.copy(likes = it) })
+            }
+            item {
+                CharacterTextField("Dislikes", fields.dislikes, { fields = fields.copy(dislikes = it) })
+            }
+            item {
+                CharacterTextField("Conversational Goals", fields.conversationalGoals, { fields = fields.copy(conversationalGoals = it) })
+            }
+            item {
+                CharacterTextField("Conversational Examples", fields.conversationalExamples, { fields = fields.copy(conversationalExamples = it) })
+            }
+            item {
+                CharacterTextField("Appearance", fields.appearance, { fields = fields.copy(appearance = it) })
+            }
+            item {
+                CharacterTextField("Knowledge: Relationships", fields.knowledgeRelationships, { fields = fields.copy(knowledgeRelationships = it) })
+            }
+            item {
+                CharacterTextField("Knowledge: General", fields.knowledgeGeneral, { fields = fields.copy(knowledgeGeneral = it) })
+            }
+        }
+    }
+}
+
+@Composable
+private fun CharacterTextField(
+    label: String,
+    value: String,
+    onValueChange: (String) -> Unit,
+    singleLine: Boolean = false
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        label = { Text(label) },
+        singleLine = singleLine,
+        minLines = if (singleLine) 1 else 3,
+        modifier = Modifier.fillMaxWidth().testTag("character_field_$label")
+    )
 }

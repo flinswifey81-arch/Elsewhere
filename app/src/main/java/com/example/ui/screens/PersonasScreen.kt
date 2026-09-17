@@ -8,7 +8,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Face
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -18,6 +20,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.example.data.model.ManualPersonaFields
+import com.example.data.model.PersonaEntity
 import com.example.domain.repository.PersonaRepository
 import kotlinx.coroutines.launch
 
@@ -36,6 +40,8 @@ fun PersonasScreen(
     var showPasteDialog by remember { mutableStateOf(false) }
     var pasteContent by remember { mutableStateOf("") }
     var importError by remember { mutableStateOf<String?>(null) }
+    var showEditor by remember { mutableStateOf(false) }
+    var editingPersona by remember { mutableStateOf<PersonaEntity?>(null) }
     
     val launcher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
@@ -142,6 +148,36 @@ fun PersonasScreen(
         )
     }
 
+    if (showEditor) {
+        ManualPersonaEditor(
+            initialFields = editingPersona?.let(repository::getManualFields) ?: ManualPersonaFields(),
+            isEditing = editingPersona != null,
+            onCancel = {
+                showEditor = false
+                editingPersona = null
+            },
+            onSave = { fields ->
+                coroutineScope.launch {
+                    try {
+                        val existing = editingPersona
+                        if (existing == null) {
+                            repository.createManualPersona(fields)
+                        } else {
+                            repository.updateManualPersona(existing.personaId, fields)
+                        }
+                        showEditor = false
+                        editingPersona = null
+                        importError = null
+                    } catch (e: Exception) {
+                        importError = e.localizedMessage ?: "Unable to save Persona."
+                    }
+                }
+            },
+            modifier = modifier
+        )
+        return
+    }
+
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
@@ -153,14 +189,28 @@ fun PersonasScreen(
             )
         },
         floatingActionButton = {
-            ExtendedFloatingActionButton(
-                onClick = { showImportOptions = true },
-                icon = { Icon(Icons.Default.Add, contentDescription = null) },
-                text = { Text("Import JSON") },
-                containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                modifier = Modifier.testTag("import_persona_fab")
-            )
+            Column(
+                horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                ExtendedFloatingActionButton(
+                    onClick = {
+                        editingPersona = null
+                        showEditor = true
+                    },
+                    icon = { Icon(Icons.Default.Add, contentDescription = null) },
+                    text = { Text("New Persona") },
+                    modifier = Modifier.testTag("new_persona_fab")
+                )
+                ExtendedFloatingActionButton(
+                    onClick = { showImportOptions = true },
+                    icon = { Icon(Icons.Default.Add, contentDescription = null) },
+                    text = { Text("Import JSON") },
+                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                    modifier = Modifier.testTag("import_persona_fab")
+                )
+            }
         },
         modifier = modifier.testTag("personas_screen")
     ) { padding ->
@@ -182,16 +232,22 @@ fun PersonasScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Text(
-                        text = "Import a persona (JSON) to start.",
+                        text = "Create a Persona or import a persona (JSON) to start.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    Button(
+                        onClick = {
+                            editingPersona = null
+                            showEditor = true
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
+                    ) {
+                        Text("New Persona", color = MaterialTheme.colorScheme.onSecondary)
+                    }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(
-                            onClick = { launcher.launch(arrayOf("application/json", "*/*")) },
-                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
-                        ) {
-                            Text("Import JSON File", color = MaterialTheme.colorScheme.onSecondary)
+                        Button(onClick = { launcher.launch(arrayOf("application/json", "*/*")) }) {
+                            Text("Import JSON File")
                         }
                         OutlinedButton(onClick = { showPasteDialog = true }) {
                             Text("Paste JSON")
@@ -270,10 +326,74 @@ fun PersonasScreen(
                                     )
                                 }
                             }
+                            IconButton(
+                                onClick = {
+                                    editingPersona = persona
+                                    showEditor = true
+                                },
+                                modifier = Modifier.testTag("edit_persona_${persona.personaId}")
+                            ) {
+                                Icon(Icons.Default.Edit, contentDescription = "Edit ${persona.displayName}")
+                            }
                         }
                     }
                 }
             }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ManualPersonaEditor(
+    initialFields: ManualPersonaFields,
+    isEditing: Boolean,
+    onCancel: () -> Unit,
+    onSave: (ManualPersonaFields) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var fields by remember(initialFields) { mutableStateOf(initialFields) }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text(if (isEditing) "Edit Persona" else "New Persona") },
+                navigationIcon = {
+                    IconButton(onClick = onCancel) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                },
+                actions = {
+                    TextButton(
+                        onClick = { onSave(fields) },
+                        enabled = fields.name.isNotBlank(),
+                        modifier = Modifier.testTag("save_persona")
+                    ) {
+                        Text("Save")
+                    }
+                }
+            )
+        },
+        modifier = modifier.testTag("manual_persona_editor")
+    ) { padding ->
+        Column(
+            modifier = Modifier.fillMaxSize().padding(padding).padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            OutlinedTextField(
+                value = fields.name,
+                onValueChange = { fields = fields.copy(name = it) },
+                label = { Text("Name") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth().testTag("persona_field_Name")
+            )
+            OutlinedTextField(
+                value = fields.backstoryInstructions,
+                onValueChange = { fields = fields.copy(backstoryInstructions = it) },
+                label = { Text("Backstory / Persona Instructions") },
+                minLines = 6,
+                modifier = Modifier.fillMaxWidth().weight(1f).testTag("persona_field_Backstory / Persona Instructions")
+            )
         }
     }
 }

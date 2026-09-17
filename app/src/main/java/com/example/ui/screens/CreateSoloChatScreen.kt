@@ -243,7 +243,9 @@ fun CreateSoloChatScreen(
                                 val chatId = chatRepository.createSoloChat(
                                     displayName = chatName.takeIf { it.isNotBlank() } ?: "Untitled Chat",
                                     personaId = selectedPersona!!.personaId,
-                                    characterId = selectedCharacter!!.characterId
+                                    characterId = selectedCharacter!!.characterId,
+                                    characterDisplayName = selectedCharacter!!.displayName,
+                                    initialCharacterMessage = characterRepository.getInitialMessage(selectedCharacter!!)
                                 )
                                 onChatCreated(chatId)
                             }

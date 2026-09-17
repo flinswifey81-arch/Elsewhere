@@ -19,7 +19,18 @@ data class ModelRouting(
     val mode: com.example.data.model.ProviderRoutingMode,
     val allowFallback: Boolean = true,
     val preferredEndpoints: List<String> = emptyList()
-)
+) {
+    companion object {
+        fun fromSettings(
+            mode: com.example.data.model.ProviderRoutingMode,
+            endpoint: String?
+        ) = ModelRouting(
+            mode = mode,
+            allowFallback = mode != com.example.data.model.ProviderRoutingMode.LOCK,
+            preferredEndpoints = endpoint?.takeIf(String::isNotBlank)?.let(::listOf).orEmpty()
+        )
+    }
+}
 
 data class GenerationOptions(
     val modelId: String,

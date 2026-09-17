@@ -1,6 +1,8 @@
 package com.example.domain.repository
 
 import com.example.data.PersonaDao
+import com.example.data.model.ManualPersonaFields
+import com.example.data.model.ManualPersonaFieldsCodec
 import com.example.data.model.PersonaEntity
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.Types
@@ -21,6 +23,41 @@ class PersonaRepository(
 
     suspend fun archivePersona(id: String) {
         personaDao.archivePersona(id)
+    }
+
+    fun getManualFields(persona: PersonaEntity): ManualPersonaFields =
+        ManualPersonaFieldsCodec.toEditableFields(persona)
+
+    suspend fun createManualPersona(fields: ManualPersonaFields): String {
+        val persona = PersonaEntity(
+            displayName = fields.name,
+            personaName = fields.name,
+            aliases = emptyList(),
+            importSchemaVersion = 1,
+            identityJson = null,
+            appearanceJson = null,
+            personalityJson = null,
+            roleplayProfileJson = null,
+            backgroundJson = null,
+            worldContextJson = null,
+            privateNotesJson = null,
+            extensionFieldsJson = ManualPersonaFieldsCodec.write(null, fields)
+        )
+        personaDao.insertPersona(persona)
+        return persona.personaId
+    }
+
+    suspend fun updateManualPersona(personaId: String, fields: ManualPersonaFields) {
+        val existing = getPersonaById(personaId)
+            ?: throw IllegalArgumentException("Persona not found")
+        personaDao.updatePersona(
+            existing.copy(
+                displayName = fields.name,
+                personaName = fields.name,
+                extensionFieldsJson = ManualPersonaFieldsCodec.write(existing.extensionFieldsJson, fields),
+                updatedAt = System.currentTimeMillis()
+            )
+        )
     }
 
     suspend fun duplicatePersona(originalId: String, newDisplayName: String? = null): String {

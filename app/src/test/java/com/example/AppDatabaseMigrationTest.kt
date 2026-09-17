@@ -93,4 +93,39 @@ class AppDatabaseMigrationTest {
             helper.close()
         }
     }
+
+    @Test
+    fun migrationFrom2To3AddsLocalMemoryTables() {
+        val helper = FrameworkSQLiteOpenHelperFactory().create(
+            SupportSQLiteOpenHelper.Configuration.builder(context)
+                .name(databaseName)
+                .callback(object : SupportSQLiteOpenHelper.Callback(2) {
+                    override fun onCreate(db: androidx.sqlite.db.SupportSQLiteDatabase) = Unit
+                    override fun onUpgrade(
+                        db: androidx.sqlite.db.SupportSQLiteDatabase,
+                        oldVersion: Int,
+                        newVersion: Int
+                    ) = Unit
+                })
+                .build()
+        )
+
+        try {
+            val database = helper.writableDatabase
+            AppDatabase.MIGRATION_2_3.migrate(database)
+
+            database.query(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('roleplay_memories', 'conversation_summaries')"
+            ).use { cursor ->
+                assertEquals(2, cursor.count)
+            }
+            database.query(
+                "SELECT name FROM sqlite_master WHERE type = 'index' AND name IN ('index_roleplay_memories_chatId', 'index_roleplay_memories_characterId')"
+            ).use { cursor ->
+                assertEquals(2, cursor.count)
+            }
+        } finally {
+            helper.close()
+        }
+    }
 }

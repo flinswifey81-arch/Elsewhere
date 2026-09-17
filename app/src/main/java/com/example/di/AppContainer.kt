@@ -7,6 +7,7 @@ import com.example.domain.repository.AppearanceRepository
 import com.example.domain.repository.CharacterRepository
 import com.example.domain.repository.ChatRepository
 import com.example.domain.repository.MessageRepository
+import com.example.domain.repository.MemoryRepository
 import com.example.domain.repository.PersonaRepository
 import com.example.domain.repository.SettingsRepository
 import com.squareup.moshi.Moshi
@@ -20,6 +21,7 @@ interface AppContainer {
     val appearanceRepository: AppearanceRepository
     val chatRepository: ChatRepository
     val messageRepository: MessageRepository
+    val memoryRepository: MemoryRepository
 }
 
 class DefaultAppContainer(private val context: Context) : AppContainer {
@@ -37,7 +39,7 @@ class DefaultAppContainer(private val context: Context) : AppContainer {
 
     private val database: AppDatabase by lazy {
         Room.databaseBuilder(context, AppDatabase::class.java, "elsewhere_database")
-            .addMigrations(AppDatabase.MIGRATION_1_2)
+            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3)
             .build()
     }
 
@@ -58,7 +60,7 @@ class DefaultAppContainer(private val context: Context) : AppContainer {
     }
 
     override val chatRepository: ChatRepository by lazy {
-        ChatRepository(database.chatDao())
+        ChatRepository(database.chatDao(), database.messageDao())
     }
 
     override val modelProvider: com.example.domain.provider.ModelProvider by lazy {
@@ -67,5 +69,9 @@ class DefaultAppContainer(private val context: Context) : AppContainer {
 
     override val messageRepository: MessageRepository by lazy {
         MessageRepository(database.messageDao())
+    }
+
+    override val memoryRepository: MemoryRepository by lazy {
+        MemoryRepository(database.memoryDao())
     }
 }

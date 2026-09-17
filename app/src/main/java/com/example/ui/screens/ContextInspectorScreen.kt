@@ -28,26 +28,38 @@ fun ContextInspectorScreen(
     var includedMessages by remember { mutableStateOf(0) }
     var modelId by remember { mutableStateOf("") }
     var routingMode by remember { mutableStateOf("") }
+    var durableMemoryCount by remember { mutableStateOf(0) }
+    var durableMemories by remember { mutableStateOf<List<com.example.data.model.RoleplayMemoryEntity>>(emptyList()) }
+    var hasRollingSummary by remember { mutableStateOf(false) }
 
     var isLoading by remember { mutableStateOf(true) }
+    var refreshVersion by remember { mutableStateOf(0) }
     val scope = rememberCoroutineScope()
-
-    LaunchedEffect(chatId) {
-        scope.launch {
+    LaunchedEffect(chatId, refreshVersion) {
+        try {
             val summary = appContainer.chatRepository.getChatSummaryById(chatId)
             val settings = appContainer.chatRepository.getChatSettings(chatId)
+                ?: com.example.data.model.ChatSettingsEntity(chatId = chatId)
             val character = summary?.characters?.firstOrNull()?.let { appContainer.characterRepository.getCharacterById(it.characterId) }
             val persona = summary?.personas?.firstOrNull()?.let { appContainer.personaRepository.getPersonaById(it.personaId) }
             val history = appContainer.messageRepository.getMessagesForChat(chatId).first()
+                .filter { it.isPrimaryVariant }
+            val memories = character?.let {
+                appContainer.memoryRepository.getMemoriesOnce(chatId, it.characterId)
+            }.orEmpty()
+            val rollingSummary = appContainer.memoryRepository.getSummaryOnce(chatId)?.summary
+            modelId = settings.selectedModelId ?: "Default"
+            routingMode = settings.providerRoutingMode.name
+            durableMemoryCount = memories.size
+            durableMemories = memories
+            hasRollingSummary = !rollingSummary.isNullOrBlank()
 
-            if (character != null && persona != null && settings != null) {
-                val currentMessage = history.lastOrNull() ?: return@launch
+            if (character != null && persona != null && history.isNotEmpty()) {
+                val currentMessage = history.last()
                 val priorHistory = history.dropLast(1)
-                val trimmed = priorHistory.takeLast(40)
+                val trimmed = priorHistory.takeLast(com.example.domain.memory.AutomaticMemoryManager.DEFAULT_RECENT_MESSAGE_LIMIT)
                 totalMessages = history.size
                 includedMessages = trimmed.size + 1
-                modelId = settings.selectedModelId ?: "Default"
-                routingMode = settings.providerRoutingMode.name
                 compiledMessages = ContextCompilerV1().compileSoloContext(
                     character = character,
                     persona = persona,
@@ -56,9 +68,12 @@ fun ContextInspectorScreen(
                     responseProfile = settings.responseLengthProfile,
                     customMin = settings.customMin,
                     customTargetMax = settings.customTargetMax,
-                    customHardMax = settings.customHardMax
+                    customHardMax = settings.customHardMax,
+                    durableMemories = memories,
+                    rollingSummary = rollingSummary
                 )
             }
+        } finally {
             isLoading = false
         }
     }
@@ -97,15 +112,41 @@ fun ContextInspectorScreen(
                             Text("Total Messages: $totalMessages", style = MaterialTheme.typography.bodySmall)
                             Text("Included in Context: $includedMessages", style = MaterialTheme.typography.bodySmall)
                             Text("Omitted from Context: ${totalMessages - includedMessages}", style = MaterialTheme.typography.bodySmall)
+                            Text("Durable Memories: $durableMemoryCount", style = MaterialTheme.typography.bodySmall)
+                            Text("Rolling Summary: ${if (hasRollingSummary) "Included" else "Not yet needed"}", style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
+                if (durableMemories.isNotEmpty()) {
+                    item {
+                        Card(modifier = Modifier.fillMaxWidth()) {
+                            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text("Durable Memories", style = MaterialTheme.typography.titleMedium)
+                                durableMemories.forEach { memory ->
+                                    Row(modifier = Modifier.fillMaxWidth()) {
+                                        Text(
+                                            "[${memory.category.name}] ${memory.content}",
+                                            modifier = Modifier.weight(1f),
+                                            style = MaterialTheme.typography.bodySmall
+                                        )
+                                        TextButton(onClick = {
+                                            scope.launch {
+                                                appContainer.memoryRepository.deleteMemory(memory)
+                                                refreshVersion++
+                                            }
+                                        }) { Text("Delete") }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
                 items(compiledMessages) { msg ->
                     Card(modifier = Modifier.fillMaxWidth()) {
                         Column(modifier = Modifier.padding(16.dp)) {
-                            Text("Role: \${msg.role.name}", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                            Text("Role: ${msg.role.name}", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
                             msg.name?.let {
-                                Text("Name: \$it", style = MaterialTheme.typography.labelMedium)
+                                Text("Name: $it", style = MaterialTheme.typography.labelMedium)
                             }
                             Spacer(Modifier.height(8.dp))
                             Text(msg.content, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)

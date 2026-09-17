@@ -12,12 +12,14 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.data.model.ProviderRoutingMode
 import com.example.data.model.ResponseLengthProfile
-import com.example.di.AppContainer
+import com.example.domain.provider.ModelProvider
+import com.example.domain.repository.ChatRepository
 import com.example.domain.provider.OpenRouterModel
 import java.math.BigDecimal
 
@@ -25,14 +27,15 @@ import java.math.BigDecimal
 @Composable
 fun ChatSettingsScreen(
     chatId: String,
-    appContainer: AppContainer,
+    chatRepository: ChatRepository,
+    modelProvider: ModelProvider,
     onNavigateBack: () -> Unit
 ) {
     val viewModel: ChatSettingsViewModel = viewModel(
         factory = ChatSettingsViewModel.Factory(
             chatId = chatId,
-            chatRepository = appContainer.chatRepository,
-            modelProvider = appContainer.modelProvider
+            chatRepository = chatRepository,
+            modelProvider = modelProvider
         )
     )
 
@@ -61,9 +64,20 @@ fun ChatSettingsScreen(
                     .padding(padding)
                     .fillMaxSize()
                     .verticalScroll(scrollState)
+                    .testTag("chat_settings_content")
                     .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
+                uiState.error?.let { error ->
+                    Surface(
+                        color = MaterialTheme.colorScheme.errorContainer,
+                        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(error, modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+
                 // Advanced Generation Params
                 Text("Generation Parameters", style = MaterialTheme.typography.titleMedium)
                 
@@ -151,6 +165,9 @@ fun ChatSettingsScreen(
                             viewModel.onCustomLengthsChanged(minVal, targetVal, maxVal)
                         }) {
                             Text("Apply Custom Lengths")
+                        }
+                        uiState.customLengthError?.let { error ->
+                            Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                         }
                     } else {
                         val desc = when (currentProfile) {
@@ -251,7 +268,7 @@ fun ChatSettingsScreen(
                             }
                         }
                     } else {
-                        Text("Selected Model: \$modelId (Not in catalog)")
+                        Text("Selected Model: $modelId (Not in catalog)")
                     }
                 } ?: run {
                     Text("No model selected")
@@ -284,7 +301,7 @@ fun ChatSettingsScreen(
                             )
                         }
                         if (uiState.filteredModels.size > 20) {
-                            Text("... and \${uiState.filteredModels.size - 20} more. Refine search.", style = MaterialTheme.typography.bodySmall)
+                            Text("... and ${uiState.filteredModels.size - 20} more. Refine search.", style = MaterialTheme.typography.bodySmall)
                         }
                     }
                 }
@@ -308,10 +325,10 @@ fun ModelItem(model: OpenRouterModel, isSelected: Boolean, onClick: () -> Unit) 
             Text(model.id, style = MaterialTheme.typography.bodySmall)
             Spacer(Modifier.height(4.dp))
             Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
-                Text("Ctx: \${model.contextLength / 1000}k", style = MaterialTheme.typography.labelSmall)
+                Text("Ctx: ${model.contextLength / 1000}k", style = MaterialTheme.typography.labelSmall)
                 val inPrice = formatPrice(model.pricingPrompt)
                 val outPrice = formatPrice(model.pricingCompletion)
-                Text("\$\${inPrice} / \$\${outPrice} per 1M", style = MaterialTheme.typography.labelSmall)
+                Text("\$$inPrice / \$$outPrice per 1M", style = MaterialTheme.typography.labelSmall)
             }
         }
     }

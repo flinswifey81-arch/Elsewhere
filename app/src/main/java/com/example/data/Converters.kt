@@ -44,4 +44,10 @@ class Converters {
     fun fromResponseLengthProfile(value: com.example.data.model.ResponseLengthProfile) = value.name
     
     @TypeConverter
-    fun toResponseLengthProfile(value: String) = enumValueOf<com.example.data.model.ResponseLengthProfile>(value)
+fun toResponseLengthProfile(value: String) = enumValueOf<com.example.data.model.ResponseLengthProfile>(value)
+
+    @TypeConverter
+    fun fromMemoryCategory(value: com.example.data.model.MemoryCategory) = value.name
+
+    @TypeConverter
+    fun toMemoryCategory(value: String) = enumValueOf<com.example.data.model.MemoryCategory>(value)

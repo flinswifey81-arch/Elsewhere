@@ -20,7 +20,11 @@ class MessageRepository(private val messageDao: MessageDao) {
     }
 
     suspend fun deleteMessage(message: MessageEntity) {
-        messageDao.deleteMessage(message)
+        messageDao.deleteMessageAndRepair(message)
+    }
+
+    suspend fun insertVariantAndSelect(message: MessageEntity) {
+        messageDao.insertVariantAndSelect(message)
     }
     
     fun getVariants(variantGroupId: String): kotlinx.coroutines.flow.Flow<List<com.example.data.model.MessageEntity>> = messageDao.getVariants(variantGroupId)

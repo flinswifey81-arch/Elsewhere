@@ -137,7 +137,8 @@ fun ElsewhereApp(container: AppContainer) {
                 val chatId = backStackEntry.arguments?.getString("chatId") ?: ""
                 ChatSettingsScreen(
                     chatId = chatId,
-                    appContainer = container,
+                    chatRepository = container.chatRepository,
+                    modelProvider = container.modelProvider,
                     onNavigateBack = { navController.popBackStack() }
                 )
             }
@@ -165,6 +166,17 @@ fun ElsewhereApp(container: AppContainer) {
                     onNavigateBack = { navController.popBackStack() },
                     onNavigateToInspector = { navController.navigate("context_inspector/$chatId") },
                     onNavigateToSettings = { navController.navigate("chat_settings/$chatId") },
+                )
+            }
+            composable(
+                "context_inspector/{chatId}",
+                arguments = listOf(navArgument("chatId") { type = NavType.StringType })
+            ) { backStackEntry ->
+                val chatId = backStackEntry.arguments?.getString("chatId") ?: ""
+                ContextInspectorScreen(
+                    chatId = chatId,
+                    appContainer = container,
+                    onNavigateBack = { navController.popBackStack() }
                 )
             }
         }
