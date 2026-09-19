@@ -6,6 +6,7 @@ import com.example.domain.provider.*
 import com.example.domain.repository.SettingsRepository
 import com.squareup.moshi.Moshi
 import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.channels.trySendBlocking
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
@@ -164,6 +165,7 @@ class OpenRouterModelProvider(
         var cachedTokens: Int? = null
         var reportedCost: Double? = null
         var finishReason: String? = null
+        val accumulatedContent = StringBuilder()
 
         val listener = object : EventSourceListener() {
             override fun onEvent(eventSource: EventSource, id: String?, type: String?, data: String) {
@@ -174,13 +176,14 @@ class OpenRouterModelProvider(
                 try {
                     val parsed = moshi.adapter(Map::class.java).fromJson(data)
                     
-                    val choices = parsed?.get("choices") as? List<Map<String, Any>>
-                    val firstChoice = choices?.firstOrNull()
-                    val delta = firstChoice?.get("delta") as? Map<String, Any>
-                    val content = delta?.get("content") as? String
+                    val choices = parsed?.get("choices") as? List<*>
+                    val firstChoice = choices?.firstOrNull() as? Map<*, *>
+                    val delta = firstChoice?.get("delta") as? Map<*, *>
+                    val content = delta?.get("content")?.toString()
                     
-                    if (content != null) {
-                        trySend(StreamEvent.Content(content))
+                    if (!content.isNullOrEmpty()) {
+                        // Keep text independent from metadata-only chunks; emit the complete stream once closed.
+                        accumulatedContent.append(content)
                     }
                     
                     (firstChoice?.get("finish_reason") as? String)?.let { finishReason = it }
@@ -221,6 +224,9 @@ class OpenRouterModelProvider(
             }
 
             override fun onClosed(eventSource: EventSource) {
+                if (accumulatedContent.isNotEmpty()) {
+                    trySendBlocking(StreamEvent.Content(accumulatedContent.toString()))
+                }
                 finalMetadata = finalMetadata?.copy(
                     generationTimeMs = System.currentTimeMillis() - startTime
                 )

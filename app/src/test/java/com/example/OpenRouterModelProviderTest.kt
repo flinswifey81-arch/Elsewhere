@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import okhttp3.Interceptor
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
 import okhttp3.Response
@@ -44,7 +45,7 @@ class OpenRouterModelProviderTest {
             .code(200)
             .message("OK")
             .header("Content-Type", "text/event-stream")
-            .body(body.toResponseBody())
+            .body(body.toResponseBody("text/event-stream".toMediaType()))
             .build()
     }
 

@@ -129,7 +129,7 @@ class ChatDetailGenerationTest {
         assertTrue(provider.messages.first { it.role == Role.SYSTEM }.content.contains("meet beneath the clock tower"))
         assertTrue(provider.messages.first { it.role == Role.SYSTEM }.content.contains("escaped the winter court"))
         assertEquals("mock/updated-model", provider.options.modelId)
-        assertEquals(1_000, provider.options.maxTokens)
+        assertNull(provider.options.maxTokens)
         val learnedMemories = withTimeout(5_000) {
             memoryRepository.getMemories(chatId, "character-1").first { memories ->
                 memories.any { it.content == "jasmine tea" }

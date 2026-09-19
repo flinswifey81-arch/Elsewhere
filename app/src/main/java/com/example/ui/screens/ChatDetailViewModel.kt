@@ -241,8 +241,10 @@ class ChatDetailViewModel(
                 modelProvider.streamResponse(contextMessages, options).collect { event ->
                     when (event) {
                         is StreamEvent.Content -> {
-                            generatedContent += event.text
-                            updateSuccessState { it.copy(streamingContent = generatedContent) }
+                            if (event.text.isNotEmpty()) {
+                                generatedContent += event.text
+                                updateSuccessState { it.copy(streamingContent = generatedContent) }
+                            }
                         }
                         is StreamEvent.Done -> {
                             currentMetadata = event.metadata
