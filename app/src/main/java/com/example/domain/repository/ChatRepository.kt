@@ -85,4 +85,8 @@ class ChatRepository(
     suspend fun updateChat(chat: ChatEntity) = withContext(Dispatchers.IO) {
         chatDao.updateChat(chat)
     }
+
+    suspend fun deleteChat(chatId: String) = withContext(Dispatchers.IO) {
+        chatDao.deleteChatAndOwnedData(chatId)
+    }
 }

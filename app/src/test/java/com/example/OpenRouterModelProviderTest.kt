@@ -1,7 +1,9 @@
 package com.example
 
 import com.example.data.remote.OpenRouterModelProvider
+import com.example.data.model.ProviderRoutingMode
 import com.example.domain.provider.GenerationOptions
+import com.example.domain.provider.ModelRouting
 import com.example.domain.provider.Role
 import com.example.domain.provider.RoleplayMessage
 import com.example.domain.provider.StreamEvent
@@ -15,13 +17,17 @@ import okhttp3.OkHttpClient
 import okhttp3.Protocol
 import okhttp3.Response
 import okhttp3.ResponseBody.Companion.toResponseBody
+import okio.Buffer
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class OpenRouterModelProviderTest {
-    private class RecordingInterceptor : Interceptor {
+    private class RecordingInterceptor(
+        private val responseBody: String = "{\"data\":[]}"
+    ) : Interceptor {
         lateinit var request: okhttp3.Request
         lateinit var executingThread: Thread
 
@@ -33,7 +39,23 @@ class OpenRouterModelProviderTest {
                 .protocol(Protocol.HTTP_1_1)
                 .code(200)
                 .message("OK")
-                .body("{\"data\":[]}".toResponseBody())
+                .body(responseBody.toResponseBody())
+                .build()
+        }
+    }
+
+    private class RoutingStreamingInterceptor : Interceptor {
+        lateinit var request: okhttp3.Request
+
+        override fun intercept(chain: Interceptor.Chain): Response {
+            request = chain.request()
+            return Response.Builder()
+                .request(request)
+                .protocol(Protocol.HTTP_1_1)
+                .code(200)
+                .message("OK")
+                .header("Content-Type", "text/event-stream")
+                .body("data: [DONE]\n\n".toResponseBody("text/event-stream".toMediaType()))
                 .build()
         }
     }
@@ -81,6 +103,62 @@ class OpenRouterModelProviderTest {
     }
 
     @Test
+    fun endpointDiscoveryParsesProviderTagFromNestedEndpointResponse() = runBlocking {
+        val interceptor = RecordingInterceptor(
+            """
+            {
+              "data": {
+                "id": "mock/model",
+                "name": "Mock Model",
+                "endpoints": [
+                  {"name":"Provider A: Mock Model","provider_name":"Provider A","tag":"provider-a"},
+                  {"name":"Provider B: Mock Model","provider_name":"Provider B","tag":"provider-b"}
+                ]
+              }
+            }
+            """.trimIndent()
+        )
+
+        val endpoints = provider(interceptor).getEndpoints("mock/model")
+
+        assertEquals(
+            listOf("Provider A" to "provider-a", "Provider B" to "provider-b"),
+            endpoints.map { it.name to it.identifier }
+        )
+    }
+
+    @Test
+    fun autoRoutingOmitsProviderConfigurationEvenWhenAnEndpointIsStored() = runBlocking {
+        val body = routingRequestBody(
+            ModelRouting.fromSettings(ProviderRoutingMode.AUTO, "provider-a")
+        )
+
+        assertFalse(body.containsKey("provider"))
+    }
+
+    @Test
+    fun preferRoutingSendsSelectedProviderTagWithFallbackEnabled() = runBlocking {
+        val body = routingRequestBody(
+            ModelRouting.fromSettings(ProviderRoutingMode.PREFER, "provider-a")
+        )
+        val provider = body["provider"] as Map<*, *>
+
+        assertEquals(true, provider["allow_fallbacks"])
+        assertEquals(listOf("provider-a"), provider["order"])
+    }
+
+    @Test
+    fun lockRoutingSendsSelectedProviderTagWithFallbackDisabled() = runBlocking {
+        val body = routingRequestBody(
+            ModelRouting.fromSettings(ProviderRoutingMode.LOCK, "provider-b")
+        )
+        val provider = body["provider"] as Map<*, *>
+
+        assertEquals(false, provider["allow_fallbacks"])
+        assertEquals(listOf("provider-b"), provider["order"])
+    }
+
+    @Test
     fun modelCatalogRequestExecutesOffCallingThread() = runBlocking {
         val interceptor = RecordingInterceptor()
         val callingThread = Thread.currentThread()
@@ -121,5 +199,25 @@ class OpenRouterModelProviderTest {
         assertEquals(34, metadata?.completionTokens)
         assertEquals("mock/resolved", metadata?.resolvedModelId)
         assertTrue(events.none { it is StreamEvent.Error })
+    }
+
+    private suspend fun routingRequestBody(routing: ModelRouting): Map<*, *> {
+        val interceptor = RoutingStreamingInterceptor()
+        val provider = OpenRouterModelProvider(
+            client = OkHttpClient.Builder().addInterceptor(interceptor).build(),
+            moshi = Moshi.Builder().build(),
+            apiKeyProvider = { "mock-openrouter-key" }
+        )
+
+        withTimeout(5_000) {
+            provider.streamResponse(
+                messages = listOf(RoleplayMessage(Role.USER, "Hello")),
+                options = GenerationOptions(modelId = "mock/model", routing = routing)
+            ).toList()
+        }
+
+        val buffer = Buffer()
+        interceptor.request.body!!.writeTo(buffer)
+        return Moshi.Builder().build().adapter(Map::class.java).fromJson(buffer.readUtf8())!!
     }
 }

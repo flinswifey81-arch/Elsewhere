@@ -42,6 +42,7 @@ data class GenerationDetailsState(
 sealed class ChatUiState {
     object Loading : ChatUiState()
     object Error : ChatUiState()
+    object Deleted : ChatUiState()
     data class Success(
         val groupedMessages: List<com.example.ui.screens.MessageGroup> = emptyList(),
         val chatSummary: ChatSummary,
@@ -435,6 +436,27 @@ class ChatDetailViewModel(
         val targetMessage = state.messages.find { it.messageId == messageId } ?: return
         viewModelScope.launch {
             messageRepository.deleteMessage(targetMessage)
+        }
+    }
+
+    fun deleteChat() {
+        if (_uiState.value !is ChatUiState.Success) return
+        generationJob?.cancel()
+        sendInProgress = false
+        viewModelScope.launch {
+            try {
+                chatRepository.deleteChat(chatId)
+                chatSummary = null
+                currentChatSettings = null
+                currentDraft.value = ""
+                _uiState.value = ChatUiState.Deleted
+            } catch (cancellation: kotlinx.coroutines.CancellationException) {
+                throw cancellation
+            } catch (_: Exception) {
+                updateSuccessState {
+                    it.copy(generationError = "The chat could not be deleted.")
+                }
+            }
         }
     }
 

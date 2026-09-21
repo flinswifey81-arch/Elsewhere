@@ -10,6 +10,7 @@ import com.example.data.model.ConversationSummaryEntity
 import com.example.data.model.GenerationMetadataEntity
 import com.example.data.model.MemoryCategory
 import com.example.data.model.PersonaEntity
+import com.example.data.model.ProviderRoutingMode
 import com.example.data.model.RoleplayMemoryEntity
 import com.example.data.model.ResponseLengthProfile
 import com.example.data.model.SpeakerType
@@ -222,6 +223,84 @@ class ChatDetailGenerationTest {
         assertEquals("The provider returned no response. You can retry this turn.", completed.generationError)
     }
 
+    @Test
+    fun repeatedRegenerationDoesNotFeedAssistantPrefixBackIntoContextOrStorage() = runBlocking {
+        val provider = SequentialResponseProvider(
+            listOf(
+                "Rowan: First reply.",
+                "Rowan: Second reply.",
+                "Rowan: Third reply."
+            )
+        )
+        val harness = createHarness(provider, ResponseLengthProfile.NORMAL)
+
+        harness.viewModel.onDraftChanged("Please answer again.")
+        harness.viewModel.sendMessage()
+
+        val original = withTimeout(5_000) {
+            harness.messageRepository.getMessagesForChat(harness.chatId).first { messages ->
+                messages.count { it.speakerType == SpeakerType.CHARACTER } == 1
+            }
+        }.single { it.speakerType == SpeakerType.CHARACTER }
+
+        harness.viewModel.regenerateMessage(original.messageId)
+        val second = withTimeout(5_000) {
+            harness.messageRepository.getMessagesForChat(harness.chatId).first { messages ->
+                messages.count { it.speakerType == SpeakerType.CHARACTER } == 2 &&
+                    messages.any { it.isPrimaryVariant && it.content == "Rowan: Second reply." }
+            }
+        }.single { it.speakerType == SpeakerType.CHARACTER && it.isPrimaryVariant }
+
+        harness.viewModel.regenerateMessage(second.messageId)
+        val messages = withTimeout(5_000) {
+            harness.messageRepository.getMessagesForChat(harness.chatId).first { stored ->
+                stored.count { it.speakerType == SpeakerType.CHARACTER } == 3 &&
+                    stored.any { it.isPrimaryVariant && it.content == "Rowan: Third reply." }
+            }
+        }
+
+        assertEquals(
+            listOf("Rowan: First reply.", "Rowan: Second reply.", "Rowan: Third reply."),
+            messages.filter { it.speakerType == SpeakerType.CHARACTER }
+                .sortedBy { it.createdAt }
+                .map { it.content }
+        )
+        assertEquals("Rowan: Third reply.", messages.single { it.speakerType == SpeakerType.CHARACTER && it.isPrimaryVariant }.content)
+        assertTrue(messages.none { it.content.contains("Rowan: Rowan:") })
+        assertEquals(3, provider.requests.size)
+        provider.requests.forEach { request ->
+            assertTrue(request.none { it.role == Role.ASSISTANT })
+            assertEquals("Please answer again.", request.last { it.role == Role.USER }.content)
+        }
+    }
+
+    @Test
+    fun lockWithoutSelectedEndpointFailsLocallyBeforeCallingProvider() = runBlocking {
+        val provider = CountingProvider()
+        val harness = createHarness(
+            provider = provider,
+            responseLengthProfile = ResponseLengthProfile.NORMAL,
+            routingMode = ProviderRoutingMode.LOCK,
+            providerEndpoint = null
+        )
+
+        harness.viewModel.onDraftChanged("Use the locked provider.")
+        harness.viewModel.sendMessage()
+
+        val failedState = withTimeout(5_000) {
+            harness.viewModel.uiState.first {
+                it is ChatUiState.Success && it.generationError == "Locked routing requires a selected provider endpoint."
+            }
+        } as ChatUiState.Success
+
+        assertEquals("Locked routing requires a selected provider endpoint.", failedState.generationError)
+        assertEquals(0, provider.requestCount)
+        assertEquals(
+            listOf(SpeakerType.PERSONA),
+            harness.messageRepository.getMessagesForChat(harness.chatId).first().map { it.speakerType }
+        )
+    }
+
     private data class Harness(
         val chatId: String,
         val viewModel: ChatDetailViewModel,
@@ -230,7 +309,9 @@ class ChatDetailGenerationTest {
 
     private suspend fun createHarness(
         provider: ModelProvider,
-        responseLengthProfile: ResponseLengthProfile
+        responseLengthProfile: ResponseLengthProfile,
+        routingMode: ProviderRoutingMode = ProviderRoutingMode.AUTO,
+        providerEndpoint: String? = null
     ): Harness {
         val moshi = Moshi.Builder().addLast(KotlinJsonAdapterFactory()).build()
         val characterRepository = CharacterRepository(database.characterDao(), moshi)
@@ -245,6 +326,8 @@ class ChatDetailGenerationTest {
             ChatSettingsEntity(
                 chatId = chatId,
                 selectedModelId = "mock/model",
+                providerRoutingMode = routingMode,
+                providerEndpoint = providerEndpoint,
                 responseLengthProfile = responseLengthProfile
             )
         )
@@ -296,6 +379,39 @@ class ChatDetailGenerationTest {
         ): Flow<StreamEvent> = flow {
             this@ScriptedStreamingProvider.options = options
             events.forEach { emit(it) }
+        }
+    }
+
+    private class SequentialResponseProvider(
+        private val responses: List<String>
+    ) : ModelProvider {
+        val requests = mutableListOf<List<RoleplayMessage>>()
+        private var responseIndex = 0
+
+        override suspend fun getModels(): List<OpenRouterModel> = emptyList()
+        override suspend fun getEndpoints(modelId: String): List<ProviderEndpoint> = emptyList()
+
+        override fun streamResponse(
+            messages: List<RoleplayMessage>,
+            options: GenerationOptions
+        ): Flow<StreamEvent> = flow {
+            requests += messages
+            emit(StreamEvent.Content(responses[responseIndex++]))
+            emit(StreamEvent.Done(null))
+        }
+    }
+
+    private class CountingProvider : ModelProvider {
+        var requestCount = 0
+
+        override suspend fun getModels(): List<OpenRouterModel> = emptyList()
+        override suspend fun getEndpoints(modelId: String): List<ProviderEndpoint> = emptyList()
+
+        override fun streamResponse(
+            messages: List<RoleplayMessage>,
+            options: GenerationOptions
+        ): Flow<StreamEvent> = flow {
+            requestCount += 1
         }
     }
 

@@ -164,6 +164,12 @@ fun ElsewhereApp(container: AppContainer) {
                     chatId = chatId,
                     appContainer = container,
                     onNavigateBack = { navController.popBackStack() },
+                    onChatDeleted = {
+                        navController.navigate(Screen.Chats.route) {
+                            popUpTo(navController.graph.findStartDestination().id)
+                            launchSingleTop = true
+                        }
+                    },
                     onNavigateToInspector = { navController.navigate("context_inspector/$chatId") },
                     onNavigateToSettings = { navController.navigate("chat_settings/$chatId") },
                 )

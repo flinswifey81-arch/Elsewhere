@@ -21,6 +21,7 @@ import com.example.data.model.ResponseLengthProfile
 import com.example.domain.provider.ModelProvider
 import com.example.domain.repository.ChatRepository
 import com.example.domain.provider.OpenRouterModel
+import com.example.domain.provider.ProviderEndpoint
 import java.math.BigDecimal
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -217,7 +218,10 @@ fun ChatSettingsScreen(
                         onExpandedChange = { expanded = !expanded }
                     ) {
                         OutlinedTextField(
-                            value = uiState.settings?.providerEndpoint ?: "Select Endpoint",
+                            value = selectedEndpointDisplayName(
+                                selectedIdentifier = uiState.settings?.providerEndpoint,
+                                endpoints = uiState.endpoints
+                            ),
                             onValueChange = {},
                             readOnly = true,
                             label = { Text("Endpoint") },
@@ -338,3 +342,10 @@ fun formatPrice(priceStr: String): String {
     val price = priceStr.toBigDecimalOrNull() ?: return "0"
     return (price * BigDecimal(1_000_000)).stripTrailingZeros().toPlainString()
 }
+
+internal fun selectedEndpointDisplayName(
+    selectedIdentifier: String?,
+    endpoints: List<ProviderEndpoint>
+): String = selectedIdentifier
+    ?.let { identifier -> endpoints.firstOrNull { it.identifier == identifier }?.name ?: identifier }
+    ?: "Select Endpoint"

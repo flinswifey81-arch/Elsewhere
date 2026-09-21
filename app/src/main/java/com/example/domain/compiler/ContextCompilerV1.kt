@@ -28,6 +28,11 @@ class ContextCompilerV1 {
         recentMessageLimit: Int = 24
     ): List<RoleplayMessage> {
         val messages = mutableListOf<RoleplayMessage>()
+        fun resolveMacros(source: String): String = IdentityMacroResolver.resolve(
+            source = source,
+            characterDisplayName = character.displayName,
+            personaDisplayName = persona.displayName
+        )
         
         // 1. Core Instruction
         val coreInstruction = buildString {
@@ -44,52 +49,52 @@ class ContextCompilerV1 {
             
             // Character details
             append("--- CHARACTER: ${character.displayName} ---\n")
-            if (!character.identityJson.isNullOrBlank()) append("Identity:\n${character.identityJson}\n\n")
-            if (!character.appearanceJson.isNullOrBlank()) append("Appearance:\n${character.appearanceJson}\n\n")
-            if (!character.personalityJson.isNullOrBlank()) append("Personality:\n${character.personalityJson}\n\n")
-            if (!character.voiceJson.isNullOrBlank()) append("Voice:\n${character.voiceJson}\n\n")
-            if (!character.behaviorJson.isNullOrBlank()) append("Behavior:\n${character.behaviorJson}\n\n")
-            if (!character.backstoryJson.isNullOrBlank()) append("Backstory:\n${character.backstoryJson}\n\n")
-            if (!character.knowledgeJson.isNullOrBlank()) append("Knowledge:\n${character.knowledgeJson}\n\n")
-            if (!character.worldContextJson.isNullOrBlank()) append("World Context:\n${character.worldContextJson}\n\n")
-            if (!character.writingRulesJson.isNullOrBlank()) append("Writing Rules:\n${character.writingRulesJson}\n\n")
-            if (!character.examplesJson.isNullOrBlank()) append("Examples:\n${character.examplesJson}\n\n")
+            if (!character.identityJson.isNullOrBlank()) append("Identity:\n${resolveMacros(character.identityJson)}\n\n")
+            if (!character.appearanceJson.isNullOrBlank()) append("Appearance:\n${resolveMacros(character.appearanceJson)}\n\n")
+            if (!character.personalityJson.isNullOrBlank()) append("Personality:\n${resolveMacros(character.personalityJson)}\n\n")
+            if (!character.voiceJson.isNullOrBlank()) append("Voice:\n${resolveMacros(character.voiceJson)}\n\n")
+            if (!character.behaviorJson.isNullOrBlank()) append("Behavior:\n${resolveMacros(character.behaviorJson)}\n\n")
+            if (!character.backstoryJson.isNullOrBlank()) append("Backstory:\n${resolveMacros(character.backstoryJson)}\n\n")
+            if (!character.knowledgeJson.isNullOrBlank()) append("Knowledge:\n${resolveMacros(character.knowledgeJson)}\n\n")
+            if (!character.worldContextJson.isNullOrBlank()) append("World Context:\n${resolveMacros(character.worldContextJson)}\n\n")
+            if (!character.writingRulesJson.isNullOrBlank()) append("Writing Rules:\n${resolveMacros(character.writingRulesJson)}\n\n")
+            if (!character.examplesJson.isNullOrBlank()) append("Examples:\n${resolveMacros(character.examplesJson)}\n\n")
             ManualCharacterFieldsCodec.readStored(character)?.let { manual ->
                 if (manual.systemInstructions.isNotEmpty()) {
                     append("--- CHARACTER SYSTEM INSTRUCTIONS ---\n")
-                    append(manual.systemInstructions)
+                    append(resolveMacros(manual.systemInstructions))
                     append("\n\n")
                 }
                 append("--- MANUAL CHARACTER DETAILS ---\n")
-                appendManualField("Name", manual.name)
-                appendManualField("Short Backstory", manual.shortBackstory)
-                appendManualField("Personality", manual.personality)
-                appendManualField("Tone", manual.tone)
-                appendManualField("Age", manual.age)
-                appendManualField("Birthday", manual.birthday)
-                appendManualField("Story", manual.story)
-                appendManualField("Likes", manual.likes)
-                appendManualField("Dislikes", manual.dislikes)
-                appendManualField("Conversational Goals", manual.conversationalGoals)
-                appendManualField("Conversational Examples", manual.conversationalExamples)
-                appendManualField("Appearance", manual.appearance)
-                appendManualField("Knowledge - Relationships", manual.knowledgeRelationships)
-                appendManualField("Knowledge - General", manual.knowledgeGeneral)
+                appendManualField("Name", resolveMacros(manual.name))
+                appendManualField("Short Backstory", resolveMacros(manual.shortBackstory))
+                appendManualField("Personality", resolveMacros(manual.personality))
+                appendManualField("Tone", resolveMacros(manual.tone))
+                appendManualField("Age", resolveMacros(manual.age))
+                appendManualField("Birthday", resolveMacros(manual.birthday))
+                appendManualField("Story", resolveMacros(manual.story))
+                appendManualField("Likes", resolveMacros(manual.likes))
+                appendManualField("Dislikes", resolveMacros(manual.dislikes))
+                appendManualField("Conversational Goals", resolveMacros(manual.conversationalGoals))
+                appendManualField("Conversational Examples", resolveMacros(manual.conversationalExamples))
+                appendManualField("Appearance", resolveMacros(manual.appearance))
+                appendManualField("Knowledge - Relationships", resolveMacros(manual.knowledgeRelationships))
+                appendManualField("Knowledge - General", resolveMacros(manual.knowledgeGeneral))
                 append('\n')
             }
             // Intentionally excluding authorNotesJson
 
             // Persona details
             append("--- USER PERSONA: ${persona.displayName} ---\n")
-            if (!persona.identityJson.isNullOrBlank()) append("Identity:\n${persona.identityJson}\n\n")
-            if (!persona.appearanceJson.isNullOrBlank()) append("Appearance:\n${persona.appearanceJson}\n\n")
-            if (!persona.personalityJson.isNullOrBlank()) append("Personality:\n${persona.personalityJson}\n\n")
-            if (!persona.backgroundJson.isNullOrBlank()) append("Background:\n${persona.backgroundJson}\n\n")
+            if (!persona.identityJson.isNullOrBlank()) append("Identity:\n${resolveMacros(persona.identityJson)}\n\n")
+            if (!persona.appearanceJson.isNullOrBlank()) append("Appearance:\n${resolveMacros(persona.appearanceJson)}\n\n")
+            if (!persona.personalityJson.isNullOrBlank()) append("Personality:\n${resolveMacros(persona.personalityJson)}\n\n")
+            if (!persona.backgroundJson.isNullOrBlank()) append("Background:\n${resolveMacros(persona.backgroundJson)}\n\n")
             ManualPersonaFieldsCodec.readStored(persona)?.backstoryInstructions
                 ?.takeIf { it.isNotEmpty() }
                 ?.let { instructions ->
                     append("Backstory / Persona Instructions:\n")
-                    append(instructions)
+                    append(resolveMacros(instructions))
                     append("\n\n")
                 }
             // Intentionally excluding privateNotesJson
@@ -135,7 +140,7 @@ class ContextCompilerV1 {
                 SpeakerType.PERSONA -> Role.USER
                 else -> Role.SYSTEM
             }
-            messages.add(RoleplayMessage(role = role, content = msg.content, name = msg.speakerDisplayNameSnapshot))
+            messages.add(RoleplayMessage(role = role, content = resolveMacros(msg.content), name = msg.speakerDisplayNameSnapshot))
         }
         
         // Add current message
@@ -144,7 +149,7 @@ class ContextCompilerV1 {
             SpeakerType.PERSONA -> Role.USER
             else -> Role.SYSTEM
         }
-        messages.add(RoleplayMessage(role = role, content = currentMessage.content, name = currentMessage.speakerDisplayNameSnapshot))
+        messages.add(RoleplayMessage(role = role, content = resolveMacros(currentMessage.content), name = currentMessage.speakerDisplayNameSnapshot))
         
         if (isContinuation) {
             messages.add(RoleplayMessage(role = Role.SYSTEM, content = "Continue the previous message. Do not repeat what you have already said."))

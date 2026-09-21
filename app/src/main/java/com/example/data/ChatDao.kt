@@ -36,6 +36,46 @@ interface ChatDao {
     @Delete
     suspend fun deleteChat(chat: ChatEntity)
 
+    @Query("DELETE FROM generation_metadata WHERE messageId IN (SELECT messageId FROM messages WHERE chatId = :chatId)")
+    suspend fun deleteGenerationMetadataForChat(chatId: String)
+
+    @Query("DELETE FROM messages WHERE chatId = :chatId")
+    suspend fun deleteMessagesForChat(chatId: String)
+
+    @Query("DELETE FROM conversation_summaries WHERE chatId = :chatId")
+    suspend fun deleteSummaryForChat(chatId: String)
+
+    @Query("DELETE FROM roleplay_memories WHERE chatId = :chatId")
+    suspend fun deleteMemoriesForChat(chatId: String)
+
+    @Query("DELETE FROM relationships WHERE scopeChatId = :chatId")
+    suspend fun deleteRelationshipsForChat(chatId: String)
+
+    @Query("DELETE FROM chat_settings WHERE chatId = :chatId")
+    suspend fun deleteSettingsForChat(chatId: String)
+
+    @Query("DELETE FROM chat_participants WHERE chatId = :chatId")
+    suspend fun deleteCharacterParticipantsForChat(chatId: String)
+
+    @Query("DELETE FROM chat_persona_participants WHERE chatId = :chatId")
+    suspend fun deletePersonaParticipantsForChat(chatId: String)
+
+    @Query("DELETE FROM chats WHERE chatId = :chatId")
+    suspend fun deleteChatById(chatId: String)
+
+    @Transaction
+    suspend fun deleteChatAndOwnedData(chatId: String) {
+        deleteGenerationMetadataForChat(chatId)
+        deleteMessagesForChat(chatId)
+        deleteSummaryForChat(chatId)
+        deleteMemoriesForChat(chatId)
+        deleteRelationshipsForChat(chatId)
+        deleteSettingsForChat(chatId)
+        deleteCharacterParticipantsForChat(chatId)
+        deletePersonaParticipantsForChat(chatId)
+        deleteChatById(chatId)
+    }
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertChatParticipant(participant: ChatParticipantEntity)
 

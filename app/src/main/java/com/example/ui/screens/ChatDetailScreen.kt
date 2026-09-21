@@ -8,6 +8,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Settings
@@ -16,6 +17,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.data.model.MessageEntity
@@ -25,6 +28,7 @@ import com.example.ui.components.MarkdownText
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -32,6 +36,7 @@ fun ChatDetailScreen(
     chatId: String,
     appContainer: AppContainer,
     onNavigateBack: () -> Unit,
+    onChatDeleted: () -> Unit,
     onNavigateToSettings: () -> Unit = {},
     onNavigateToInspector: () -> Unit = {},
     modifier: Modifier = Modifier
@@ -50,8 +55,19 @@ fun ChatDetailScreen(
 
     val uiState by viewModel.uiState.collectAsState()
     val draft by viewModel.draft.collectAsState()
+    val clipboardManager = LocalClipboardManager.current
+    val snackbarHostState = remember { SnackbarHostState() }
+    val coroutineScope = rememberCoroutineScope()
+    var showDeleteChatConfirm by remember { mutableStateOf(false) }
+
+    LaunchedEffect(uiState) {
+        if (uiState is ChatUiState.Deleted) {
+            onChatDeleted()
+        }
+    }
 
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = {
@@ -70,6 +86,13 @@ fun ChatDetailScreen(
                     IconButton(onClick = onNavigateToSettings) {
                         Icon(Icons.Filled.Settings, contentDescription = "Settings")
                     }
+                    IconButton(onClick = { showDeleteChatConfirm = true }) {
+                        Icon(
+                            Icons.Filled.Delete,
+                            contentDescription = "Delete Chat",
+                            tint = MaterialTheme.colorScheme.error
+                        )
+                    }
                 }
             )
         }
@@ -86,6 +109,9 @@ fun ChatDetailScreen(
                 is ChatUiState.Error -> {
                     Text("Error loading chat.", modifier = Modifier.align(Alignment.Center))
                 }
+                is ChatUiState.Deleted -> {
+                    CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+                }
                 is ChatUiState.Success -> {
                     Column(modifier = Modifier.fillMaxSize()) {
                         LazyColumn(
@@ -101,6 +127,12 @@ fun ChatDetailScreen(
                                     onSwitchVariant = { msgId -> viewModel.switchVariant(group.primaryMessage.variantGroupId ?: group.primaryMessage.messageId, msgId) },
                                     onRegenerate = { viewModel.regenerateMessage(it) },
                                     onContinue = { viewModel.continueMessage(it) },
+                                    onCopy = { content ->
+                                        clipboardManager.setText(AnnotatedString(content))
+                                        coroutineScope.launch {
+                                            snackbarHostState.showSnackbar("Message copied")
+                                        }
+                                    },
                                     onEdit = { id, content -> viewModel.editMessage(id, content) },
                                     onDelete = { viewModel.deleteMessage(it) },
                                     onShowMetadata = { viewModel.showGenerationDetails(it) }
@@ -209,6 +241,29 @@ fun ChatDetailScreen(
             }
         }
     }
+
+    if (showDeleteChatConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDeleteChatConfirm = false },
+            title = { Text("Delete Chat") },
+            text = { Text("Delete this entire chat and all of its messages and chat-specific memory? This cannot be undone.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showDeleteChatConfirm = false
+                        viewModel.deleteChat()
+                    }
+                ) {
+                    Text("Delete", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteChatConfirm = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
 }
 
 @Composable
@@ -217,6 +272,7 @@ fun MessageBubble(
     onSwitchVariant: (String) -> Unit,
     onRegenerate: (String) -> Unit,
     onContinue: (String) -> Unit,
+    onCopy: (String) -> Unit,
     onEdit: (String, String) -> Unit,
     onDelete: (String) -> Unit,
     onShowMetadata: (String) -> Unit
@@ -270,6 +326,7 @@ fun MessageBubble(
                     MessageMenu(
                         expanded = showMenu,
                         onDismiss = { showMenu = false },
+                        onCopy = { onCopy(message.content) },
                         onEdit = { isEditing = true },
                         onDelete = { showDeleteConfirm = true },
                         onRegenerate = null,
@@ -320,6 +377,7 @@ fun MessageBubble(
                     MessageMenu(
                         expanded = showMenu,
                         onDismiss = { showMenu = false },
+                        onCopy = { onCopy(message.content) },
                         onEdit = { isEditing = true },
                         onDelete = { showDeleteConfirm = true },
                         onRegenerate = { onRegenerate(message.messageId) },
@@ -391,6 +449,7 @@ fun MessageBubble(
 fun MessageMenu(
     expanded: Boolean,
     onDismiss: () -> Unit,
+    onCopy: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
     onRegenerate: (() -> Unit)?,
@@ -401,6 +460,10 @@ fun MessageMenu(
         expanded = expanded,
         onDismissRequest = onDismiss
     ) {
+        DropdownMenuItem(
+            text = { Text("Copy") },
+            onClick = { onDismiss(); onCopy() }
+        )
         DropdownMenuItem(
             text = { Text("Edit") },
             onClick = { onDismiss(); onEdit() }

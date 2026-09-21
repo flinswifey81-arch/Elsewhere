@@ -95,14 +95,22 @@ class OpenRouterModelProvider(
             val body = response.body?.string() ?: ""
             val adapter = moshi.adapter(Map::class.java)
             val parsed = adapter.fromJson(body)
-            val data = parsed?.get("data") as? List<Map<String, Any>> ?: emptyList()
-            
-            data.map { item ->
+            val data = parsed?.get("data") as? Map<*, *> ?: return@use emptyList()
+            val endpoints = data["endpoints"] as? List<*> ?: return@use emptyList()
+
+            endpoints.mapNotNull { endpoint ->
+                val item = endpoint as? Map<*, *> ?: return@mapNotNull null
+                val tag = (item["tag"] ?: item["identifier"])
+                    ?.toString()
+                    ?.takeIf(String::isNotBlank)
+                    ?: return@mapNotNull null
                 ProviderEndpoint(
-                    name = item["name"]?.toString() ?: item["identifier"]?.toString() ?: "Unknown",
-                    identifier = item["identifier"]?.toString() ?: ""
+                    name = item["provider_name"]?.toString()
+                        ?: item["name"]?.toString()
+                        ?: tag,
+                    identifier = tag
                 )
-            }
+            }.distinctBy(ProviderEndpoint::identifier)
         }
     }
 
