@@ -13,6 +13,8 @@ import androidx.compose.ui.unit.dp
 import com.example.di.AppContainer
 import com.example.domain.compiler.ContextCompilerV1
 import com.example.domain.provider.RoleplayMessage
+import com.example.ui.components.elsewhereCardBorder
+import com.example.ui.components.elsewhereTopAppBarColors
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
@@ -86,9 +88,11 @@ fun ContextInspectorScreen(
                     IconButton(onClick = onNavigateBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
-                }
+                },
+                colors = elsewhereTopAppBarColors()
             )
-        }
+        },
+        containerColor = MaterialTheme.colorScheme.background
     ) { padding ->
         if (isLoading) {
             Box(Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) {
@@ -103,7 +107,7 @@ fun ContextInspectorScreen(
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 item {
-                    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
+                    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer), border = elsewhereCardBorder()) {
                         Column(modifier = Modifier.padding(16.dp).fillMaxWidth()) {
                             Text("Settings Overview", style = MaterialTheme.typography.titleMedium)
                             Spacer(Modifier.height(8.dp))
@@ -119,7 +123,7 @@ fun ContextInspectorScreen(
                 }
                 if (durableMemories.isNotEmpty()) {
                     item {
-                        Card(modifier = Modifier.fillMaxWidth()) {
+                        Card(modifier = Modifier.fillMaxWidth(), border = elsewhereCardBorder()) {
                             Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Text("Durable Memories", style = MaterialTheme.typography.titleMedium)
                                 durableMemories.forEach { memory ->
@@ -142,7 +146,7 @@ fun ContextInspectorScreen(
                     }
                 }
                 items(compiledMessages) { msg ->
-                    Card(modifier = Modifier.fillMaxWidth()) {
+                    Card(modifier = Modifier.fillMaxWidth(), border = elsewhereCardBorder()) {
                         Column(modifier = Modifier.padding(16.dp)) {
                             Text("Role: ${msg.role.name}", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
                             msg.name?.let {

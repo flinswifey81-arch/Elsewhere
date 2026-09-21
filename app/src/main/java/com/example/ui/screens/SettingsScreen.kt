@@ -15,6 +15,9 @@ import com.example.domain.repository.AppearanceRepository
 import com.example.domain.repository.ApiKeyRepository
 import kotlinx.coroutines.launch
 import com.example.domain.repository.ThemeMode
+import com.example.ui.components.elsewhereCardBorder
+import com.example.ui.components.elsewhereTextFieldColors
+import com.example.ui.components.elsewhereTopAppBarColors
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -39,10 +42,7 @@ fun SettingsScreen(
         topBar = {
             CenterAlignedTopAppBar(
                 title = { Text("Settings", style = MaterialTheme.typography.titleLarge) },
-                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background,
-                    titleContentColor = MaterialTheme.colorScheme.onBackground
-                )
+                colors = elsewhereTopAppBarColors()
             )
         },
         modifier = modifier.testTag("settings_screen"),
@@ -64,7 +64,8 @@ fun SettingsScreen(
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    border = elsewhereCardBorder()
                 ) {
                     Column(modifier = Modifier.padding(20.dp)) {
                         Text("Theme Mode", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -129,7 +130,8 @@ fun SettingsScreen(
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    border = elsewhereCardBorder()
                 ) {
                     Column(modifier = Modifier.padding(20.dp)) {
                         Text("OpenRouter Integration", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
@@ -162,6 +164,7 @@ fun SettingsScreen(
                                     visualTransformation = PasswordVisualTransformation(),
                                     singleLine = true,
                                     shape = RoundedCornerShape(12.dp),
+                                    colors = elsewhereTextFieldColors(),
                                     modifier = Modifier.fillMaxWidth().testTag("api_key_input")
                                 )
                                 Spacer(modifier = Modifier.height(16.dp))
@@ -199,11 +202,14 @@ fun SettingsScreen(
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    border = elsewhereCardBorder()
                 ) {
                     Column(modifier = Modifier.padding(20.dp)) {
                         Text("Elsewhere", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
                         Spacer(modifier = Modifier.height(4.dp))
+                        Text("Private stories, your way.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(modifier = Modifier.height(8.dp))
                         Text("Version 1.0", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }

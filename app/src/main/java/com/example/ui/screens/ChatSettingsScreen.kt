@@ -22,6 +22,9 @@ import com.example.domain.provider.ModelProvider
 import com.example.domain.repository.ChatRepository
 import com.example.domain.provider.OpenRouterModel
 import com.example.domain.provider.ProviderEndpoint
+import com.example.ui.components.elsewhereCardBorder
+import com.example.ui.components.elsewhereTextFieldColors
+import com.example.ui.components.elsewhereTopAppBarColors
 import java.math.BigDecimal
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -51,9 +54,11 @@ fun ChatSettingsScreen(
                     IconButton(onClick = onNavigateBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
-                }
+                },
+                colors = elsewhereTopAppBarColors()
             )
-        }
+        },
+        containerColor = MaterialTheme.colorScheme.background
     ) { padding ->
         if (uiState.isLoading) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -73,6 +78,7 @@ fun ChatSettingsScreen(
                     Surface(
                         color = MaterialTheme.colorScheme.errorContainer,
                         contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                        shape = MaterialTheme.shapes.medium,
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text(error, modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.bodySmall)
@@ -104,7 +110,7 @@ fun ChatSettingsScreen(
                     Button(onClick = { viewModel.onTopPChanged(null) }) { Text("Reset Top P") }
                 }
 
-                HorizontalDivider()
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
                 // Response Length Profile
                 Text("Response Length", style = MaterialTheme.typography.titleMedium)
@@ -144,18 +150,24 @@ fun ChatSettingsScreen(
                                 value = min,
                                 onValueChange = { min = it },
                                 label = { Text("Min") },
+                                shape = MaterialTheme.shapes.medium,
+                                colors = elsewhereTextFieldColors(),
                                 modifier = Modifier.weight(1f)
                             )
                             OutlinedTextField(
                                 value = target,
                                 onValueChange = { target = it },
                                 label = { Text("Target") },
+                                shape = MaterialTheme.shapes.medium,
+                                colors = elsewhereTextFieldColors(),
                                 modifier = Modifier.weight(1f)
                             )
                             OutlinedTextField(
                                 value = max,
                                 onValueChange = { max = it },
                                 label = { Text("Max") },
+                                shape = MaterialTheme.shapes.medium,
+                                colors = elsewhereTextFieldColors(),
                                 modifier = Modifier.weight(1f)
                             )
                         }
@@ -181,7 +193,7 @@ fun ChatSettingsScreen(
                     }
                 }
 
-                Divider()
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
                 // Routing Mode
                 Text("Provider Routing", style = MaterialTheme.typography.titleMedium)
@@ -227,6 +239,7 @@ fun ChatSettingsScreen(
                             label = { Text("Endpoint") },
                             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
                             colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors(),
+                            shape = MaterialTheme.shapes.medium,
                             modifier = Modifier.menuAnchor().fillMaxWidth()
                         )
                         ExposedDropdownMenu(
@@ -252,7 +265,7 @@ fun ChatSettingsScreen(
                     }
                 }
 
-                Divider()
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
                 // Model Selection
                 Text("Model Selection", style = MaterialTheme.typography.titleMedium)
@@ -262,7 +275,8 @@ fun ChatSettingsScreen(
                     if (selectedModel != null) {
                         Card(
                             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier.fillMaxWidth(),
+                            border = elsewhereCardBorder()
                         ) {
                             Column(modifier = Modifier.padding(16.dp)) {
                                 Text("Active Model", style = MaterialTheme.typography.labelSmall)
@@ -290,6 +304,8 @@ fun ChatSettingsScreen(
                         value = uiState.searchQuery,
                         onValueChange = viewModel::onSearchQueryChanged,
                         label = { Text("Search Models") },
+                        shape = MaterialTheme.shapes.medium,
+                        colors = elsewhereTextFieldColors(),
                         modifier = Modifier.fillMaxWidth()
                     )
                     
@@ -322,7 +338,8 @@ fun ModelItem(model: OpenRouterModel, isSelected: Boolean, onClick: () -> Unit) 
             .clickable(onClick = onClick),
         colors = CardDefaults.cardColors(
             containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant
-        )
+        ),
+        border = elsewhereCardBorder()
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
             Text(model.name, fontWeight = FontWeight.Bold, color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant)

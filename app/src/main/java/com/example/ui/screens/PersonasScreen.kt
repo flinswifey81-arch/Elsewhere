@@ -23,6 +23,10 @@ import androidx.compose.ui.unit.dp
 import com.example.data.model.ManualPersonaFields
 import com.example.data.model.PersonaEntity
 import com.example.domain.repository.PersonaRepository
+import com.example.ui.components.ElsewhereEmptyState
+import com.example.ui.components.elsewhereCardBorder
+import com.example.ui.components.elsewhereTextFieldColors
+import com.example.ui.components.elsewhereTopAppBarColors
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -182,10 +186,7 @@ fun PersonasScreen(
         topBar = {
             CenterAlignedTopAppBar(
                 title = { Text("Personas", style = MaterialTheme.typography.titleLarge) },
-                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background,
-                    titleContentColor = MaterialTheme.colorScheme.onBackground
-                )
+                colors = elsewhereTopAppBarColors()
             )
         },
         floatingActionButton = {
@@ -212,7 +213,8 @@ fun PersonasScreen(
                 )
             }
         },
-        modifier = modifier.testTag("personas_screen")
+        modifier = modifier.testTag("personas_screen"),
+        containerColor = MaterialTheme.colorScheme.background
     ) { padding ->
         if (personas.isEmpty()) {
             Box(
@@ -226,15 +228,10 @@ fun PersonasScreen(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    Text(
-                        text = "Your library is empty.",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Text(
-                        text = "Create a Persona or import a persona (JSON) to start.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    ElsewhereEmptyState(
+                        icon = Icons.Default.Face,
+                        title = "Your library is empty.",
+                        message = "Create a Persona or import a persona (JSON) to start."
                     )
                     Button(
                         onClick = {
@@ -270,7 +267,8 @@ fun PersonasScreen(
                         shape = RoundedCornerShape(16.dp),
                         colors = CardDefaults.cardColors(
                             containerColor = MaterialTheme.colorScheme.surface
-                        )
+                        ),
+                        border = elsewhereCardBorder()
                     ) {
                         Row(modifier = Modifier.padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
                             Surface(
@@ -371,29 +369,41 @@ private fun ManualPersonaEditor(
                     ) {
                         Text("Save")
                     }
-                }
+                },
+                colors = elsewhereTopAppBarColors()
             )
         },
-        modifier = modifier.testTag("manual_persona_editor")
+        modifier = modifier.testTag("manual_persona_editor"),
+        containerColor = MaterialTheme.colorScheme.background
     ) { padding ->
-        Column(
+        Card(
             modifier = Modifier.fillMaxSize().padding(padding).padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            border = elsewhereCardBorder()
         ) {
-            OutlinedTextField(
-                value = fields.name,
-                onValueChange = { fields = fields.copy(name = it) },
-                label = { Text("Name") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth().testTag("persona_field_Name")
-            )
-            OutlinedTextField(
-                value = fields.backstoryInstructions,
-                onValueChange = { fields = fields.copy(backstoryInstructions = it) },
-                label = { Text("Backstory / Persona Instructions") },
-                minLines = 6,
-                modifier = Modifier.fillMaxWidth().weight(1f).testTag("persona_field_Backstory / Persona Instructions")
-            )
+            Column(
+                modifier = Modifier.fillMaxSize().padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                OutlinedTextField(
+                    value = fields.name,
+                    onValueChange = { fields = fields.copy(name = it) },
+                    label = { Text("Name") },
+                    singleLine = true,
+                    shape = MaterialTheme.shapes.medium,
+                    colors = elsewhereTextFieldColors(),
+                    modifier = Modifier.fillMaxWidth().testTag("persona_field_Name")
+                )
+                OutlinedTextField(
+                    value = fields.backstoryInstructions,
+                    onValueChange = { fields = fields.copy(backstoryInstructions = it) },
+                    label = { Text("Backstory / Persona Instructions") },
+                    minLines = 6,
+                    shape = MaterialTheme.shapes.medium,
+                    colors = elsewhereTextFieldColors(),
+                    modifier = Modifier.fillMaxWidth().weight(1f).testTag("persona_field_Backstory / Persona Instructions")
+                )
+            }
         }
     }
 }

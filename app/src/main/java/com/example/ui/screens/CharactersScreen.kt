@@ -23,6 +23,10 @@ import androidx.compose.ui.unit.dp
 import com.example.data.model.CharacterEntity
 import com.example.data.model.ManualCharacterFields
 import com.example.domain.repository.CharacterRepository
+import com.example.ui.components.ElsewhereEmptyState
+import com.example.ui.components.elsewhereCardBorder
+import com.example.ui.components.elsewhereTextFieldColors
+import com.example.ui.components.elsewhereTopAppBarColors
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -182,10 +186,7 @@ fun CharactersScreen(
         topBar = {
             CenterAlignedTopAppBar(
                 title = { Text("Characters", style = MaterialTheme.typography.titleLarge) },
-                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background,
-                    titleContentColor = MaterialTheme.colorScheme.onBackground
-                )
+                colors = elsewhereTopAppBarColors()
             )
         },
         floatingActionButton = {
@@ -212,7 +213,8 @@ fun CharactersScreen(
                 )
             }
         },
-        modifier = modifier.testTag("characters_screen")
+        modifier = modifier.testTag("characters_screen"),
+        containerColor = MaterialTheme.colorScheme.background
     ) { padding ->
         if (characters.isEmpty()) {
             Box(
@@ -226,15 +228,10 @@ fun CharactersScreen(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    Text(
-                        text = "Your library is empty.",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Text(
-                        text = "Create a Character or import a character card (JSON) to start.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    ElsewhereEmptyState(
+                        icon = Icons.Default.Person,
+                        title = "Your library is empty.",
+                        message = "Create a Character or import a character card (JSON) to start."
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(onClick = {
@@ -264,7 +261,8 @@ fun CharactersScreen(
                         shape = RoundedCornerShape(16.dp),
                         colors = CardDefaults.cardColors(
                             containerColor = MaterialTheme.colorScheme.surface
-                        )
+                        ),
+                        border = elsewhereCardBorder()
                     ) {
                         Row(modifier = Modifier.padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
                             Surface(
@@ -365,16 +363,19 @@ private fun ManualCharacterEditor(
                     ) {
                         Text("Save")
                     }
-                }
+                },
+                colors = elsewhereTopAppBarColors()
             )
         },
-        modifier = modifier.testTag("manual_character_editor")
+        modifier = modifier.testTag("manual_character_editor"),
+        containerColor = MaterialTheme.colorScheme.background
     ) { padding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(padding),
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
+            item { EditorSectionTitle("Identity & Opening") }
             item {
                 CharacterTextField("Name", fields.name, { fields = fields.copy(name = it) }, singleLine = true)
             }
@@ -387,6 +388,7 @@ private fun ManualCharacterEditor(
             item {
                 CharacterTextField("System Instructions", fields.systemInstructions, { fields = fields.copy(systemInstructions = it) })
             }
+            item { EditorSectionTitle("Voice & Personality") }
             item {
                 CharacterTextField("Personality", fields.personality, { fields = fields.copy(personality = it) })
             }
@@ -399,6 +401,7 @@ private fun ManualCharacterEditor(
             item {
                 CharacterTextField("Birthday", fields.birthday, { fields = fields.copy(birthday = it) }, singleLine = true)
             }
+            item { EditorSectionTitle("Story & Preferences") }
             item {
                 CharacterTextField("Story", fields.story, { fields = fields.copy(story = it) })
             }
@@ -417,6 +420,7 @@ private fun ManualCharacterEditor(
             item {
                 CharacterTextField("Appearance", fields.appearance, { fields = fields.copy(appearance = it) })
             }
+            item { EditorSectionTitle("Knowledge") }
             item {
                 CharacterTextField("Knowledge: Relationships", fields.knowledgeRelationships, { fields = fields.copy(knowledgeRelationships = it) })
             }
@@ -440,6 +444,18 @@ private fun CharacterTextField(
         label = { Text(label) },
         singleLine = singleLine,
         minLines = if (singleLine) 1 else 3,
+        shape = MaterialTheme.shapes.medium,
+        colors = elsewhereTextFieldColors(),
         modifier = Modifier.fillMaxWidth().testTag("character_field_$label")
+    )
+}
+
+@Composable
+private fun EditorSectionTitle(title: String) {
+    Text(
+        text = title,
+        style = MaterialTheme.typography.titleMedium,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(top = 8.dp, start = 4.dp)
     )
 }

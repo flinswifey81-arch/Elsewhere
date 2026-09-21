@@ -1,41 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
-<vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="108dp"
-    android:height="108dp"
-    android:viewportWidth="108"
-    android:viewportHeight="108">
-
-    <!-- Light spill (faint outer) -->
-    <path
-        android:fillColor="#FFF0B3"
-        android:fillAlpha="0.1"
-        android:pathData="M 38 70 L 70 70 L 86 92 L 22 92 Z" />
-
-    <!-- Light spill (brighter inner) -->
-    <path
-        android:fillColor="#FFF0B3"
-        android:fillAlpha="0.25"
-        android:pathData="M 40 70 L 68 70 L 76 82 L 32 82 Z" />
-
-    <!-- Door Frame (Outer trim) -->
-    <path
-        android:fillColor="#151B2E"
-        android:pathData="M 34 22 H 74 V 70 H 68 V 28 H 40 V 70 H 34 Z" />
-
-    <!-- The illuminated room inside (Doorway opening) -->
-    <path
-        android:fillColor="#FFF0B3"
-        android:pathData="M 40 28 H 68 V 70 H 40 Z" />
-
-    <!-- The Door (Swinging inward, hinged on the left) -->
-    <path
-        android:fillColor="#06080F"
-        android:pathData="M 40 28 L 54 34 L 54 64 L 40 70 Z" />
-
-    <!-- Door edge rim light (adds perspective depth) -->
-    <path
-        android:fillColor="#FFFFFF"
-        android:fillAlpha="0.8"
-        android:pathData="M 53 33.6 L 54 34 L 54 64 L 53 64.4 Z" />
-
-</vector>
+<inset xmlns:android="http://schemas.android.com/apk/res/android"
+    android:drawable="@drawable/elsewhere_icon"
+    android:inset="8%" />

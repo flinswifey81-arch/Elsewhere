@@ -6,6 +6,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Person
@@ -17,6 +18,9 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.domain.repository.ChatRepository
+import com.example.ui.components.ElsewhereEmptyState
+import com.example.ui.components.elsewhereCardBorder
+import com.example.ui.components.elsewhereTopAppBarColors
 import com.example.data.model.ChatSummary
 import com.example.data.model.ChatType
 import java.text.SimpleDateFormat
@@ -38,10 +42,7 @@ fun ChatsScreen(
         topBar = {
             CenterAlignedTopAppBar(
                 title = { Text("Chats", style = MaterialTheme.typography.titleLarge) },
-                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background,
-                    titleContentColor = MaterialTheme.colorScheme.onBackground
-                )
+                colors = elsewhereTopAppBarColors()
             )
         },
         floatingActionButton = {
@@ -82,19 +83,11 @@ fun ChatsScreen(
                 modifier = Modifier.fillMaxSize().padding(padding),
                 contentAlignment = Alignment.Center
             ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        "No chats yet.",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onBackground
+                    ElsewhereEmptyState(
+                        icon = Icons.AutoMirrored.Filled.Chat,
+                        title = "No chats yet.",
+                        message = "Tap the + button to start a conversation."
                     )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        "Tap the + button to start a conversation.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
             }
         } else {
             LazyColumn(
@@ -128,6 +121,7 @@ fun ChatCard(
             .testTag("chat_card_${chatSummary.chat.chatId}"),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        , border = elsewhereCardBorder()
     ) {
         Column(modifier = Modifier.padding(20.dp)) {
             Row(

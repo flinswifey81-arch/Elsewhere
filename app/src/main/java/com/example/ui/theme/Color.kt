@@ -2,37 +2,40 @@ package com.example.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-val BackgroundDark = Color(0xFF0C0A14) // very dark midnight plum/indigo
-val SurfaceDark = Color(0xFF161421) // charcoal plum
-val SurfaceVariantDark = Color(0xFF1F1C2E)
-val PrimaryTextDark = Color(0xFFF4EFEA) // warm ivory
-val SecondaryTextDark = Color(0xFF9BA0B5) // muted lavender-gray
-val PrimaryAccentDark = Color(0xFF8A88B5) // soft dusty lavender/violet
-val SecondaryAccentDark = Color(0xFFD4B88C) // muted warm gold/cream
-val OutlineDark = Color(0xFF2C2840)
+// Elsewhere brand palette. Plum is the world; Doorlight is the highlight.
+val NightInk = Color(0xFF150F20)
+val CharcoalPlum = Color(0xFF22162F)
+val DeepEggplant = Color(0xFF302039)
+val TwilightPlum = Color(0xFF3A294B)
+val DeepIris = Color(0xFF654576)
+val LavenderDusk = Color(0xFF845A88)
+val DustyMauve = Color(0xFFA17197)
+val MutedRose = Color(0xFFBB8CA4)
+val RoseBlush = Color(0xFFD6AAAA)
+val MoonCream = Color(0xFFF0DED8)
+val Doorlight = Color(0xFFF8CEA3)
+val Moonlight = Color(0xFFFEF7D0)
 
-// For light mode, we can provide a softer version, though the app leans dark.
-val BackgroundLight = Color(0xFFF7F5F0)
-val SurfaceLight = Color(0xFFEFECE8)
-val SurfaceVariantLight = Color(0xFFE4DFE8)
-val PrimaryTextLight = Color(0xFF2A2433)
-val SecondaryTextLight = Color(0xFF67627A)
-val PrimaryAccentLight = Color(0xFF7A6899)
-val SecondaryAccentLight = Color(0xFFA88D62)
-val OutlineLight = Color(0xFFD1CEDB)
+val Parchment = Color(0xFFF7F2E9)
+val WarmWhite = Color(0xFFFFFBF6)
+val LightSecondary = Color(0xFF76546F)
+val LightSecondaryContainer = Color(0xFFEAD4DE)
+val LightTertiary = Color(0xFF765B3E)
+val LightSurfaceVariant = Color(0xFFEDE3E8)
+val LightOutlineVariant = Color(0xFFD9CBD5)
 
-// Accent Presets (Dark)
-val AccentDustyLavenderDark = Color(0xFF8A88B5)
-val AccentMutedRoseDark = Color(0xFFB58896)
-val AccentSageDark = Color(0xFF88B59A)
-val AccentSoftBlueDark = Color(0xFF88A1B5)
-val AccentWarmGoldDark = Color(0xFFB5A688)
-val AccentPlumDark = Color(0xFF9E88B5)
+// Existing appearance choices remain available, but are softened to stay within
+// Elsewhere's warm, low-saturation atmosphere.
+val AccentDustyLavenderDark = RoseBlush
+val AccentMutedRoseDark = MutedRose
+val AccentSageDark = Color(0xFFB7B99F)
+val AccentSoftBlueDark = Color(0xFFA7AFC4)
+val AccentWarmGoldDark = Doorlight
+val AccentPlumDark = DustyMauve
 
-// Accent Presets (Light)
-val AccentDustyLavenderLight = Color(0xFF5E5C8B)
-val AccentMutedRoseLight = Color(0xFF8B5C6C)
-val AccentSageLight = Color(0xFF5C8B70)
-val AccentSoftBlueLight = Color(0xFF5C768B)
-val AccentWarmGoldLight = Color(0xFF8B7A5C)
-val AccentPlumLight = Color(0xFF735C8B)
+val AccentDustyLavenderLight = DeepIris
+val AccentMutedRoseLight = Color(0xFF84536A)
+val AccentSageLight = Color(0xFF65705B)
+val AccentSoftBlueLight = Color(0xFF59677E)
+val AccentWarmGoldLight = LightTertiary
+val AccentPlumLight = Color(0xFF704A72)

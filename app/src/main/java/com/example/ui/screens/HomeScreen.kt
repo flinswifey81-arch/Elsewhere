@@ -2,6 +2,7 @@ package com.example.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -17,9 +18,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
+import com.example.R
 import com.example.domain.repository.ChatRepository
+import com.example.ui.components.elsewhereCardBorder
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -46,7 +51,7 @@ fun HomeScreen(
                     .background(
                         brush = Brush.verticalGradient(
                             colors = listOf(
-                                MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
                                 Color.Transparent
                             )
                         )
@@ -55,25 +60,21 @@ fun HomeScreen(
 
             LazyColumn(
                 modifier = Modifier.fillMaxSize().padding(padding),
-                contentPadding = PaddingValues(top = 48.dp, start = 16.dp, end = 16.dp, bottom = 16.dp),
+                contentPadding = PaddingValues(top = 28.dp, start = 16.dp, end = 16.dp, bottom = 24.dp),
                 verticalArrangement = Arrangement.spacedBy(32.dp)
             ) {
                 // Header
                 item {
-                    Column(
-                        modifier = Modifier.padding(horizontal = 8.dp),
-                        horizontalAlignment = Alignment.Start
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                        border = elsewhereCardBorder()
                     ) {
-                        Text(
-                            text = "Elsewhere", 
-                            style = MaterialTheme.typography.displayLarge,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "Go somewhere else for a while.",
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        Image(
+                            painter = painterResource(R.drawable.elsewhere_logo),
+                            contentDescription = "Elsewhere — Private stories, your way.",
+                            modifier = Modifier.fillMaxWidth().heightIn(max = 168.dp),
+                            contentScale = ContentScale.FillWidth
                         )
                     }
                 }
@@ -94,7 +95,8 @@ fun HomeScreen(
                                 shape = RoundedCornerShape(16.dp),
                                 colors = CardDefaults.cardColors(
                                     containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-                                )
+                                ),
+                                border = elsewhereCardBorder()
                             ) {
                                 Box(
                                     modifier = Modifier.padding(32.dp).fillMaxWidth(),
@@ -183,7 +185,8 @@ fun ActionCard(
     Card(
         modifier = modifier.clickable(onClick = onClick),
         shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = elsewhereCardBorder()
     ) {
         if (horizontal) {
             Row(

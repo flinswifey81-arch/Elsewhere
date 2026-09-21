@@ -19,6 +19,9 @@ import androidx.compose.ui.unit.dp
 import com.example.domain.repository.CharacterRepository
 import com.example.domain.repository.ChatRepository
 import com.example.domain.repository.PersonaRepository
+import com.example.ui.components.elsewhereCardBorder
+import com.example.ui.components.elsewhereTextFieldColors
+import com.example.ui.components.elsewhereTopAppBarColors
 import com.example.data.model.CharacterEntity
 import com.example.data.model.PersonaEntity
 import kotlinx.coroutines.launch
@@ -144,9 +147,11 @@ fun CreateSoloChatScreen(
                     }) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
-                }
+                },
+                colors = elsewhereTopAppBarColors()
             )
-        }
+        },
+        containerColor = MaterialTheme.colorScheme.background
     ) { padding ->
         Column(modifier = Modifier.padding(padding).fillMaxSize().padding(16.dp)) {
             when (step) {
@@ -234,6 +239,8 @@ fun CreateSoloChatScreen(
                         value = chatName,
                         onValueChange = { chatName = it },
                         label = { Text("Chat Name") },
+                        shape = MaterialTheme.shapes.medium,
+                        colors = elsewhereTextFieldColors(),
                         modifier = Modifier.fillMaxWidth()
                     )
                     Spacer(modifier = Modifier.weight(1f))
@@ -271,7 +278,8 @@ fun SelectionCard(
         colors = CardDefaults.cardColors(
             containerColor = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
             contentColor = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
-        )
+        ),
+        border = elsewhereCardBorder()
     ) {
         Text(
             text = text,

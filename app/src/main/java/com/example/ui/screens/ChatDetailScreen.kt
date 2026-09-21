@@ -25,6 +25,8 @@ import com.example.data.model.MessageEntity
 import com.example.data.model.SpeakerType
 import com.example.di.AppContainer
 import com.example.ui.components.MarkdownText
+import com.example.ui.components.elsewhereTextFieldColors
+import com.example.ui.components.elsewhereTopAppBarColors
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -67,7 +69,15 @@ fun ChatDetailScreen(
     }
 
     Scaffold(
-        snackbarHost = { SnackbarHost(snackbarHostState) },
+        snackbarHost = {
+            SnackbarHost(snackbarHostState) { snackbarData ->
+                Snackbar(
+                    snackbarData = snackbarData,
+                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                )
+            }
+        },
         topBar = {
             TopAppBar(
                 title = {
@@ -93,9 +103,11 @@ fun ChatDetailScreen(
                             tint = MaterialTheme.colorScheme.error
                         )
                     }
-                }
+                },
+                colors = elsewhereTopAppBarColors()
             )
-        }
+        },
+        containerColor = MaterialTheme.colorScheme.background
     ) { padding ->
         Box(
             modifier = Modifier
@@ -180,32 +192,38 @@ fun ChatDetailScreen(
                                     }
                                 }
                             }
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(8.dp),
-                                verticalAlignment = Alignment.CenterVertically
+                            Surface(
+                                color = MaterialTheme.colorScheme.surface,
+                                tonalElevation = 3.dp,
+                                modifier = Modifier.fillMaxWidth()
                             ) {
-                                OutlinedTextField(
-                                    value = draft,
-                                    onValueChange = viewModel::onDraftChanged,
-                                    modifier = Modifier.weight(1f),
-                                    placeholder = { Text("Type a message...") },
-                                    maxLines = 5
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                if (state.isGenerating) {
-                                    IconButton(onClick = { viewModel.stopGeneration() }) {
-                                        Icon(Icons.Filled.Stop, contentDescription = "Stop Generation", tint = MaterialTheme.colorScheme.error)
-                                    }
-                                } else {
-                                    IconButton(
-                                        onClick = { 
-                                            if (draft.isNotBlank()) viewModel.sendMessage() 
-                                            else viewModel.retryGeneration()
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    OutlinedTextField(
+                                        value = draft,
+                                        onValueChange = viewModel::onDraftChanged,
+                                        modifier = Modifier.weight(1f),
+                                        placeholder = { Text("Type a message...") },
+                                        maxLines = 5,
+                                        shape = MaterialTheme.shapes.medium,
+                                        colors = elsewhereTextFieldColors()
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    if (state.isGenerating) {
+                                        IconButton(onClick = { viewModel.stopGeneration() }) {
+                                            Icon(Icons.Filled.Stop, contentDescription = "Stop Generation", tint = MaterialTheme.colorScheme.error)
                                         }
-                                    ) {
-                                        Icon(Icons.Filled.Send, contentDescription = "Send", tint = if (draft.isNotBlank() || state.messages.lastOrNull()?.speakerType == SpeakerType.PERSONA) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f))
+                                    } else {
+                                        IconButton(
+                                            onClick = {
+                                                if (draft.isNotBlank()) viewModel.sendMessage()
+                                                else viewModel.retryGeneration()
+                                            }
+                                        ) {
+                                            Icon(Icons.Filled.Send, contentDescription = "Send", tint = if (draft.isNotBlank() || state.messages.lastOrNull()?.speakerType == SpeakerType.PERSONA) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f))
+                                        }
                                     }
                                 }
                             }
@@ -339,6 +357,7 @@ fun MessageBubble(
             Surface(
                 shape = shape,
                 color = color,
+                tonalElevation = 1.dp,
                 modifier = Modifier.fillMaxWidth(0.88f)
             ) {
                 if (isEditing) {
@@ -346,7 +365,9 @@ fun MessageBubble(
                         OutlinedTextField(
                             value = editContent,
                             onValueChange = { editContent = it },
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = MaterialTheme.shapes.medium,
+                            colors = elsewhereTextFieldColors()
                         )
                         Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
                             TextButton(onClick = { isEditing = false; editContent = message.content }) {
@@ -508,6 +529,7 @@ fun StreamingBubble(content: String, characterName: String) {
         Surface(
             shape = RoundedCornerShape(16.dp, 16.dp, 16.dp, 0.dp),
             color = MaterialTheme.colorScheme.surfaceVariant,
+            tonalElevation = 1.dp,
             modifier = Modifier.fillMaxWidth(0.88f)
         ) {
             MarkdownText(
