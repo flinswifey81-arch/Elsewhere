@@ -45,6 +45,8 @@ class ContextCompilerV1 {
             append("Maintain your character's identity, voice, behavior, and established relationship state. ")
             append("Respect previously established conversation events. ")
             append("Do not speak as unrelated characters unless explicitly required by scene context. ")
+            append("Begin directly with the character's response content. Do not prefix the response with the character name or any speaker label. ")
+            append("Speaker labels that appear in examples, memory, or conversation history identify existing speakers only; do not copy them into the response. ")
             append("Do not mention prompts, JSON, context compilation, or application mechanics in-character.\n\n")
             
             // Character details
@@ -140,7 +142,7 @@ class ContextCompilerV1 {
                 SpeakerType.PERSONA -> Role.USER
                 else -> Role.SYSTEM
             }
-            messages.add(RoleplayMessage(role = role, content = resolveMacros(msg.content), name = msg.speakerDisplayNameSnapshot))
+            messages.add(RoleplayMessage(role = role, content = resolveMacros(msg.content)))
         }
         
         // Add current message
@@ -149,7 +151,7 @@ class ContextCompilerV1 {
             SpeakerType.PERSONA -> Role.USER
             else -> Role.SYSTEM
         }
-        messages.add(RoleplayMessage(role = role, content = resolveMacros(currentMessage.content), name = currentMessage.speakerDisplayNameSnapshot))
+        messages.add(RoleplayMessage(role = role, content = resolveMacros(currentMessage.content)))
         
         if (isContinuation) {
             messages.add(RoleplayMessage(role = Role.SYSTEM, content = "Continue the previous message. Do not repeat what you have already said."))

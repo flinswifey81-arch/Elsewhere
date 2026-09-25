@@ -16,10 +16,11 @@ import com.example.domain.repository.ApiKeyRepository
 import kotlinx.coroutines.launch
 import com.example.domain.repository.ThemeMode
 import com.example.ui.components.elsewhereCardBorder
+import com.example.ui.components.elsewhereDestructiveButtonColors
 import com.example.ui.components.elsewhereTextFieldColors
 import com.example.ui.components.elsewhereTopAppBarColors
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     settingsRepository: ApiKeyRepository,
@@ -64,7 +65,7 @@ fun SettingsScreen(
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
                     border = elsewhereCardBorder()
                 ) {
                     Column(modifier = Modifier.padding(20.dp)) {
@@ -96,25 +97,8 @@ fun SettingsScreen(
                             },
                             valueRange = 12f..24f,
                             steps = 11,
-                            modifier = Modifier.padding(top = 8.dp, bottom = 16.dp)
-                        )
-
-                        Text("Accent Color", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        val presets = listOf("Dusty Lavender", "Muted Rose", "Sage", "Soft Blue", "Warm Gold", "Plum")
-                        FlowRow(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
                             modifier = Modifier.padding(top = 8.dp)
-                        ) {
-                            presets.forEach { preset ->
-                                FilterChip(
-                                    selected = appearanceSettings.accentPreset == preset,
-                                    onClick = {
-                                        coroutineScope.launch { appearanceRepository.updateAccentPreset(preset) }
-                                    },
-                                    label = { Text(preset) }
-                                )
-                            }
-                        }
+                        )
                     }
                 }
             }
@@ -130,7 +114,7 @@ fun SettingsScreen(
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
                     border = elsewhereCardBorder()
                 ) {
                     Column(modifier = Modifier.padding(20.dp)) {
@@ -149,10 +133,7 @@ fun SettingsScreen(
                                         }
                                     },
                                     shape = RoundedCornerShape(12.dp),
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = MaterialTheme.colorScheme.errorContainer,
-                                        contentColor = MaterialTheme.colorScheme.onErrorContainer
-                                    )
+                                    colors = elsewhereDestructiveButtonColors()
                                 ) {
                                     Text("Remove Key")
                                 }
@@ -202,7 +183,7 @@ fun SettingsScreen(
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
                     border = elsewhereCardBorder()
                 ) {
                     Column(modifier = Modifier.padding(20.dp)) {

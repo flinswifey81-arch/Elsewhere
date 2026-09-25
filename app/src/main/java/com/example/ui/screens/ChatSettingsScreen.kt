@@ -337,7 +337,7 @@ fun ModelItem(model: OpenRouterModel, isSelected: Boolean, onClick: () -> Unit) 
             .fillMaxWidth()
             .clickable(onClick = onClick),
         colors = CardDefaults.cardColors(
-            containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant
+            containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainer
         ),
         border = elsewhereCardBorder()
     ) {

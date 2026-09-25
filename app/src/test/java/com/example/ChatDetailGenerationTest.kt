@@ -9,6 +9,7 @@ import com.example.data.model.ChatSettingsEntity
 import com.example.data.model.ConversationSummaryEntity
 import com.example.data.model.GenerationMetadataEntity
 import com.example.data.model.MemoryCategory
+import com.example.data.model.MessageEntity
 import com.example.data.model.PersonaEntity
 import com.example.data.model.ProviderRoutingMode
 import com.example.data.model.RoleplayMemoryEntity
@@ -272,6 +273,133 @@ class ChatDetailGenerationTest {
             assertTrue(request.none { it.role == Role.ASSISTANT })
             assertEquals("Please answer again.", request.last { it.role == Role.USER }.content)
         }
+    }
+
+    @Test
+    fun normalAndRepeatedRegenerationUseTheSameCleanMultiTurnRequest() = runBlocking {
+        val provider = SequentialResponseProvider(
+            listOf(
+                "Rowan: First current reply.",
+                "Rowan: Second current reply.",
+                "Rowan: Third current reply."
+            )
+        )
+        val harness = createHarness(provider, ResponseLengthProfile.NORMAL)
+        harness.messageRepository.insertMessage(
+            MessageEntity(
+                messageId = "earlier-persona",
+                chatId = harness.chatId,
+                speakerType = SpeakerType.PERSONA,
+                speakerId = "persona-1",
+                speakerDisplayNameSnapshot = "Mara",
+                content = "Did you find the observatory?",
+                orderIndex = 1L
+            )
+        )
+        harness.messageRepository.insertMessage(
+            MessageEntity(
+                messageId = "earlier-character",
+                chatId = harness.chatId,
+                speakerType = SpeakerType.CHARACTER,
+                speakerId = "character-1",
+                speakerDisplayNameSnapshot = "Rowan",
+                content = "Rowan: I found it beyond the cedar path.",
+                orderIndex = 2L
+            )
+        )
+        withTimeout(5_000) {
+            harness.viewModel.uiState.first {
+                it is ChatUiState.Success && it.messages.size == 2
+            }
+        }
+
+        harness.viewModel.onDraftChanged("Take me there before sunrise.")
+        harness.viewModel.sendMessage()
+        val firstCurrentReply = withTimeout(5_000) {
+            harness.messageRepository.getMessagesForChat(harness.chatId).first { messages ->
+                messages.any { it.content == "Rowan: First current reply." }
+            }
+        }.single { it.content == "Rowan: First current reply." }
+
+        harness.viewModel.regenerateMessage(firstCurrentReply.messageId)
+        val secondCurrentReply = withTimeout(5_000) {
+            harness.messageRepository.getMessagesForChat(harness.chatId).first { messages ->
+                messages.any { it.isPrimaryVariant && it.content == "Rowan: Second current reply." }
+            }
+        }.single { it.isPrimaryVariant && it.content == "Rowan: Second current reply." }
+        withTimeout(5_000) {
+            harness.viewModel.uiState.first { state ->
+                state is ChatUiState.Success &&
+                    state.messages.any { it.isPrimaryVariant && it.messageId == secondCurrentReply.messageId }
+            }
+        }
+
+        harness.viewModel.regenerateMessage(secondCurrentReply.messageId)
+        withTimeout(5_000) {
+            harness.messageRepository.getMessagesForChat(harness.chatId).first { messages ->
+                messages.any { it.isPrimaryVariant && it.content == "Rowan: Third current reply." }
+            }
+        }
+
+        assertEquals(3, provider.requests.size)
+        val expectedRoles = listOf(Role.SYSTEM, Role.USER, Role.ASSISTANT, Role.USER)
+        val expectedConversation = listOf(
+            "Did you find the observatory?",
+            "Rowan: I found it beyond the cedar path.",
+            "Take me there before sunrise."
+        )
+        provider.requests.forEach { request ->
+            assertEquals(expectedRoles, request.map { it.role })
+            assertEquals(expectedConversation, request.drop(1).map { it.content })
+            assertTrue(request.all { it.name == null })
+            assertTrue(request.first().content.contains("Do not prefix the response with the character name or any speaker label."))
+        }
+        assertEquals(provider.requests[0], provider.requests[1])
+        assertEquals(provider.requests[1], provider.requests[2])
+    }
+
+    @Test
+    fun persistedPreferEndpointIsConsumedWithFallbackEnabled() = runBlocking {
+        val provider = RecordingStreamingProvider()
+        val harness = createHarness(
+            provider = provider,
+            responseLengthProfile = ResponseLengthProfile.NORMAL,
+            routingMode = ProviderRoutingMode.PREFER,
+            providerEndpoint = "provider-a"
+        )
+
+        harness.viewModel.onDraftChanged("Use the preferred provider.")
+        harness.viewModel.sendMessage()
+
+        withTimeout(5_000) {
+            harness.viewModel.uiState.first { provider.requests.size == 1 }
+        }
+
+        assertEquals(ProviderRoutingMode.PREFER, provider.options.routing.mode)
+        assertEquals(listOf("provider-a"), provider.options.routing.preferredEndpoints)
+        assertTrue(provider.options.routing.allowFallback)
+    }
+
+    @Test
+    fun persistedLockEndpointIsConsumedWithFallbackDisabled() = runBlocking {
+        val provider = RecordingStreamingProvider()
+        val harness = createHarness(
+            provider = provider,
+            responseLengthProfile = ResponseLengthProfile.NORMAL,
+            routingMode = ProviderRoutingMode.LOCK,
+            providerEndpoint = "provider-b"
+        )
+
+        harness.viewModel.onDraftChanged("Use only the locked provider.")
+        harness.viewModel.sendMessage()
+
+        withTimeout(5_000) {
+            harness.viewModel.uiState.first { provider.requests.size == 1 }
+        }
+
+        assertEquals(ProviderRoutingMode.LOCK, provider.options.routing.mode)
+        assertEquals(listOf("provider-b"), provider.options.routing.preferredEndpoints)
+        assertFalse(provider.options.routing.allowFallback)
     }
 
     @Test

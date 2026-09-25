@@ -149,6 +149,57 @@ class Stage3SoloRoleplayTests {
     }
 
     @Test
+    fun `solo request keeps authored labels as content but does not add structured speaker names`() {
+        val character = createChar(id = "c1", name = "Miki").copy(
+            examplesJson = """{"dialogue_examples":["Shai: Stay?\\nMiki: Always."]}"""
+        )
+        val persona = createPersona(id = "p1", name = "Shai")
+        val history = listOf(
+            MessageEntity(
+                chatId = "chat",
+                speakerType = SpeakerType.PERSONA,
+                speakerId = "p1",
+                speakerDisplayNameSnapshot = "Shai",
+                content = "You came back.",
+                orderIndex = 1L
+            ),
+            MessageEntity(
+                chatId = "chat",
+                speakerType = SpeakerType.CHARACTER,
+                speakerId = "c1",
+                speakerDisplayNameSnapshot = "Miki",
+                content = "Miki: I promised I would.",
+                orderIndex = 2L
+            )
+        )
+
+        val messages = ContextCompilerV1().compileSoloContext(
+            character = character,
+            persona = persona,
+            chatHistory = history,
+            currentMessage = MessageEntity(
+                chatId = "chat",
+                speakerType = SpeakerType.PERSONA,
+                speakerId = "p1",
+                speakerDisplayNameSnapshot = "Shai",
+                content = "Then sit with me.",
+                orderIndex = 3L
+            ),
+            responseProfile = ResponseLengthProfile.NORMAL,
+            customMin = null,
+            customTargetMax = null,
+            customHardMax = null,
+            rollingSummary = "Shai: She waited by the door.\nMiki: Miki: He returned at dawn."
+        )
+
+        assertTrue(messages.first().content.contains("Miki: Always."))
+        assertTrue(messages.first().content.contains("Miki: Miki: He returned at dawn."))
+        assertTrue(messages.first().content.contains("Do not prefix the response with the character name or any speaker label."))
+        assertEquals("Miki: I promised I would.", messages[2].content)
+        assertTrue(messages.all { it.name == null })
+    }
+
+    @Test
     fun `ContextCompiler includes durable memory and rolling summary before recent verbatim history`() {
         val messages = ContextCompilerV1().compileSoloContext(
             character = createChar("c1", "Char"),

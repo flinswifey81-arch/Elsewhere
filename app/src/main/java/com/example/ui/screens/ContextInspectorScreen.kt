@@ -14,6 +14,7 @@ import com.example.di.AppContainer
 import com.example.domain.compiler.ContextCompilerV1
 import com.example.domain.provider.RoleplayMessage
 import com.example.ui.components.elsewhereCardBorder
+import com.example.ui.components.elsewhereDestructiveButtonColors
 import com.example.ui.components.elsewhereTopAppBarColors
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -133,12 +134,15 @@ fun ContextInspectorScreen(
                                             modifier = Modifier.weight(1f),
                                             style = MaterialTheme.typography.bodySmall
                                         )
-                                        TextButton(onClick = {
-                                            scope.launch {
-                                                appContainer.memoryRepository.deleteMemory(memory)
-                                                refreshVersion++
-                                            }
-                                        }) { Text("Delete") }
+                                        TextButton(
+                                            onClick = {
+                                                scope.launch {
+                                                    appContainer.memoryRepository.deleteMemory(memory)
+                                                    refreshVersion++
+                                                }
+                                            },
+                                            colors = elsewhereDestructiveButtonColors()
+                                        ) { Text("Delete") }
                                     }
                                 }
                             }

@@ -76,7 +76,7 @@ class OpenRouterModelProvider(
                     .scheme("https")
                     .host("openrouter.ai")
                     .addPathSegments("api/v1/models")
-                    .addPathSegment(modelId)
+                    .addPathSegments(modelId)
                     .addPathSegment("endpoints")
                     .build()
             )

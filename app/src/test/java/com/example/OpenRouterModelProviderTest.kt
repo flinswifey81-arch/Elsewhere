@@ -90,14 +90,14 @@ class OpenRouterModelProviderTest {
     }
 
     @Test
-    fun endpointDiscoveryUsesSelectedModelIdAsOneEncodedPathSegment() = runBlocking {
+    fun endpointDiscoveryUsesDocumentedAuthorAndSlugPathSegments() = runBlocking {
         val interceptor = RecordingInterceptor()
 
         provider(interceptor).getEndpoints("openai/gpt-4.1-mini")
 
         assertEquals("Bearer mock-openrouter-key", interceptor.request.header("Authorization"))
         assertEquals(
-            "/api/v1/models/openai%2Fgpt-4.1-mini/endpoints",
+            "/api/v1/models/openai/gpt-4.1-mini/endpoints",
             interceptor.request.url.encodedPath
         )
     }
@@ -134,6 +134,26 @@ class OpenRouterModelProviderTest {
         )
 
         assertFalse(body.containsKey("provider"))
+    }
+
+    @Test
+    fun messageNameIsOnlySerializedAsStructuredMetadata() = runBlocking {
+        val body = routingRequestBody(
+            routing = ModelRouting.fromSettings(ProviderRoutingMode.AUTO, null),
+            messages = listOf(
+                RoleplayMessage(Role.ASSISTANT, "Miki: I came back.", name = "Miki"),
+                RoleplayMessage(Role.USER, "Stay with me.")
+            )
+        )
+        val messages = body["messages"] as List<*>
+        val assistant = messages[0] as Map<*, *>
+        val user = messages[1] as Map<*, *>
+
+        assertEquals("Miki: I came back.", assistant["content"])
+        assertEquals("Miki", assistant["name"])
+        assertEquals(setOf("role", "content", "name"), assistant.keys)
+        assertEquals("Stay with me.", user["content"])
+        assertFalse(user.containsKey("name"))
     }
 
     @Test
@@ -201,7 +221,10 @@ class OpenRouterModelProviderTest {
         assertTrue(events.none { it is StreamEvent.Error })
     }
 
-    private suspend fun routingRequestBody(routing: ModelRouting): Map<*, *> {
+    private suspend fun routingRequestBody(
+        routing: ModelRouting,
+        messages: List<RoleplayMessage> = listOf(RoleplayMessage(Role.USER, "Hello"))
+    ): Map<*, *> {
         val interceptor = RoutingStreamingInterceptor()
         val provider = OpenRouterModelProvider(
             client = OkHttpClient.Builder().addInterceptor(interceptor).build(),
@@ -211,7 +234,7 @@ class OpenRouterModelProviderTest {
 
         withTimeout(5_000) {
             provider.streamResponse(
-                messages = listOf(RoleplayMessage(Role.USER, "Hello")),
+                messages = messages,
                 options = GenerationOptions(modelId = "mock/model", routing = routing)
             ).toList()
         }

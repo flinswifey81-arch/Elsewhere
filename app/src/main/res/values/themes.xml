@@ -6,5 +6,8 @@
         <item name="android:navigationBarColor">@color/elsewhere_night_ink</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:windowActionModeOverlay">true</item>
+        <item name="android:windowSplashScreenBackground">@color/elsewhere_night_ink</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/ic_launcher_foreground</item>
+        <item name="android:windowSplashScreenIconBackgroundColor">@color/elsewhere_night_ink</item>
     </style>
 </resources>

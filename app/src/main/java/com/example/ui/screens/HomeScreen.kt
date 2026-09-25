@@ -67,7 +67,7 @@ fun HomeScreen(
                 item {
                     Card(
                         modifier = Modifier.fillMaxWidth(),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest),
                         border = elsewhereCardBorder()
                     ) {
                         Image(
@@ -85,7 +85,7 @@ fun HomeScreen(
                         Text(
                             text = "Continue",
                             style = MaterialTheme.typography.titleMedium,
-                            color = MaterialTheme.colorScheme.onBackground,
+                            color = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.padding(bottom = 12.dp, start = 8.dp)
                         )
                         
@@ -94,7 +94,7 @@ fun HomeScreen(
                                 modifier = Modifier.fillMaxWidth(),
                                 shape = RoundedCornerShape(16.dp),
                                 colors = CardDefaults.cardColors(
-                                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
                                 ),
                                 border = elsewhereCardBorder()
                             ) {
@@ -128,7 +128,7 @@ fun HomeScreen(
                         Text(
                             text = "Start Something New",
                             style = MaterialTheme.typography.titleMedium,
-                            color = MaterialTheme.colorScheme.onBackground,
+                            color = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.padding(bottom = 12.dp, start = 8.dp)
                         )
                         Row(
@@ -157,7 +157,7 @@ fun HomeScreen(
                         Text(
                             text = "Library",
                             style = MaterialTheme.typography.titleMedium,
-                            color = MaterialTheme.colorScheme.onBackground,
+                            color = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.padding(bottom = 12.dp, start = 8.dp)
                         )
                         ActionCard(
@@ -185,7 +185,7 @@ fun ActionCard(
     Card(
         modifier = modifier.clickable(onClick = onClick),
         shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
         border = elsewhereCardBorder()
     ) {
         if (horizontal) {

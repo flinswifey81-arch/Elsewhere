@@ -52,9 +52,8 @@ class SettingsFunctionalTest {
         composeTestRule.onNodeWithText("Theme Mode").assertExists()
         composeTestRule.onNodeWithText("Dark").performClick()
         
-        // Appearance: Accent Preset
-        composeTestRule.onNodeWithText("Accent Color").assertExists()
-        composeTestRule.onNodeWithText("Sage").performClick()
+        // Legacy accent controls are intentionally hidden in the Regular build.
+        composeTestRule.onNodeWithText("Accent Color").assertDoesNotExist()
         
         composeTestRule.waitForIdle()
         
@@ -70,6 +69,8 @@ class SettingsFunctionalTest {
         
         // Test API Key save
         composeTestRule.onNodeWithTag("api_key_input").performTextInput("sk-test-key")
+        composeTestRule.onNodeWithTag("settings_list")
+            .performScrollToNode(hasTestTag("save_key_button"))
         composeTestRule.onNodeWithTag("save_key_button").performClick()
         
         composeTestRule.waitForIdle()

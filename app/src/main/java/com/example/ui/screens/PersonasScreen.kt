@@ -266,7 +266,7 @@ fun PersonasScreen(
                         onClick = { onPersonaSelected(persona.personaId) },
                         shape = RoundedCornerShape(16.dp),
                         colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surface
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
                         ),
                         border = elsewhereCardBorder()
                     ) {
@@ -378,7 +378,7 @@ private fun ManualPersonaEditor(
     ) { padding ->
         Card(
             modifier = Modifier.fillMaxSize().padding(padding).padding(16.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
             border = elsewhereCardBorder()
         ) {
             Column(

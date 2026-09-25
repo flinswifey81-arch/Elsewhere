@@ -17,12 +17,28 @@ val Doorlight = Color(0xFFF8CEA3)
 val Moonlight = Color(0xFFFEF7D0)
 
 val Parchment = Color(0xFFF7F2E9)
-val WarmWhite = Color(0xFFFFFBF6)
+val WarmWhite = Color(0xFFFFF9F3)
+val LightSurfaceBright = Color(0xFFFFFDF9)
+val LightSurfaceContainerLowest = Color(0xFFFFFDF9)
+val LightSurfaceContainerLow = Color(0xFFF8EEE9)
+val LightSurfaceContainer = Color(0xFFF2E6E8)
+val LightSurfaceContainerHigh = Color(0xFFEBDCE4)
+val LightSurfaceContainerHighest = Color(0xFFE3D2DE)
+val LightSurfaceDim = Color(0xFFE8DDE0)
 val LightSecondary = Color(0xFF76546F)
-val LightSecondaryContainer = Color(0xFFEAD4DE)
-val LightTertiary = Color(0xFF765B3E)
-val LightSurfaceVariant = Color(0xFFEDE3E8)
-val LightOutlineVariant = Color(0xFFD9CBD5)
+val LightSecondaryContainer = Color(0xFFE8D3DE)
+val LightTertiary = Color(0xFF91652F)
+val LightTertiaryContainer = Color(0xFFF2DFC5)
+val LightSurfaceVariant = LightSurfaceContainer
+val LightOutline = Color(0xFF9A718E)
+val LightOutlineVariant = Color(0xFFDAC7D4)
+
+// Branded destructive colors: clearly distinct without introducing a bright red.
+val DestructiveWine = Color(0xFF6E2F3E)
+val DestructiveBlush = Color(0xFFFFF3EE)
+val DestructiveContainerLight = Color(0xFFF0D8DE)
+val DestructiveOnContainerLight = Color(0xFF54202D)
+val DestructiveLight = Color(0xFFF2B7C3)
 
 // Existing appearance choices remain available, but are softened to stay within
 // Elsewhere's warm, low-saturation atmosphere.

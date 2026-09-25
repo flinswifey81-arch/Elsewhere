@@ -120,7 +120,7 @@ fun ChatCard(
             .clickable(onClick = onClick)
             .testTag("chat_card_${chatSummary.chat.chatId}"),
         shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)
         , border = elsewhereCardBorder()
     ) {
         Column(modifier = Modifier.padding(20.dp)) {

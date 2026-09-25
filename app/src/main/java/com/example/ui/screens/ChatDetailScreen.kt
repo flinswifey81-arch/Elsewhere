@@ -25,6 +25,7 @@ import com.example.data.model.MessageEntity
 import com.example.data.model.SpeakerType
 import com.example.di.AppContainer
 import com.example.ui.components.MarkdownText
+import com.example.ui.components.elsewhereDestructiveButtonColors
 import com.example.ui.components.elsewhereTextFieldColors
 import com.example.ui.components.elsewhereTopAppBarColors
 import java.text.SimpleDateFormat
@@ -270,9 +271,10 @@ fun ChatDetailScreen(
                     onClick = {
                         showDeleteChatConfirm = false
                         viewModel.deleteChat()
-                    }
+                    },
+                    colors = elsewhereDestructiveButtonColors()
                 ) {
-                    Text("Delete", color = MaterialTheme.colorScheme.error)
+                    Text("Delete")
                 }
             },
             dismissButton = {
@@ -450,10 +452,13 @@ fun MessageBubble(
             title = { Text("Delete Message") },
             text = { Text("Are you sure you want to delete this message?") },
             confirmButton = {
-                TextButton(onClick = {
-                    onDelete(message.messageId)
-                    showDeleteConfirm = false
-                }) {
+                TextButton(
+                    onClick = {
+                        onDelete(message.messageId)
+                        showDeleteConfirm = false
+                    },
+                    colors = elsewhereDestructiveButtonColors()
+                ) {
                     Text("Delete")
                 }
             },
