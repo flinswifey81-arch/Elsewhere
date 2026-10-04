@@ -8,6 +8,7 @@ import com.example.domain.repository.CharacterRepository
 import com.example.domain.repository.ChatRepository
 import com.example.domain.repository.MessageRepository
 import com.example.domain.repository.MemoryRepository
+import com.example.domain.repository.LorebookRepository
 import com.example.domain.repository.PersonaRepository
 import com.example.domain.repository.SettingsRepository
 import com.squareup.moshi.Moshi
@@ -22,6 +23,7 @@ interface AppContainer {
     val chatRepository: ChatRepository
     val messageRepository: MessageRepository
     val memoryRepository: MemoryRepository
+    val lorebookRepository: LorebookRepository? get() = null
 }
 
 class DefaultAppContainer(private val context: Context) : AppContainer {
@@ -39,7 +41,7 @@ class DefaultAppContainer(private val context: Context) : AppContainer {
 
     private val database: AppDatabase by lazy {
         Room.databaseBuilder(context, AppDatabase::class.java, "elsewhere_database")
-            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3)
+            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4)
             .build()
     }
 
@@ -73,5 +75,9 @@ class DefaultAppContainer(private val context: Context) : AppContainer {
 
     override val memoryRepository: MemoryRepository by lazy {
         MemoryRepository(database.memoryDao())
+    }
+
+    override val lorebookRepository: LorebookRepository by lazy {
+        LorebookRepository(database.lorebookDao(), moshi)
     }
 }

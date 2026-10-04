@@ -11,6 +11,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.example.di.AppContainer
+import com.example.data.model.ChatType
 import com.example.domain.compiler.ContextCompilerV1
 import com.example.domain.provider.RoleplayMessage
 import com.example.ui.components.elsewhereCardBorder
@@ -23,6 +24,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun ContextInspectorScreen(
     chatId: String,
+    characterId: String? = null,
     appContainer: AppContainer,
     onNavigateBack: () -> Unit
 ) {
@@ -34,6 +36,7 @@ fun ContextInspectorScreen(
     var durableMemoryCount by remember { mutableStateOf(0) }
     var durableMemories by remember { mutableStateOf<List<com.example.data.model.RoleplayMemoryEntity>>(emptyList()) }
     var hasRollingSummary by remember { mutableStateOf(false) }
+    var inspectedCharacterName by remember { mutableStateOf<String?>(null) }
 
     var isLoading by remember { mutableStateOf(true) }
     var refreshVersion by remember { mutableStateOf(0) }
@@ -43,7 +46,10 @@ fun ContextInspectorScreen(
             val summary = appContainer.chatRepository.getChatSummaryById(chatId)
             val settings = appContainer.chatRepository.getChatSettings(chatId)
                 ?: com.example.data.model.ChatSettingsEntity(chatId = chatId)
-            val character = summary?.characters?.firstOrNull()?.let { appContainer.characterRepository.getCharacterById(it.characterId) }
+            val selectedCharacter = summary?.characters
+                ?.firstOrNull { it.characterId == characterId }
+                ?: summary?.characters?.firstOrNull()
+            val character = selectedCharacter?.let { appContainer.characterRepository.getCharacterById(it.characterId) }
             val persona = summary?.personas?.firstOrNull()?.let { appContainer.personaRepository.getPersonaById(it.personaId) }
             val history = appContainer.messageRepository.getMessagesForChat(chatId).first()
                 .filter { it.isPrimaryVariant }
@@ -56,25 +62,58 @@ fun ContextInspectorScreen(
             durableMemoryCount = memories.size
             durableMemories = memories
             hasRollingSummary = !rollingSummary.isNullOrBlank()
+            inspectedCharacterName = character?.displayName
 
             if (character != null && persona != null && history.isNotEmpty()) {
                 val currentMessage = history.last()
                 val priorHistory = history.dropLast(1)
+                val activeLore = appContainer.lorebookRepository?.resolveActiveLore(
+                    chatId = chatId,
+                    chatHistory = priorHistory,
+                    currentMessage = currentMessage,
+                    recentMessageLimit = com.example.domain.memory.AutomaticMemoryManager.DEFAULT_RECENT_MESSAGE_LIMIT
+                ).orEmpty()
                 val trimmed = priorHistory.takeLast(com.example.domain.memory.AutomaticMemoryManager.DEFAULT_RECENT_MESSAGE_LIMIT)
                 totalMessages = history.size
                 includedMessages = trimmed.size + 1
-                compiledMessages = ContextCompilerV1().compileSoloContext(
-                    character = character,
-                    persona = persona,
-                    chatHistory = priorHistory,
-                    currentMessage = currentMessage,
-                    responseProfile = settings.responseLengthProfile,
-                    customMin = settings.customMin,
-                    customTargetMax = settings.customTargetMax,
-                    customHardMax = settings.customHardMax,
-                    durableMemories = memories,
-                    rollingSummary = rollingSummary
-                )
+                val compiler = ContextCompilerV1()
+                compiledMessages = if (summary.chat.chatType == ChatType.GROUP) {
+                    val activeIds = appContainer.chatRepository.getParticipantsForChat(chatId).first()
+                        .filter { it.isActive }
+                        .sortedBy { it.sortPosition }
+                        .map { it.characterId }
+                    val activeNames = activeIds.mapNotNull { id ->
+                        appContainer.characterRepository.getCharacterById(id)?.displayName
+                    }
+                    compiler.compileGroupCharacterContext(
+                        character = character,
+                        persona = persona,
+                        activeCharacterNames = activeNames,
+                        chatHistory = priorHistory,
+                        currentMessage = currentMessage,
+                        responseProfile = settings.responseLengthProfile,
+                        customMin = settings.customMin,
+                        customTargetMax = settings.customTargetMax,
+                        customHardMax = settings.customHardMax,
+                        durableMemories = memories,
+                        rollingSummary = rollingSummary,
+                        activeLore = activeLore
+                    )
+                } else {
+                    compiler.compileSoloContext(
+                        character = character,
+                        persona = persona,
+                        chatHistory = priorHistory,
+                        currentMessage = currentMessage,
+                        responseProfile = settings.responseLengthProfile,
+                        customMin = settings.customMin,
+                        customTargetMax = settings.customTargetMax,
+                        customHardMax = settings.customHardMax,
+                        durableMemories = memories,
+                        rollingSummary = rollingSummary,
+                        activeLore = activeLore
+                    )
+                }
             }
         } finally {
             isLoading = false
@@ -114,6 +153,7 @@ fun ContextInspectorScreen(
                             Spacer(Modifier.height(8.dp))
                             Text("Model: $modelId", style = MaterialTheme.typography.bodySmall)
                             Text("Routing Mode: $routingMode", style = MaterialTheme.typography.bodySmall)
+                            inspectedCharacterName?.let { Text("Character: $it", style = MaterialTheme.typography.bodySmall) }
                             Text("Total Messages: $totalMessages", style = MaterialTheme.typography.bodySmall)
                             Text("Included in Context: $includedMessages", style = MaterialTheme.typography.bodySmall)
                             Text("Omitted from Context: ${totalMessages - includedMessages}", style = MaterialTheme.typography.bodySmall)

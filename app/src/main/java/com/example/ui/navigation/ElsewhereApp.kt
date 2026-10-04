@@ -1,7 +1,7 @@
 package com.example.ui.navigation
 
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.consumeWindowInsets
+import android.net.Uri
+import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.*
@@ -26,6 +26,7 @@ sealed class Screen(val route: String, val title: String, val icon: androidx.com
     object Home : Screen("home", "Home", Icons.Filled.Home)
     object Characters : Screen("characters", "Characters", Icons.Filled.Person)
     object Personas : Screen("personas", "Personas", Icons.Filled.Face)
+    object Lorebooks : Screen("lorebooks", "Lorebooks", Icons.Filled.MenuBook)
     object Chats : Screen("chats", "Chats", Icons.AutoMirrored.Filled.Chat)
     object Settings : Screen("settings", "Settings", Icons.Filled.Settings)
 }
@@ -34,6 +35,7 @@ val bottomNavItems = listOf(
     Screen.Home,
     Screen.Characters,
     Screen.Personas,
+    Screen.Lorebooks,
     Screen.Chats,
     Screen.Settings
 )
@@ -108,6 +110,16 @@ fun ElsewhereApp(container: AppContainer) {
                     onPersonaSelected = { /* TODO */ }
                 ) 
             }
+            composable(Screen.Lorebooks.route) {
+                val repository = container.lorebookRepository
+                if (repository == null) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) {
+                        Text("Lorebooks are unavailable in this environment.")
+                    }
+                } else {
+                    LorebooksScreen(repository = repository)
+                }
+            }
             composable(Screen.Chats.route) { 
                 ChatsScreen(
                     chatRepository = container.chatRepository,
@@ -176,17 +188,47 @@ fun ElsewhereApp(container: AppContainer) {
                             launchSingleTop = true
                         }
                     },
-                    onNavigateToInspector = { navController.navigate("context_inspector/$chatId") },
+                    onNavigateToInspector = { characterId ->
+                        navController.navigate("context_inspector/$chatId?characterId=${Uri.encode(characterId.orEmpty())}")
+                    },
+                    onNavigateToLorebooks = { navController.navigate("chat_lorebooks/$chatId") },
                     onNavigateToSettings = { navController.navigate("chat_settings/$chatId") },
                 )
             }
             composable(
-                "context_inspector/{chatId}",
+                "chat_lorebooks/{chatId}",
                 arguments = listOf(navArgument("chatId") { type = NavType.StringType })
             ) { backStackEntry ->
                 val chatId = backStackEntry.arguments?.getString("chatId") ?: ""
+                val repository = container.lorebookRepository
+                if (repository == null) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) {
+                        Text("Lorebooks are unavailable in this environment.")
+                    }
+                } else {
+                    ChatLorebooksScreen(
+                        chatId = chatId,
+                        repository = repository,
+                        onNavigateBack = { navController.popBackStack() }
+                    )
+                }
+            }
+            composable(
+                "context_inspector/{chatId}?characterId={characterId}",
+                arguments = listOf(
+                    navArgument("chatId") { type = NavType.StringType },
+                    navArgument("characterId") {
+                        type = NavType.StringType
+                        nullable = true
+                        defaultValue = null
+                    }
+                )
+            ) { backStackEntry ->
+                val chatId = backStackEntry.arguments?.getString("chatId") ?: ""
+                val characterId = backStackEntry.arguments?.getString("characterId")?.takeIf(String::isNotBlank)
                 ContextInspectorScreen(
                     chatId = chatId,
+                    characterId = characterId,
                     appContainer = container,
                     onNavigateBack = { navController.popBackStack() }
                 )

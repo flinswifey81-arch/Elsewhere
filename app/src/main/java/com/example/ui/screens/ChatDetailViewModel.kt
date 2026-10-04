@@ -21,6 +21,7 @@ import com.example.domain.repository.CharacterRepository
 import com.example.domain.repository.ChatRepository
 import com.example.domain.repository.MessageRepository
 import com.example.domain.repository.MemoryRepository
+import com.example.domain.repository.LorebookRepository
 import com.example.domain.repository.PersonaRepository
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -76,7 +77,8 @@ class ChatDetailViewModel(
     private val characterRepository: CharacterRepository,
     private val personaRepository: PersonaRepository,
     private val modelProvider: ModelProvider,
-    private val memoryRepository: MemoryRepository
+    private val memoryRepository: MemoryRepository,
+    private val lorebookRepository: LorebookRepository? = null
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow<ChatUiState>(ChatUiState.Loading)
@@ -117,6 +119,17 @@ class ChatDetailViewModel(
             }
             currentChatSettings = settings
             currentDraft.value = settings.draftMessage ?: ""
+
+            // Establish the mutable success state before any child collectors can emit. Room flows
+            // may deliver their first value immediately; dropping that value while still Loading
+            // leaves Group participants empty until the database happens to change again.
+            _uiState.value = ChatUiState.Success(
+                chatSummary = summary,
+                messages = emptyList(),
+                chatSettings = settings,
+                historyLoaded = false,
+                selectedGroupCharacterId = selectedGroupCharacterId
+            )
 
             launch {
                 chatRepository.getChatSettingsFlow(chatId).filterNotNull().collect { latestSettings ->
@@ -343,13 +356,10 @@ class ChatDetailViewModel(
     ) {
         val summary = chatSummary ?: return
         val settings = currentChatSettings ?: return
-        val character = characterId
-            ?.let { requestedId -> summary.characters.firstOrNull { it.characterId == requestedId } }
-            ?: summary.characters.firstOrNull()
-            ?: return
+        val resolvedCharacterId = characterId ?: summary.characters.firstOrNull()?.characterId ?: return
         val persona = summary.personas.firstOrNull() ?: return
-        
-        val fullCharacter = characterRepository.getCharacterById(character.characterId) ?: return
+
+        val fullCharacter = characterRepository.getCharacterById(resolvedCharacterId) ?: return
         val fullPersona = personaRepository.getPersonaById(persona.personaId) ?: return
         if (settings.providerRoutingMode == com.example.data.model.ProviderRoutingMode.LOCK && settings.providerEndpoint.isNullOrBlank()) {
             updateSuccessState {
@@ -357,8 +367,14 @@ class ChatDetailViewModel(
             }
             return
         }
-        val durableMemories = memoryRepository.getMemoriesOnce(chatId, character.characterId)
+        val durableMemories = memoryRepository.getMemoriesOnce(chatId, fullCharacter.characterId)
         val rollingSummary = memoryRepository.getSummaryOnce(chatId)?.summary
+        val activeLore = lorebookRepository?.resolveActiveLore(
+            chatId = chatId,
+            chatHistory = history,
+            currentMessage = currentMessage,
+            recentMessageLimit = AutomaticMemoryManager.DEFAULT_RECENT_MESSAGE_LIMIT
+        ).orEmpty()
 
         val contextMessages = if (summary.chat.chatType == ChatType.GROUP) {
             val state = _uiState.value as? ChatUiState.Success
@@ -379,7 +395,8 @@ class ChatDetailViewModel(
                 customTargetMax = settings.customTargetMax,
                 customHardMax = settings.customHardMax,
                 durableMemories = durableMemories,
-                rollingSummary = rollingSummary
+                rollingSummary = rollingSummary,
+                activeLore = activeLore
             )
         } else {
             compiler.compileSoloContext(
@@ -393,7 +410,8 @@ class ChatDetailViewModel(
                 customTargetMax = settings.customTargetMax,
                 customHardMax = settings.customHardMax,
                 durableMemories = durableMemories,
-                rollingSummary = rollingSummary
+                rollingSummary = rollingSummary,
+                activeLore = activeLore
             )
         }
 
@@ -415,7 +433,7 @@ class ChatDetailViewModel(
                 streamingContent = "",
                 partialStopped = false,
                 generationError = null,
-                generationCharacterId = character.characterId
+                generationCharacterId = fullCharacter.characterId
             )
         }
 
@@ -460,12 +478,15 @@ class ChatDetailViewModel(
                     )
                 }
             } else if (generatedContent.isBlank()) {
+                val finishReason = currentMetadata?.finishReason?.takeIf(String::isNotBlank)
                 updateSuccessState {
                     it.copy(
                         isGenerating = false,
                         streamingContent = null,
                         generationCharacterId = null,
-                        generationError = "The provider returned no response. You can retry this turn."
+                        generationError = finishReason?.let {
+                            "The provider returned no visible response (finish reason: $it). You can retry this turn."
+                        } ?: "The provider returned no response. You can retry this turn."
                     )
                 }
             } else {
@@ -735,12 +756,14 @@ class ChatDetailViewModel(
         private val characterRepository: CharacterRepository,
         private val personaRepository: PersonaRepository,
         private val modelProvider: ModelProvider,
-        private val memoryRepository: MemoryRepository
+        private val memoryRepository: MemoryRepository,
+        private val lorebookRepository: LorebookRepository? = null
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
             return ChatDetailViewModel(
-                chatId, chatRepository, messageRepository, characterRepository, personaRepository, modelProvider, memoryRepository
+                chatId, chatRepository, messageRepository, characterRepository, personaRepository, modelProvider, memoryRepository,
+                lorebookRepository
             ) as T
         }
     }

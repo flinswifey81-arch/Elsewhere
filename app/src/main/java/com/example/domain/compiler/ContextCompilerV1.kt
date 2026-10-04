@@ -10,6 +10,7 @@ import com.example.data.model.RoleplayMemoryEntity
 import com.example.data.model.SpeakerType
 import com.example.domain.provider.Role
 import com.example.domain.provider.RoleplayMessage
+import com.example.domain.lore.ActiveLoreEntry
 
 class ContextCompilerV1 {
 
@@ -26,7 +27,8 @@ class ContextCompilerV1 {
         durableMemories: List<RoleplayMemoryEntity> = emptyList(),
         rollingSummary: String? = null,
         recentMessageLimit: Int = 24,
-        groupParticipantNames: List<String> = emptyList()
+        groupParticipantNames: List<String> = emptyList(),
+        activeLore: List<ActiveLoreEntry> = emptyList()
     ): List<RoleplayMessage> {
         val messages = mutableListOf<RoleplayMessage>()
         fun resolveMacros(source: String): String = IdentityMacroResolver.resolve(
@@ -92,6 +94,16 @@ class ContextCompilerV1 {
                 append('\n')
             }
             // Intentionally excluding authorNotesJson
+
+            if (activeLore.isNotEmpty()) {
+                append("--- ACTIVE WORLD LORE ---\n")
+                append("Treat these as world and scene facts for consistency. Do not assume your Character knows hidden information unless their established perspective supports that knowledge.\n")
+                activeLore.forEach { lore ->
+                    append("[${lore.title}]\n")
+                    append(lore.currentContent)
+                    append("\n\n")
+                }
+            }
 
             // Persona details
             append("--- USER PERSONA: ${persona.displayName} ---\n")
@@ -196,22 +208,33 @@ class ContextCompilerV1 {
         customHardMax: Int?,
         durableMemories: List<RoleplayMemoryEntity> = emptyList(),
         rollingSummary: String? = null,
-        recentMessageLimit: Int = 24
-    ): List<RoleplayMessage> = compileSoloContext(
-        isContinuation = isContinuation,
-        character = character,
-        persona = persona,
-        chatHistory = chatHistory,
-        currentMessage = currentMessage,
-        responseProfile = responseProfile,
-        customMin = customMin,
-        customTargetMax = customTargetMax,
-        customHardMax = customHardMax,
-        durableMemories = durableMemories,
-        rollingSummary = rollingSummary,
-        recentMessageLimit = recentMessageLimit,
-        groupParticipantNames = activeCharacterNames
-    )
+        recentMessageLimit: Int = 24,
+        activeLore: List<ActiveLoreEntry> = emptyList()
+    ): List<RoleplayMessage> {
+        val messages = compileSoloContext(
+            isContinuation = isContinuation,
+            character = character,
+            persona = persona,
+            chatHistory = chatHistory,
+            currentMessage = currentMessage,
+            responseProfile = responseProfile,
+            customMin = customMin,
+            customTargetMax = customTargetMax,
+            customHardMax = customHardMax,
+            durableMemories = durableMemories,
+            rollingSummary = rollingSummary,
+            recentMessageLimit = recentMessageLimit,
+            groupParticipantNames = activeCharacterNames,
+            activeLore = activeLore
+        )
+        return messages + RoleplayMessage(
+            role = Role.USER,
+            content = "[DIRECTOR TURN CONTROL — application instruction, not Persona dialogue or action]\n" +
+                "The preceding messages are shared scene history. " +
+                "Generate the next roleplay message now as ${character.displayName}. " +
+                "Respond only as ${character.displayName}; do not continue or portray another Character's response."
+        )
+    }
 
     private fun StringBuilder.appendManualField(label: String, value: String) {
         if (value.isNotEmpty()) append("$label:\n$value\n")

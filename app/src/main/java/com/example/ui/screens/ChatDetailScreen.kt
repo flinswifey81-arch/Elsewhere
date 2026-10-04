@@ -17,6 +17,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Settings
@@ -52,7 +53,8 @@ fun ChatDetailScreen(
     onNavigateBack: () -> Unit,
     onChatDeleted: () -> Unit,
     onNavigateToSettings: () -> Unit = {},
-    onNavigateToInspector: () -> Unit = {},
+    onNavigateToInspector: (String?) -> Unit = {},
+    onNavigateToLorebooks: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val viewModel: ChatDetailViewModel = viewModel(
@@ -63,7 +65,8 @@ fun ChatDetailScreen(
             characterRepository = appContainer.characterRepository,
             personaRepository = appContainer.personaRepository,
             modelProvider = appContainer.modelProvider,
-            memoryRepository = appContainer.memoryRepository
+            memoryRepository = appContainer.memoryRepository,
+            lorebookRepository = appContainer.lorebookRepository
         )
     )
 
@@ -102,8 +105,13 @@ fun ChatDetailScreen(
                     }
                 },
                 actions = {
-                    IconButton(onClick = onNavigateToInspector) {
+                    IconButton(onClick = {
+                        onNavigateToInspector((uiState as? ChatUiState.Success)?.selectedGroupCharacterId)
+                    }) {
                         Icon(Icons.Filled.Info, contentDescription = "Inspector")
+                    }
+                    IconButton(onClick = onNavigateToLorebooks) {
+                        Icon(Icons.Filled.MenuBook, contentDescription = "Chat Lorebooks")
                     }
                     IconButton(onClick = onNavigateToSettings) {
                         Icon(Icons.Filled.Settings, contentDescription = "Settings")

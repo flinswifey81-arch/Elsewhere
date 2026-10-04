@@ -183,7 +183,21 @@ class OpenRouterModelProvider(
                 }
                 try {
                     val parsed = moshi.adapter(Map::class.java).fromJson(data)
-                    
+
+                    parsed?.get("error")?.let { rawError ->
+                        val error = rawError as? Map<*, *>
+                        val message = error?.get("message")?.toString()
+                            ?.takeIf(String::isNotBlank)
+                            ?: rawError.toString().takeIf(String::isNotBlank)
+                            ?: "Unknown OpenRouter streaming error"
+                        val code = error?.get("code")?.toString()?.takeIf(String::isNotBlank)
+                        val prefix = code?.let { "OpenRouter error $it" } ?: "OpenRouter error"
+                        trySend(StreamEvent.Error(IOException("$prefix: $message")))
+                        eventSource.cancel()
+                        close()
+                        return
+                    }
+
                     val choices = parsed?.get("choices") as? List<*>
                     val firstChoice = choices?.firstOrNull() as? Map<*, *>
                     val delta = firstChoice?.get("delta") as? Map<*, *>

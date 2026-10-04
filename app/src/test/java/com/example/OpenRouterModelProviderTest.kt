@@ -1,7 +1,13 @@
 package com.example
 
 import com.example.data.remote.OpenRouterModelProvider
+import com.example.data.model.CharacterEntity
+import com.example.data.model.MessageEntity
+import com.example.data.model.PersonaEntity
 import com.example.data.model.ProviderRoutingMode
+import com.example.data.model.ResponseLengthProfile
+import com.example.data.model.SpeakerType
+import com.example.domain.compiler.ContextCompilerV1
 import com.example.domain.provider.GenerationOptions
 import com.example.domain.provider.ModelRouting
 import com.example.domain.provider.Role
@@ -157,6 +163,92 @@ class OpenRouterModelProviderTest {
     }
 
     @Test
+    fun groupTurnControlIsSerializedAsFinalUserMessageWithoutChangingSharedHistory() = runBlocking {
+        val zsadist = CharacterEntity(
+            characterId = "zsadist",
+            displayName = "Zsadist",
+            characterName = "Zsadist",
+            aliases = emptyList(),
+            importSchemaVersion = 1,
+            identityJson = null,
+            appearanceJson = null,
+            personalityJson = null,
+            voiceJson = null,
+            behaviorJson = null,
+            backstoryJson = null,
+            knowledgeJson = "{\"private\":\"Z_ONLY_KNOWLEDGE\"}",
+            worldContextJson = null,
+            writingRulesJson = null,
+            examplesJson = null,
+            authorNotesJson = null,
+            extensionFieldsJson = null
+        )
+        val persona = PersonaEntity(
+            personaId = "persona",
+            displayName = "Persona",
+            personaName = "Persona",
+            aliases = emptyList(),
+            importSchemaVersion = 1,
+            identityJson = null,
+            appearanceJson = null,
+            personalityJson = null,
+            roleplayProfileJson = null,
+            backgroundJson = null,
+            worldContextJson = null,
+            privateNotesJson = null,
+            extensionFieldsJson = null
+        )
+        val compiled = ContextCompilerV1().compileGroupCharacterContext(
+            character = zsadist,
+            persona = persona,
+            activeCharacterNames = listOf("Vishous", "Zsadist"),
+            chatHistory = listOf(
+                MessageEntity(
+                    chatId = "group",
+                    speakerType = SpeakerType.PERSONA,
+                    speakerId = "persona",
+                    speakerDisplayNameSnapshot = "Persona",
+                    content = "Who found the map?",
+                    orderIndex = 1L
+                )
+            ),
+            currentMessage = MessageEntity(
+                chatId = "group",
+                speakerType = SpeakerType.CHARACTER,
+                speakerId = "vishous",
+                speakerDisplayNameSnapshot = "Vishous",
+                content = "I did.",
+                orderIndex = 2L
+            ),
+            responseProfile = ResponseLengthProfile.NORMAL,
+            customMin = null,
+            customTargetMax = null,
+            customHardMax = null
+        )
+        val body = routingRequestBody(
+            routing = ModelRouting.fromSettings(ProviderRoutingMode.AUTO, null),
+            messages = compiled
+        )
+        val messages = body["messages"] as List<*>
+
+        assertEquals(
+            listOf("system", "user", "assistant", "user"),
+            messages.map { (it as Map<*, *>)["role"] }
+        )
+        assertEquals("Persona: Who found the map?", (messages[1] as Map<*, *>)["content"])
+        assertEquals("Vishous: I did.", (messages[2] as Map<*, *>)["content"])
+        val system = (messages.first() as Map<*, *>)["content"].toString()
+        assertTrue(system.contains("--- CHARACTER: Zsadist ---"))
+        assertTrue(system.contains("Z_ONLY_KNOWLEDGE"))
+        assertFalse(system.contains("--- CHARACTER: Vishous ---"))
+        val director = (messages.last() as Map<*, *>)["content"].toString()
+        assertTrue(director.startsWith("[DIRECTOR TURN CONTROL"))
+        assertTrue(director.contains("not Persona dialogue or action"))
+        assertTrue(director.contains("Respond only as Zsadist"))
+        assertFalse(director.contains("Z_ONLY_KNOWLEDGE"))
+    }
+
+    @Test
     fun preferRoutingSendsSelectedProviderTagWithFallbackEnabled() = runBlocking {
         val body = routingRequestBody(
             ModelRouting.fromSettings(ProviderRoutingMode.PREFER, "provider-a")
@@ -219,6 +311,32 @@ class OpenRouterModelProviderTest {
         assertEquals(34, metadata?.completionTokens)
         assertEquals("mock/resolved", metadata?.resolvedModelId)
         assertTrue(events.none { it is StreamEvent.Error })
+    }
+
+    @Test
+    fun streamedOpenRouterErrorIsNotReportedAsAnEmptySuccessfulResponse() = runBlocking {
+        val sse = """
+            data: {"error":{"message":"Provider rejected the message sequence","code":400}}
+
+            data: [DONE]
+
+        """.trimIndent()
+        val provider = OpenRouterModelProvider(
+            client = OkHttpClient.Builder().addInterceptor(StreamingInterceptor(sse)).build(),
+            moshi = Moshi.Builder().build(),
+            apiKeyProvider = { "mock-openrouter-key" }
+        )
+
+        val events = withTimeout(5_000) {
+            provider.streamResponse(
+                messages = listOf(RoleplayMessage(Role.USER, "Hello")),
+                options = GenerationOptions(modelId = "mock/requested")
+            ).toList()
+        }
+
+        val error = events.filterIsInstance<StreamEvent.Error>().single()
+        assertTrue(error.exception.message.orEmpty().contains("Provider rejected the message sequence"))
+        assertTrue(events.none { it is StreamEvent.Done })
     }
 
     private suspend fun routingRequestBody(

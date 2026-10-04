@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "type": "elsewhere_lorebook",
+  "id": "evermere-primer",
+  "name": "Evermere Primer",
+  "description": "Places and customs used in the Evermere story.",
+  "enabled": true,
+  "scope": {
+    "type": "story",
+    "story_id": null
+  },
+  "entries": [
+    {
+      "id": "evermere-moonwell",
+      "title": "The Moonwell",
+      "enabled": true,
+      "activation": {
+        "mode": "keyword",
+        "keys": ["Moonwell", "moon well"],
+        "secondary_keys": ["silver water", "well beneath the abbey"],
+        "match": "any",
+        "case_sensitive": false,
+        "whole_words": true
+      },
+      "canon": {
+        "content": "The Moonwell lies beneath the ruined abbey. Its water reflects possible futures but never guarantees them.",
+        "locked": true
+      },
+      "current": {
+        "content": "The Moonwell lies beneath the ruined abbey. Since the autumn eclipse, its water has shown only the northern road."
+      },
+      "injection": {
+        "priority": 75,
+        "position": "lore"
+      },
+      "tags": ["location", "magic"],
+      "notes": "Private author note: reveal the cause of the eclipse later.",
+      "created_at": "2026-10-04T00:00:00Z",
+      "updated_at": "2026-10-04T00:00:00Z"
+    },
+    {
+      "id": "evermere-guest-right",
+      "title": "Evermere Guest Right",
+      "enabled": true,
+      "activation": {
+        "mode": "always",
+        "keys": [],
+        "secondary_keys": [],
+        "match": "any",
+        "case_sensitive": false,
+        "whole_words": true
+      },
+      "canon": {
+        "content": "A host who offers bread and salt owes a guest safety until the next sunrise.",
+        "locked": true
+      },
+      "current": {
+        "content": "A host who offers bread and salt owes a guest safety until the next sunrise. Breaking guest right causes lasting public disgrace."
+      },
+      "injection": {
+        "priority": 50,
+        "position": "lore"
+      },
+      "tags": ["custom", "law"],
+      "notes": "Private planning note; never model context.",
+      "created_at": "2026-10-04T00:00:00Z",
+      "updated_at": "2026-10-04T00:00:00Z"
+    }
+  ]
+}

@@ -60,6 +60,12 @@ interface ChatDao {
     @Query("DELETE FROM chat_persona_participants WHERE chatId = :chatId")
     suspend fun deletePersonaParticipantsForChat(chatId: String)
 
+    @Query("DELETE FROM chat_lorebook_entry_overlays WHERE chatId = :chatId")
+    suspend fun deleteLorebookOverlaysForChat(chatId: String)
+
+    @Query("DELETE FROM chat_lorebook_attachments WHERE chatId = :chatId")
+    suspend fun deleteLorebookAttachmentsForChat(chatId: String)
+
     @Query("DELETE FROM chats WHERE chatId = :chatId")
     suspend fun deleteChatById(chatId: String)
 
@@ -71,6 +77,8 @@ interface ChatDao {
         deleteMemoriesForChat(chatId)
         deleteRelationshipsForChat(chatId)
         deleteSettingsForChat(chatId)
+        deleteLorebookOverlaysForChat(chatId)
+        deleteLorebookAttachmentsForChat(chatId)
         deleteCharacterParticipantsForChat(chatId)
         deletePersonaParticipantsForChat(chatId)
         deleteChatById(chatId)

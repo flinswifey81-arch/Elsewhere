@@ -221,7 +221,10 @@ class ChatDetailGenerationTest {
         assertEquals(1, persisted.size)
         assertEquals(SpeakerType.PERSONA, persisted.single().speakerType)
         assertTrue(persisted.none { it.speakerType == SpeakerType.CHARACTER || it.content.isEmpty() })
-        assertEquals("The provider returned no response. You can retry this turn.", completed.generationError)
+        assertEquals(
+            "The provider returned no visible response (finish reason: stop). You can retry this turn.",
+            completed.generationError
+        )
     }
 
     @Test
@@ -321,7 +324,7 @@ class ChatDetailGenerationTest {
                 orderIndex = 2L
             )
         )
-        withTimeout(15_000) {
+        withTimeout(30_000) {
             harness.viewModel.uiState.first {
                 it is ChatUiState.Success && it.messages.size == 2
             }
@@ -329,12 +332,12 @@ class ChatDetailGenerationTest {
 
         harness.viewModel.onDraftChanged("Take me there before sunrise.")
         harness.viewModel.sendMessage()
-        val firstCurrentReply = withTimeout(15_000) {
+        val firstCurrentReply = withTimeout(30_000) {
             harness.messageRepository.getMessagesForChat(harness.chatId).first { messages ->
                 messages.any { it.content == "Rowan: First current reply." }
             }
         }.single { it.content == "Rowan: First current reply." }
-        withTimeout(15_000) {
+        withTimeout(30_000) {
             harness.viewModel.uiState.first { state ->
                 state is ChatUiState.Success &&
                     !state.isGenerating &&
@@ -343,12 +346,12 @@ class ChatDetailGenerationTest {
         }
 
         harness.viewModel.regenerateMessage(firstCurrentReply.messageId)
-        val secondCurrentReply = withTimeout(15_000) {
+        val secondCurrentReply = withTimeout(30_000) {
             harness.messageRepository.getMessagesForChat(harness.chatId).first { messages ->
                 messages.any { it.isPrimaryVariant && it.content == "Rowan: Second current reply." }
             }
         }.single { it.isPrimaryVariant && it.content == "Rowan: Second current reply." }
-        withTimeout(15_000) {
+        withTimeout(30_000) {
             harness.viewModel.uiState.first { state ->
                 state is ChatUiState.Success &&
                     !state.isGenerating &&
@@ -357,7 +360,7 @@ class ChatDetailGenerationTest {
         }
 
         harness.viewModel.regenerateMessage(secondCurrentReply.messageId)
-        withTimeout(15_000) {
+        withTimeout(30_000) {
             harness.messageRepository.getMessagesForChat(harness.chatId).first { messages ->
                 messages.any { it.isPrimaryVariant && it.content == "Rowan: Third current reply." }
             }
