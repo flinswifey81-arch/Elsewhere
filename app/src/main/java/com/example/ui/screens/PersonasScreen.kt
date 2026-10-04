@@ -10,6 +10,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Face
 import androidx.compose.material3.*
@@ -23,8 +24,10 @@ import androidx.compose.ui.unit.dp
 import com.example.data.model.ManualPersonaFields
 import com.example.data.model.PersonaEntity
 import com.example.domain.repository.PersonaRepository
+import com.example.domain.repository.ProfileDeletionResult
 import com.example.ui.components.ElsewhereEmptyState
 import com.example.ui.components.elsewhereCardBorder
+import com.example.ui.components.elsewhereDestructiveButtonColors
 import com.example.ui.components.elsewhereTextFieldColors
 import com.example.ui.components.elsewhereTopAppBarColors
 import kotlinx.coroutines.launch
@@ -46,6 +49,10 @@ fun PersonasScreen(
     var importError by remember { mutableStateOf<String?>(null) }
     var showEditor by remember { mutableStateOf(false) }
     var editingPersona by remember { mutableStateOf<PersonaEntity?>(null) }
+    var personaPendingDeletion by remember { mutableStateOf<PersonaEntity?>(null) }
+    var deletionInProgress by remember { mutableStateOf(false) }
+    var deletionNotice by remember { mutableStateOf<String?>(null) }
+    var deletionSucceeded by remember { mutableStateOf(false) }
     
     val launcher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
@@ -148,6 +155,81 @@ fun PersonasScreen(
                 TextButton(onClick = { importError = null }) {
                     Text("OK")
                 }
+            }
+        )
+    }
+
+    personaPendingDeletion?.let { persona ->
+        AlertDialog(
+            onDismissRequest = {
+                if (!deletionInProgress) personaPendingDeletion = null
+            },
+            title = { Text("Delete Persona Permanently?") },
+            text = {
+                Text(
+                    "Permanently delete \"${persona.displayName}\"? This cannot be undone. " +
+                        "The Persona will be removed from every chat, but all historical messages " +
+                        "and speaker names will remain. A chat with no remaining Persona will become history-only."
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        deletionInProgress = true
+                        coroutineScope.launch {
+                            deletionNotice = try {
+                                when (val result = repository.deletePersonaPermanently(persona.personaId)) {
+                                    is ProfileDeletionResult.Deleted -> {
+                                        deletionSucceeded = true
+                                        if (result.affectedChatCount == 0) {
+                                            null
+                                        } else {
+                                            val chatLabel = if (result.affectedChatCount == 1) "chat" else "chats"
+                                            val historyOnly = if (result.historyOnlyChatCount == 0) "" else {
+                                                " ${result.historyOnlyChatCount} now ${if (result.historyOnlyChatCount == 1) "opens" else "open"} as history-only."
+                                            }
+                                            "Deleted \"${persona.displayName}\" and removed the Persona from " +
+                                                "${result.affectedChatCount} $chatLabel. All historical messages were kept.$historyOnly"
+                                        }
+                                    }
+                                    ProfileDeletionResult.NotFound -> {
+                                        deletionSucceeded = false
+                                        "This Persona no longer exists."
+                                    }
+                                }
+                            } catch (_: Exception) {
+                                deletionSucceeded = false
+                                "The Persona could not be deleted. No chat or message was changed."
+                            }
+                            deletionInProgress = false
+                            personaPendingDeletion = null
+                        }
+                    },
+                    enabled = !deletionInProgress,
+                    colors = elsewhereDestructiveButtonColors(),
+                    modifier = Modifier.testTag("confirm_delete_persona")
+                ) {
+                    Text(if (deletionInProgress) "Deleting…" else "Delete Permanently")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { personaPendingDeletion = null },
+                    enabled = !deletionInProgress
+                ) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    deletionNotice?.let { notice ->
+        AlertDialog(
+            onDismissRequest = { deletionNotice = null },
+            title = { Text(if (deletionSucceeded) "Persona Deleted" else "Persona Not Deleted") },
+            text = { Text(notice) },
+            confirmButton = {
+                TextButton(onClick = { deletionNotice = null }) { Text("OK") }
             }
         )
     }
@@ -332,6 +414,16 @@ fun PersonasScreen(
                                 modifier = Modifier.testTag("edit_persona_${persona.personaId}")
                             ) {
                                 Icon(Icons.Default.Edit, contentDescription = "Edit ${persona.displayName}")
+                            }
+                            IconButton(
+                                onClick = { personaPendingDeletion = persona },
+                                modifier = Modifier.testTag("delete_persona_${persona.personaId}")
+                            ) {
+                                Icon(
+                                    Icons.Default.Delete,
+                                    contentDescription = "Delete ${persona.displayName}",
+                                    tint = MaterialTheme.colorScheme.error
+                                )
                             }
                         }
                     }

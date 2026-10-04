@@ -81,6 +81,32 @@ class ChatRepository(
 
     fun getChatSettingsFlow(chatId: String): Flow<ChatSettingsEntity?> =
         chatDao.getChatSettingsFlow(chatId)
+
+    fun getParticipantsForChat(chatId: String): Flow<List<ChatParticipantEntity>> =
+        chatDao.getParticipantsForChat(chatId)
+
+    fun getPersonaParticipantsForChat(chatId: String): Flow<List<ChatPersonaParticipantEntity>> =
+        chatDao.getPersonaParticipantsForChat(chatId)
+
+    suspend fun setGroupCharacterActive(chatId: String, characterId: String, isActive: Boolean) =
+        withContext(Dispatchers.IO) {
+            chatDao.setChatParticipantActive(chatId, characterId, isActive)
+        }
+
+    suspend fun removeGroupCharacter(chatId: String, characterId: String) =
+        withContext(Dispatchers.IO) {
+            chatDao.deleteChatParticipant(chatId, characterId)
+        }
+
+    suspend fun addGroupCharacter(chatId: String, characterId: String) =
+        withContext(Dispatchers.IO) {
+            chatDao.addChatParticipantAtEnd(chatId, characterId)
+        }
+
+    suspend fun moveGroupCharacter(chatId: String, characterId: String, direction: Int) =
+        withContext(Dispatchers.IO) {
+            chatDao.moveChatParticipant(chatId, characterId, direction)
+        }
     
     suspend fun updateChat(chat: ChatEntity) = withContext(Dispatchers.IO) {
         chatDao.updateChat(chat)

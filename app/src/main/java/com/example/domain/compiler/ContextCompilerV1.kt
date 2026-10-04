@@ -25,7 +25,8 @@ class ContextCompilerV1 {
         customHardMax: Int?,
         durableMemories: List<RoleplayMemoryEntity> = emptyList(),
         rollingSummary: String? = null,
-        recentMessageLimit: Int = 24
+        recentMessageLimit: Int = 24,
+        groupParticipantNames: List<String> = emptyList()
     ): List<RoleplayMessage> {
         val messages = mutableListOf<RoleplayMessage>()
         fun resolveMacros(source: String): String = IdentityMacroResolver.resolve(
@@ -38,6 +39,12 @@ class ContextCompilerV1 {
         val coreInstruction = buildString {
             append("You are participating in a roleplay.\n")
             append("Portray the character described below. ")
+            if (groupParticipantNames.isNotEmpty()) {
+                append("This is a group roleplay. Respond only as ${character.displayName}. ")
+                append("Never write dialogue, actions, thoughts, feelings, or decisions for any other AI Character. ")
+                append("Messages from other Characters are shared scene history, not permission to portray them. ")
+                append("Active AI Characters: ${groupParticipantNames.joinToString(", ")}. ")
+            }
             append("Treat the user as the Persona described below. ")
             append("Never write dialogue for the user/Persona. ")
             append("Never dictate the user/Persona's actions, thoughts, feelings, decisions, or internal state. ")
@@ -142,7 +149,13 @@ class ContextCompilerV1 {
                 SpeakerType.PERSONA -> Role.USER
                 else -> Role.SYSTEM
             }
-            messages.add(RoleplayMessage(role = role, content = resolveMacros(msg.content)))
+            val content = resolveMacros(msg.content)
+            messages.add(
+                RoleplayMessage(
+                    role = role,
+                    content = if (groupParticipantNames.isEmpty()) content else "${msg.speakerDisplayNameSnapshot}: $content"
+                )
+            )
         }
         
         // Add current message
@@ -151,7 +164,17 @@ class ContextCompilerV1 {
             SpeakerType.PERSONA -> Role.USER
             else -> Role.SYSTEM
         }
-        messages.add(RoleplayMessage(role = role, content = resolveMacros(currentMessage.content)))
+        val currentContent = resolveMacros(currentMessage.content)
+        messages.add(
+            RoleplayMessage(
+                role = role,
+                content = if (groupParticipantNames.isEmpty()) {
+                    currentContent
+                } else {
+                    "${currentMessage.speakerDisplayNameSnapshot}: $currentContent"
+                }
+            )
+        )
         
         if (isContinuation) {
             messages.add(RoleplayMessage(role = Role.SYSTEM, content = "Continue the previous message. Do not repeat what you have already said."))
@@ -159,6 +182,36 @@ class ContextCompilerV1 {
         
         return messages
     }
+
+    fun compileGroupCharacterContext(
+        isContinuation: Boolean = false,
+        character: CharacterEntity,
+        persona: PersonaEntity,
+        activeCharacterNames: List<String>,
+        chatHistory: List<MessageEntity>,
+        currentMessage: MessageEntity,
+        responseProfile: ResponseLengthProfile,
+        customMin: Int?,
+        customTargetMax: Int?,
+        customHardMax: Int?,
+        durableMemories: List<RoleplayMemoryEntity> = emptyList(),
+        rollingSummary: String? = null,
+        recentMessageLimit: Int = 24
+    ): List<RoleplayMessage> = compileSoloContext(
+        isContinuation = isContinuation,
+        character = character,
+        persona = persona,
+        chatHistory = chatHistory,
+        currentMessage = currentMessage,
+        responseProfile = responseProfile,
+        customMin = customMin,
+        customTargetMax = customTargetMax,
+        customHardMax = customHardMax,
+        durableMemories = durableMemories,
+        rollingSummary = rollingSummary,
+        recentMessageLimit = recentMessageLimit,
+        groupParticipantNames = activeCharacterNames
+    )
 
     private fun StringBuilder.appendManualField(label: String, value: String) {
         if (value.isNotEmpty()) append("$label:\n$value\n")

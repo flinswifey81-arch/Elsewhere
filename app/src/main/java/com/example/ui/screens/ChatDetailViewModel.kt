@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.data.model.CharacterEntity
 import com.example.data.model.ChatSettingsEntity
 import com.example.data.model.ChatSummary
+import com.example.data.model.ChatType
 import com.example.data.model.GenerationMetadataEntity
 import com.example.data.model.MessageEntity
 import com.example.data.model.ResponseLengthProfile
@@ -34,6 +35,12 @@ data class MessageGroup(
     val variants: List<com.example.data.model.MessageEntity>
 )
 
+data class GroupCharacterState(
+    val character: CharacterEntity,
+    val isActive: Boolean,
+    val sortPosition: Int
+)
+
 data class GenerationDetailsState(
     val metadata: com.example.data.model.GenerationMetadataEntity? = null,
     val isVisible: Boolean = false
@@ -48,6 +55,12 @@ sealed class ChatUiState {
         val chatSummary: ChatSummary,
         val messages: List<MessageEntity>,
         val chatSettings: ChatSettingsEntity,
+        val historyLoaded: Boolean = false,
+        val groupCharacters: List<GroupCharacterState> = emptyList(),
+        val availableGroupCharacters: List<CharacterEntity> = emptyList(),
+        val groupParticipantsLoaded: Boolean = false,
+        val selectedGroupCharacterId: String? = null,
+        val generationCharacterId: String? = null,
         val isGenerating: Boolean = false,
         val streamingContent: String? = null,
         val partialStopped: Boolean = false,
@@ -74,7 +87,9 @@ class ChatDetailViewModel(
 
     private var chatSummary: ChatSummary? = null
     private var currentChatSettings: ChatSettingsEntity? = null
+    private var selectedGroupCharacterId: String? = null
     private var generationJob: Job? = null
+    private var generationStartInProgress = false
     private var sendInProgress = false
     private val compiler = ContextCompilerV1()
     private val memoryManager = AutomaticMemoryManager(memoryRepository)
@@ -91,6 +106,9 @@ class ChatDetailViewModel(
                 return@launch
             }
             chatSummary = summary
+            if (summary.chat.chatType == ChatType.GROUP) {
+                selectedGroupCharacterId = summary.characters.firstOrNull()?.characterId
+            }
             
             var settings = chatRepository.getChatSettings(chatId)
             if (settings == null) {
@@ -107,12 +125,56 @@ class ChatDetailViewModel(
                 }
             }
 
+            if (summary.chat.chatType == ChatType.GROUP) {
+                launch {
+                    characterRepository.getAllCharacters().collect { characters ->
+                        updateSuccessState { it.copy(availableGroupCharacters = characters) }
+                    }
+                }
+                launch {
+                    chatRepository.getParticipantsForChat(chatId).collect { participants ->
+                        val groupCharacters = buildList {
+                            participants.sortedBy { it.sortPosition }.forEach { participant ->
+                                characterRepository.getCharacterById(participant.characterId)?.let { character ->
+                                    add(
+                                        GroupCharacterState(
+                                            character = character,
+                                            isActive = participant.isActive,
+                                            sortPosition = participant.sortPosition
+                                        )
+                                    )
+                                }
+                            }
+                        }
+                        val activeIds = groupCharacters.filter { it.isActive }.map { it.character.characterId }
+                        if (selectedGroupCharacterId !in activeIds) {
+                            selectedGroupCharacterId = activeIds.firstOrNull()
+                        }
+                        updateSuccessState {
+                            it.copy(
+                                groupCharacters = groupCharacters,
+                                groupParticipantsLoaded = true,
+                                selectedGroupCharacterId = selectedGroupCharacterId
+                            )
+                        }
+                    }
+                }
+            }
+
             messageRepository.getMessagesForChat(chatId).collect { messages ->
                 val grouped = messages.groupBy { it.variantGroupId ?: it.messageId }.mapNotNull { (_, msgs) ->
                     val primary = msgs.find { it.isPrimaryVariant } ?: msgs.firstOrNull()
                     if (primary != null) MessageGroup(primary, msgs.sortedBy { it.orderIndex }) else null
                 }.sortedBy { it.primaryMessage.orderIndex }
-                updateSuccessState { it.copy(messages = messages, groupedMessages = grouped, chatSummary = summary, chatSettings = currentChatSettings!!) }
+                updateSuccessState {
+                    it.copy(
+                        messages = messages,
+                        groupedMessages = grouped,
+                        chatSummary = summary,
+                        chatSettings = currentChatSettings!!,
+                        historyLoaded = true
+                    )
+                }
             }
         }
     }
@@ -163,6 +225,11 @@ class ChatDetailViewModel(
             }
 
             sendInProgress = false
+            updateSuccessState { it.copy(generationError = null) }
+            if (summary.chat.chatType == ChatType.GROUP) {
+                chatRepository.updateChat(summary.chat.copy(updatedAt = System.currentTimeMillis()))
+                return@launch
+            }
             try {
                 startGeneration(userMsg)
             } catch (cancellation: kotlinx.coroutines.CancellationException) {
@@ -181,16 +248,105 @@ class ChatDetailViewModel(
         startGenerationInternal(userMsg, history)
     }
 
+    fun selectGroupCharacter(characterId: String) {
+        val state = _uiState.value as? ChatUiState.Success ?: return
+        if (
+            state.chatSummary.chat.chatType != ChatType.GROUP ||
+            state.isGenerating ||
+            generationStartInProgress
+        ) return
+        if (state.groupCharacters.none { it.isActive && it.character.characterId == characterId }) return
+
+        selectedGroupCharacterId = characterId
+        updateSuccessState { it.copy(selectedGroupCharacterId = characterId) }
+    }
+
+    fun setGroupCharacterActive(characterId: String, isActive: Boolean) {
+        val state = _uiState.value as? ChatUiState.Success ?: return
+        if (state.chatSummary.chat.chatType != ChatType.GROUP || state.isGenerating) return
+        viewModelScope.launch {
+            chatRepository.setGroupCharacterActive(chatId, characterId, isActive)
+        }
+    }
+
+    fun moveGroupCharacter(characterId: String, direction: Int) {
+        val state = _uiState.value as? ChatUiState.Success ?: return
+        if (state.chatSummary.chat.chatType != ChatType.GROUP || state.isGenerating) return
+        if (direction !in setOf(-1, 1)) return
+        viewModelScope.launch {
+            chatRepository.moveGroupCharacter(chatId, characterId, direction)
+        }
+    }
+
+    fun removeGroupCharacter(characterId: String) {
+        val state = _uiState.value as? ChatUiState.Success ?: return
+        if (state.chatSummary.chat.chatType != ChatType.GROUP || state.isGenerating) return
+        viewModelScope.launch {
+            chatRepository.removeGroupCharacter(chatId, characterId)
+        }
+    }
+
+    fun addGroupCharacter(characterId: String) {
+        val state = _uiState.value as? ChatUiState.Success ?: return
+        if (state.chatSummary.chat.chatType != ChatType.GROUP || state.isGenerating) return
+        if (state.groupCharacters.any { it.character.characterId == characterId }) return
+        viewModelScope.launch {
+            chatRepository.addGroupCharacter(chatId, characterId)
+        }
+    }
+
+    fun generateGroupResponse(characterId: String? = null) {
+        val state = _uiState.value as? ChatUiState.Success ?: return
+        if (
+            state.chatSummary.chat.chatType != ChatType.GROUP ||
+            state.isGenerating ||
+            generationStartInProgress
+        ) return
+        val selectedId = characterId
+            ?: state.generationCharacterId
+            ?: state.selectedGroupCharacterId
+            ?: return
+        if (state.groupCharacters.none { it.isActive && it.character.characterId == selectedId }) return
+
+        selectedGroupCharacterId = selectedId
+        updateSuccessState { it.copy(selectedGroupCharacterId = selectedId, generationError = null) }
+        generationStartInProgress = true
+        viewModelScope.launch {
+            try {
+                val primaryMessages = messageRepository.getMessagesForChatOnce(chatId)
+                    .filter { it.isPrimaryVariant }
+                val currentMessage = primaryMessages.lastOrNull()
+                if (currentMessage == null) {
+                    updateSuccessState {
+                        it.copy(generationError = "Send a Persona message before generating a Character reply.")
+                    }
+                    return@launch
+                }
+                startGenerationInternal(
+                    currentMessage = currentMessage,
+                    history = primaryMessages.dropLast(1),
+                    characterId = selectedId
+                )
+            } finally {
+                generationStartInProgress = false
+            }
+        }
+    }
+
     private suspend fun startGenerationInternal(
         currentMessage: MessageEntity,
         history: List<MessageEntity>,
         variantGroupId: String? = null,
         isContinuation: Boolean = false,
-        continuationTarget: MessageEntity? = null
+        continuationTarget: MessageEntity? = null,
+        characterId: String? = null
     ) {
         val summary = chatSummary ?: return
         val settings = currentChatSettings ?: return
-        val character = summary.characters.firstOrNull() ?: return
+        val character = characterId
+            ?.let { requestedId -> summary.characters.firstOrNull { it.characterId == requestedId } }
+            ?: summary.characters.firstOrNull()
+            ?: return
         val persona = summary.personas.firstOrNull() ?: return
         
         val fullCharacter = characterRepository.getCharacterById(character.characterId) ?: return
@@ -204,19 +360,42 @@ class ChatDetailViewModel(
         val durableMemories = memoryRepository.getMemoriesOnce(chatId, character.characterId)
         val rollingSummary = memoryRepository.getSummaryOnce(chatId)?.summary
 
-        val contextMessages = compiler.compileSoloContext(
-            isContinuation = isContinuation,
-            character = fullCharacter,
-            persona = fullPersona,
-            chatHistory = history,
-            currentMessage = currentMessage,
-            responseProfile = settings.responseLengthProfile,
-            customMin = settings.customMin,
-            customTargetMax = settings.customTargetMax,
-            customHardMax = settings.customHardMax,
-            durableMemories = durableMemories,
-            rollingSummary = rollingSummary
-        )
+        val contextMessages = if (summary.chat.chatType == ChatType.GROUP) {
+            val state = _uiState.value as? ChatUiState.Success
+            val activeCharacterNames = state?.groupCharacters
+                ?.filter { it.isActive }
+                ?.map { it.character.displayName }
+                ?.takeIf { it.isNotEmpty() }
+                ?: summary.characters.map { it.displayName }
+            compiler.compileGroupCharacterContext(
+                isContinuation = isContinuation,
+                character = fullCharacter,
+                persona = fullPersona,
+                activeCharacterNames = activeCharacterNames,
+                chatHistory = history,
+                currentMessage = currentMessage,
+                responseProfile = settings.responseLengthProfile,
+                customMin = settings.customMin,
+                customTargetMax = settings.customTargetMax,
+                customHardMax = settings.customHardMax,
+                durableMemories = durableMemories,
+                rollingSummary = rollingSummary
+            )
+        } else {
+            compiler.compileSoloContext(
+                isContinuation = isContinuation,
+                character = fullCharacter,
+                persona = fullPersona,
+                chatHistory = history,
+                currentMessage = currentMessage,
+                responseProfile = settings.responseLengthProfile,
+                customMin = settings.customMin,
+                customTargetMax = settings.customTargetMax,
+                customHardMax = settings.customHardMax,
+                durableMemories = durableMemories,
+                rollingSummary = rollingSummary
+            )
+        }
 
         val routing = ModelRouting.fromSettings(settings.providerRoutingMode, settings.providerEndpoint)
 
@@ -230,7 +409,15 @@ class ChatDetailViewModel(
             maxTokens = null
         )
 
-        updateSuccessState { it.copy(isGenerating = true, streamingContent = "", partialStopped = false, generationError = null) }
+        updateSuccessState {
+            it.copy(
+                isGenerating = true,
+                streamingContent = "",
+                partialStopped = false,
+                generationError = null,
+                generationCharacterId = character.characterId
+            )
+        }
 
         var generatedContent = ""
         var currentMetadata: GenerationMetadataEntity? = null
@@ -277,6 +464,7 @@ class ChatDetailViewModel(
                     it.copy(
                         isGenerating = false,
                         streamingContent = null,
+                        generationCharacterId = null,
                         generationError = "The provider returned no response. You can retry this turn."
                     )
                 }
@@ -318,7 +506,14 @@ class ChatDetailViewModel(
             val continuedMessage = continuationTarget.copy(content = continuationTarget.content + content)
             messageRepository.updateMessage(continuedMessage)
             metadata?.let { messageRepository.insertGenerationMetadata(it.copy(messageId = continuationTarget.messageId)) }
-            updateSuccessState { it.copy(isGenerating = false, streamingContent = null, generationError = null) }
+            updateSuccessState {
+                it.copy(
+                    isGenerating = false,
+                    streamingContent = null,
+                    generationCharacterId = null,
+                    generationError = null
+                )
+            }
             chatRepository.getChatSummaryById(chatId)?.let { summary ->
                 chatRepository.updateChat(summary.chat.copy(updatedAt = System.currentTimeMillis()))
             }
@@ -364,7 +559,14 @@ class ChatDetailViewModel(
              messageRepository.insertGenerationMetadata(it.copy(messageId = msgId))
         }
         
-        updateSuccessState { it.copy(isGenerating = false, streamingContent = null, generationError = memoryWarning) }
+        updateSuccessState {
+            it.copy(
+                isGenerating = false,
+                streamingContent = null,
+                generationCharacterId = null,
+                generationError = memoryWarning
+            )
+        }
         
         val summary = chatRepository.getChatSummaryById(chatId)
         summary?.let {
@@ -377,13 +579,18 @@ class ChatDetailViewModel(
     }
     
     fun discardPartial() {
-        updateSuccessState { it.copy(partialStopped = false, streamingContent = null) }
+        updateSuccessState {
+            it.copy(partialStopped = false, streamingContent = null, generationCharacterId = null)
+        }
     }
     
     fun keepPartial() {
         val state = _uiState.value as? ChatUiState.Success ?: return
         val content = state.streamingContent ?: return
-        val character = state.chatSummary.characters.firstOrNull() ?: return
+        val character = state.generationCharacterId
+            ?.let { id -> state.chatSummary.characters.firstOrNull { it.characterId == id } }
+            ?: state.chatSummary.characters.firstOrNull()
+            ?: return
         
         viewModelScope.launch {
             val fullChar = characterRepository.getCharacterById(character.characterId) ?: return@launch
@@ -394,6 +601,10 @@ class ChatDetailViewModel(
 
     fun retryGeneration() {
         val state = _uiState.value as? ChatUiState.Success ?: return
+        if (state.chatSummary.chat.chatType == ChatType.GROUP) {
+            generateGroupResponse(state.generationCharacterId ?: state.selectedGroupCharacterId)
+            return
+        }
         val lastMessage = state.messages.lastOrNull()
         if (lastMessage?.speakerType == SpeakerType.PERSONA) {
             viewModelScope.launch {
@@ -407,11 +618,28 @@ class ChatDetailViewModel(
         val primaryMessages = state.messages.filter { it.isPrimaryVariant || it.messageId == messageId }
         val targetMessage = primaryMessages.find { it.messageId == messageId } ?: return
         val history = primaryMessages.takeWhile { it.messageId != messageId }
+        if (state.chatSummary.chat.chatType == ChatType.GROUP) {
+            val currentMessage = history.lastOrNull() ?: return
+            viewModelScope.launch {
+                startGenerationInternal(
+                    currentMessage = currentMessage,
+                    history = history.dropLast(1),
+                    variantGroupId = targetMessage.variantGroupId ?: targetMessage.messageId,
+                    characterId = targetMessage.speakerId
+                )
+            }
+            return
+        }
         val lastUserMessage = history.lastOrNull { it.speakerType == SpeakerType.PERSONA }
         if (lastUserMessage != null) {
             viewModelScope.launch {
                 val newHistory = history.takeWhile { it.messageId != lastUserMessage.messageId }
-                startGenerationInternal(lastUserMessage, newHistory, variantGroupId = targetMessage.variantGroupId ?: targetMessage.messageId)
+                startGenerationInternal(
+                    currentMessage = lastUserMessage,
+                    history = newHistory,
+                    variantGroupId = targetMessage.variantGroupId ?: targetMessage.messageId,
+                    characterId = targetMessage.speakerId
+                )
             }
         }
     }
@@ -426,7 +654,8 @@ class ChatDetailViewModel(
                 currentMessage = targetMessage,
                 history = history,
                 isContinuation = true,
-                continuationTarget = targetMessage
+                continuationTarget = targetMessage,
+                characterId = targetMessage.speakerId
             )
         }
     }
@@ -493,7 +722,8 @@ class ChatDetailViewModel(
             _uiState.value = update(ChatUiState.Success(
                 chatSummary = chatSummary!!,
                 messages = emptyList(),
-                chatSettings = currentChatSettings!!
+                chatSettings = currentChatSettings!!,
+                selectedGroupCharacterId = selectedGroupCharacterId
             ))
         }
     }

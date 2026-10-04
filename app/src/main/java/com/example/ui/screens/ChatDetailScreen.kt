@@ -1,9 +1,17 @@
 package com.example.ui.screens
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -17,12 +25,15 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.data.model.MessageEntity
 import com.example.data.model.SpeakerType
+import com.example.data.model.ChatType
 import com.example.di.AppContainer
 import com.example.ui.components.MarkdownText
 import com.example.ui.components.elsewhereDestructiveButtonColors
@@ -126,13 +137,18 @@ fun ChatDetailScreen(
                     CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
                 }
                 is ChatUiState.Success -> {
+                    val isHistoryOnly = state.isHistoryOnlyChat()
                     Column(modifier = Modifier.fillMaxSize()) {
-                        LazyColumn(
+                        val hasStreamingItem = state.isGenerating || state.partialStopped
+                        AutoScrollingChatColumn(
+                            conversationKey = chatId,
+                            historyLoaded = state.historyLoaded,
+                            itemCount = state.groupedMessages.size + if (hasStreamingItem) 1 else 0,
+                            isStreaming = hasStreamingItem,
+                            streamContentKey = state.streamingContent,
                             modifier = Modifier
                                 .weight(1f)
-                                .fillMaxWidth(),
-                            contentPadding = PaddingValues(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                                .fillMaxWidth()
                         ) {
                             items(state.groupedMessages, key = { it.primaryMessage.messageId }) { group ->
                                 MessageBubble(
@@ -152,17 +168,50 @@ fun ChatDetailScreen(
                                 )
                             }
                             
-                            if (state.isGenerating || state.partialStopped) {
-                                item {
+                            if (hasStreamingItem) {
+                                item(key = "streaming-response") {
+                                    val generationCharacterName = state.generationCharacterId
+                                        ?.let { id ->
+                                            state.groupCharacters.firstOrNull {
+                                                it.character.characterId == id
+                                            }?.character?.displayName
+                                                ?: state.chatSummary.characters.firstOrNull {
+                                                    it.characterId == id
+                                                }?.displayName
+                                        }
                                     StreamingBubble(
                                         content = state.streamingContent ?: "",
-                                        characterName = state.chatSummary.characters.firstOrNull()?.displayName ?: "Character"
+                                        characterName = generationCharacterName
+                                            ?: state.chatSummary.characters.firstOrNull()?.displayName
+                                            ?: "Character"
                                     )
                                 }
                             }
                         }
 
-                        if (state.partialStopped) {
+                        if (
+                            state.chatSummary.chat.chatType == ChatType.GROUP &&
+                            state.chatSummary.personas.isNotEmpty() &&
+                            !state.partialStopped
+                        ) {
+                            GroupCharacterControls(
+                                characters = state.groupCharacters,
+                                availableCharacters = state.availableGroupCharacters,
+                                selectedCharacterId = state.selectedGroupCharacterId,
+                                isGenerating = state.isGenerating,
+                                canGenerate = state.messages.any { it.isPrimaryVariant },
+                                onSelectCharacter = viewModel::selectGroupCharacter,
+                                onGenerate = viewModel::generateGroupResponse,
+                                onSetActive = viewModel::setGroupCharacterActive,
+                                onMove = viewModel::moveGroupCharacter,
+                                onRemove = viewModel::removeGroupCharacter,
+                                onAdd = viewModel::addGroupCharacter
+                            )
+                        }
+
+                        if (isHistoryOnly) {
+                            HistoryOnlyChatNotice()
+                        } else if (state.partialStopped) {
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -217,13 +266,25 @@ fun ChatDetailScreen(
                                             Icon(Icons.Filled.Stop, contentDescription = "Stop Generation", tint = MaterialTheme.colorScheme.error)
                                         }
                                     } else {
+                                        val isGroup = state.chatSummary.chat.chatType == ChatType.GROUP
+                                        val canSend = draft.isNotBlank() ||
+                                            (!isGroup && state.messages.lastOrNull()?.speakerType == SpeakerType.PERSONA)
                                         IconButton(
                                             onClick = {
                                                 if (draft.isNotBlank()) viewModel.sendMessage()
-                                                else viewModel.retryGeneration()
-                                            }
+                                                else if (!isGroup) viewModel.retryGeneration()
+                                            },
+                                            enabled = canSend
                                         ) {
-                                            Icon(Icons.Filled.Send, contentDescription = "Send", tint = if (draft.isNotBlank() || state.messages.lastOrNull()?.speakerType == SpeakerType.PERSONA) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f))
+                                            Icon(
+                                                Icons.Filled.Send,
+                                                contentDescription = "Send",
+                                                tint = if (canSend) {
+                                                    MaterialTheme.colorScheme.primary
+                                                } else {
+                                                    MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                                                }
+                                            )
                                         }
                                     }
                                 }
@@ -284,6 +345,254 @@ fun ChatDetailScreen(
             }
         )
     }
+}
+
+internal fun ChatUiState.Success.isHistoryOnlyChat(): Boolean =
+    chatSummary.personas.isEmpty() || when (chatSummary.chat.chatType) {
+        ChatType.SOLO -> chatSummary.characters.isEmpty()
+        ChatType.GROUP -> groupParticipantsLoaded && groupCharacters.isEmpty()
+    }
+
+@Composable
+private fun HistoryOnlyChatNotice() {
+    Surface(
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Text(
+            text = "History only — a required Character or Persona was permanently deleted. " +
+                "Saved messages and speaker names are preserved. Add a Character where available; " +
+                "otherwise new messages and AI replies remain disabled.",
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
+        )
+    }
+}
+
+@Composable
+internal fun GroupCharacterControls(
+    characters: List<GroupCharacterState>,
+    availableCharacters: List<com.example.data.model.CharacterEntity>,
+    selectedCharacterId: String?,
+    isGenerating: Boolean,
+    canGenerate: Boolean,
+    onSelectCharacter: (String) -> Unit,
+    onGenerate: (String?) -> Unit,
+    onSetActive: (String, Boolean) -> Unit,
+    onMove: (String, Int) -> Unit,
+    onRemove: (String) -> Unit,
+    onAdd: (String) -> Unit
+) {
+    val activeCharacters = characters.filter { it.isActive }.sortedBy { it.sortPosition }
+    val orderedCharacters = characters.sortedBy { it.sortPosition }
+    val participantIds = characters.mapTo(mutableSetOf()) { it.character.characterId }
+    val addableCharacters = availableCharacters.filter { it.characterId !in participantIds }
+    val selectedCharacter = activeCharacters.firstOrNull {
+        it.character.characterId == selectedCharacterId
+    }
+    var showManageCharacters by remember { mutableStateOf(false) }
+
+    Surface(
+        color = MaterialTheme.colorScheme.surface,
+        tonalElevation = 2.dp,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Text(
+                text = "Next Character",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                activeCharacters.forEach { groupCharacter ->
+                    FilterChip(
+                        selected = groupCharacter.character.characterId == selectedCharacterId,
+                        onClick = { onSelectCharacter(groupCharacter.character.characterId) },
+                        enabled = !isGenerating,
+                        label = { Text(groupCharacter.character.displayName) }
+                    )
+                }
+            }
+            Button(
+                onClick = { onGenerate(selectedCharacterId) },
+                enabled = selectedCharacter != null && canGenerate && !isGenerating,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    if (isGenerating) {
+                        "Generating ${selectedCharacter?.character?.displayName ?: "reply"}…"
+                    } else {
+                        "Generate ${selectedCharacter?.character?.displayName ?: "Character"} Reply"
+                    }
+                )
+            }
+            TextButton(
+                onClick = { showManageCharacters = true },
+                enabled = !isGenerating,
+                modifier = Modifier.align(Alignment.End)
+            ) {
+                Text("Manage Characters")
+            }
+        }
+    }
+
+    if (showManageCharacters) {
+        AlertDialog(
+            onDismissRequest = { showManageCharacters = false },
+            title = { Text("Manage Group Characters") },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 460.dp).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text(
+                        "Reorder, mute, or remove Characters. Removing a Character keeps every historical message and speaker name.",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    orderedCharacters.forEachIndexed { index, groupCharacter ->
+                        Surface(
+                            shape = MaterialTheme.shapes.medium,
+                            color = MaterialTheme.colorScheme.surfaceVariant,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp)) {
+                                Text(
+                                    "${index + 1}. ${groupCharacter.character.displayName}" +
+                                        if (groupCharacter.isActive) "" else " (muted)",
+                                    style = MaterialTheme.typography.titleSmall
+                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    TextButton(
+                                        onClick = { onMove(groupCharacter.character.characterId, -1) },
+                                        enabled = index > 0
+                                    ) { Text("Up") }
+                                    TextButton(
+                                        onClick = { onMove(groupCharacter.character.characterId, 1) },
+                                        enabled = index < orderedCharacters.lastIndex
+                                    ) { Text("Down") }
+                                    TextButton(
+                                        onClick = {
+                                            onSetActive(
+                                                groupCharacter.character.characterId,
+                                                !groupCharacter.isActive
+                                            )
+                                        }
+                                    ) { Text(if (groupCharacter.isActive) "Mute" else "Activate") }
+                                    TextButton(
+                                        onClick = { onRemove(groupCharacter.character.characterId) },
+                                        colors = elsewhereDestructiveButtonColors()
+                                    ) { Text("Remove") }
+                                }
+                            }
+                        }
+                    }
+                    if (addableCharacters.isNotEmpty()) {
+                        HorizontalDivider()
+                        Text("Add existing Character", style = MaterialTheme.typography.titleSmall)
+                        addableCharacters.forEach { character ->
+                            OutlinedButton(
+                                onClick = { onAdd(character.characterId) },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("Add ${character.displayName}")
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showManageCharacters = false }) { Text("Done") }
+            }
+        )
+    }
+}
+
+@Composable
+internal fun AutoScrollingChatColumn(
+    conversationKey: String,
+    historyLoaded: Boolean,
+    itemCount: Int,
+    isStreaming: Boolean,
+    streamContentKey: String?,
+    modifier: Modifier = Modifier,
+    listState: LazyListState = rememberLazyListState(),
+    content: LazyListScope.() -> Unit
+) {
+    var initialScrollComplete by remember(conversationKey) { mutableStateOf(false) }
+    var followStreaming by remember(conversationKey) { mutableStateOf(false) }
+    val isUserDragging by listState.interactionSource.collectIsDraggedAsState()
+    val nearBottomThresholdPx = with(LocalDensity.current) { 72.dp.roundToPx() }
+
+    LaunchedEffect(conversationKey, historyLoaded, itemCount) {
+        if (historyLoaded && !initialScrollComplete) {
+            listState.scrollToBottom(itemCount)
+            initialScrollComplete = true
+            followStreaming = true
+        }
+    }
+
+    LaunchedEffect(isUserDragging, initialScrollComplete) {
+        if (!initialScrollComplete) return@LaunchedEffect
+        followStreaming = if (isUserDragging) {
+            false
+        } else {
+            listState.isNearBottom(nearBottomThresholdPx)
+        }
+    }
+
+    LaunchedEffect(isStreaming, streamContentKey, itemCount) {
+        if (
+            initialScrollComplete &&
+            isStreaming &&
+            followStreaming &&
+            !isUserDragging
+        ) {
+            listState.scrollToBottom(itemCount)
+        }
+    }
+
+    LazyColumn(
+        state = listState,
+        modifier = modifier.alpha(
+            if (!historyLoaded || initialScrollComplete) 1f else 0f
+        ),
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        content = content
+    )
+}
+
+private suspend fun LazyListState.scrollToBottom(itemCount: Int) {
+    if (itemCount <= 0) return
+
+    val lastIndex = itemCount - 1
+    scrollToItem(lastIndex)
+    val lastItem = layoutInfo.visibleItemsInfo.firstOrNull { it.index == lastIndex } ?: return
+    val hiddenBottom = lastItem.offset + lastItem.size - layoutInfo.viewportEndOffset
+    if (hiddenBottom > 0) {
+        scrollBy(hiddenBottom.toFloat())
+    }
+}
+
+private fun LazyListState.isNearBottom(thresholdPx: Int): Boolean {
+    val info = layoutInfo
+    if (info.totalItemsCount == 0) return true
+
+    val lastVisibleItem = info.visibleItemsInfo.lastOrNull() ?: return false
+    if (lastVisibleItem.index != info.totalItemsCount - 1) return false
+
+    val hiddenBottom = lastVisibleItem.offset + lastVisibleItem.size - info.viewportEndOffset
+    return hiddenBottom <= thresholdPx
 }
 
 @Composable

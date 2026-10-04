@@ -10,6 +10,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.*
@@ -23,8 +24,10 @@ import androidx.compose.ui.unit.dp
 import com.example.data.model.CharacterEntity
 import com.example.data.model.ManualCharacterFields
 import com.example.domain.repository.CharacterRepository
+import com.example.domain.repository.ProfileDeletionResult
 import com.example.ui.components.ElsewhereEmptyState
 import com.example.ui.components.elsewhereCardBorder
+import com.example.ui.components.elsewhereDestructiveButtonColors
 import com.example.ui.components.elsewhereTextFieldColors
 import com.example.ui.components.elsewhereTopAppBarColors
 import kotlinx.coroutines.launch
@@ -46,6 +49,10 @@ fun CharactersScreen(
     var importError by remember { mutableStateOf<String?>(null) }
     var showEditor by remember { mutableStateOf(false) }
     var editingCharacter by remember { mutableStateOf<CharacterEntity?>(null) }
+    var characterPendingDeletion by remember { mutableStateOf<CharacterEntity?>(null) }
+    var deletionInProgress by remember { mutableStateOf(false) }
+    var deletionNotice by remember { mutableStateOf<String?>(null) }
+    var deletionSucceeded by remember { mutableStateOf(false) }
     
     val launcher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
@@ -148,6 +155,82 @@ fun CharactersScreen(
                 TextButton(onClick = { importError = null }) {
                     Text("OK")
                 }
+            }
+        )
+    }
+
+    characterPendingDeletion?.let { character ->
+        AlertDialog(
+            onDismissRequest = {
+                if (!deletionInProgress) characterPendingDeletion = null
+            },
+            title = { Text("Delete Character Permanently?") },
+            text = {
+                Text(
+                    "Permanently delete \"${character.displayName}\" and its profile-scoped " +
+                        "relationships and memories? This cannot be undone. The Character will be removed " +
+                        "from every chat, but all historical messages and speaker names will remain. " +
+                        "A chat with no remaining Character will become history-only."
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        deletionInProgress = true
+                        coroutineScope.launch {
+                            deletionNotice = try {
+                                when (val result = repository.deleteCharacterPermanently(character.characterId)) {
+                                    is ProfileDeletionResult.Deleted -> {
+                                        deletionSucceeded = true
+                                        if (result.affectedChatCount == 0) {
+                                            null
+                                        } else {
+                                            val chatLabel = if (result.affectedChatCount == 1) "chat" else "chats"
+                                            val historyOnly = if (result.historyOnlyChatCount == 0) "" else {
+                                                " ${result.historyOnlyChatCount} now ${if (result.historyOnlyChatCount == 1) "opens" else "open"} as history-only."
+                                            }
+                                            "Deleted \"${character.displayName}\" and removed the Character from " +
+                                                "${result.affectedChatCount} $chatLabel. All historical messages were kept.$historyOnly"
+                                        }
+                                    }
+                                    ProfileDeletionResult.NotFound -> {
+                                        deletionSucceeded = false
+                                        "This Character no longer exists."
+                                    }
+                                }
+                            } catch (_: Exception) {
+                                deletionSucceeded = false
+                                "The Character could not be deleted. No chat or message was changed."
+                            }
+                            deletionInProgress = false
+                            characterPendingDeletion = null
+                        }
+                    },
+                    enabled = !deletionInProgress,
+                    colors = elsewhereDestructiveButtonColors(),
+                    modifier = Modifier.testTag("confirm_delete_character")
+                ) {
+                    Text(if (deletionInProgress) "Deleting…" else "Delete Permanently")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { characterPendingDeletion = null },
+                    enabled = !deletionInProgress
+                ) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    deletionNotice?.let { notice ->
+        AlertDialog(
+            onDismissRequest = { deletionNotice = null },
+            title = { Text(if (deletionSucceeded) "Character Deleted" else "Character Not Deleted") },
+            text = { Text(notice) },
+            confirmButton = {
+                TextButton(onClick = { deletionNotice = null }) { Text("OK") }
             }
         )
     }
@@ -326,6 +409,16 @@ fun CharactersScreen(
                                 modifier = Modifier.testTag("edit_character_${character.characterId}")
                             ) {
                                 Icon(Icons.Default.Edit, contentDescription = "Edit ${character.displayName}")
+                            }
+                            IconButton(
+                                onClick = { characterPendingDeletion = character },
+                                modifier = Modifier.testTag("delete_character_${character.characterId}")
+                            ) {
+                                Icon(
+                                    Icons.Default.Delete,
+                                    contentDescription = "Delete ${character.displayName}",
+                                    tint = MaterialTheme.colorScheme.error
+                                )
                             }
                         }
                     }

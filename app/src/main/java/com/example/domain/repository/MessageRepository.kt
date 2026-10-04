@@ -11,6 +11,9 @@ class MessageRepository(private val messageDao: MessageDao) {
         return messageDao.getMessagesForChat(chatId)
     }
 
+    suspend fun getMessagesForChatOnce(chatId: String): List<MessageEntity> =
+        messageDao.getMessagesForChatOnce(chatId)
+
     suspend fun insertMessage(message: MessageEntity) {
         messageDao.insertMessage(message)
     }

@@ -25,6 +25,9 @@ class PersonaRepository(
         personaDao.archivePersona(id)
     }
 
+    suspend fun deletePersonaPermanently(id: String): ProfileDeletionResult =
+        personaDao.deletePersonaPermanently(id).toProfileDeletionResult()
+
     fun getManualFields(persona: PersonaEntity): ManualPersonaFields =
         ManualPersonaFieldsCodec.toEditableFields(persona)
 

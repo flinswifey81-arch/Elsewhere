@@ -25,6 +25,9 @@ class CharacterRepository(
         characterDao.archiveCharacter(id)
     }
 
+    suspend fun deleteCharacterPermanently(id: String): ProfileDeletionResult =
+        characterDao.deleteCharacterPermanently(id).toProfileDeletionResult()
+
     fun getManualFields(character: CharacterEntity): ManualCharacterFields =
         ManualCharacterFieldsCodec.toEditableFields(character)
 

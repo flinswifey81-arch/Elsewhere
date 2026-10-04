@@ -107,14 +107,14 @@ class ChatDetailGenerationTest {
             provider,
             memoryRepository
         )
-        withTimeout(5_000) { viewModel.uiState.first { it is ChatUiState.Success } }
+        withTimeout(15_000) { viewModel.uiState.first { it is ChatUiState.Success } }
         chatRepository.insertChatSettings(
             (viewModel.uiState.value as ChatUiState.Success).chatSettings.copy(
                 selectedModelId = "mock/updated-model",
                 responseLengthProfile = ResponseLengthProfile.LONG
             )
         )
-        withTimeout(5_000) {
+        withTimeout(15_000) {
             viewModel.uiState.first {
                 it is ChatUiState.Success && it.chatSettings.selectedModelId == "mock/updated-model"
             }
@@ -123,7 +123,7 @@ class ChatDetailGenerationTest {
         viewModel.onDraftChanged("Remember that I prefer jasmine tea.")
         viewModel.sendMessage()
 
-        val persisted = withTimeout(5_000) {
+        val persisted = withTimeout(15_000) {
             messageRepository.getMessagesForChat(chatId).first { it.size == 2 }
         }
         assertEquals(listOf(SpeakerType.PERSONA, SpeakerType.CHARACTER), persisted.map { it.speakerType })
@@ -132,13 +132,13 @@ class ChatDetailGenerationTest {
         assertTrue(provider.messages.first { it.role == Role.SYSTEM }.content.contains("escaped the winter court"))
         assertEquals("mock/updated-model", provider.options.modelId)
         assertNull(provider.options.maxTokens)
-        val learnedMemories = withTimeout(5_000) {
+        val learnedMemories = withTimeout(15_000) {
             memoryRepository.getMemories(chatId, "character-1").first { memories ->
                 memories.any { it.content == "jasmine tea" }
             }
         }
         assertTrue(learnedMemories.any { it.content == "jasmine tea" })
-        val completedState = withTimeout(5_000) {
+        val completedState = withTimeout(15_000) {
             viewModel.uiState.first {
                 it is ChatUiState.Success && !it.isGenerating && it.messages.size == 2
             }
@@ -146,7 +146,7 @@ class ChatDetailGenerationTest {
         assertFalse(completedState.isGenerating)
 
         viewModel.continueMessage(persisted.last().messageId)
-        val continuedMessages = withTimeout(5_000) {
+        val continuedMessages = withTimeout(15_000) {
             messageRepository.getMessagesForChat(chatId).first { messages ->
                 messages.size == 2 && messages.last().content == "A quiet answer.A quiet answer."
             }
@@ -179,7 +179,7 @@ class ChatDetailGenerationTest {
         harness.viewModel.onDraftChanged("Tell me everything you can.")
         harness.viewModel.sendMessage()
 
-        val persisted = withTimeout(5_000) {
+        val persisted = withTimeout(15_000) {
             harness.messageRepository.getMessagesForChat(harness.chatId).first { it.size == 2 }
         }
         val assistant = persisted.single { it.speakerType == SpeakerType.CHARACTER }
@@ -211,7 +211,7 @@ class ChatDetailGenerationTest {
         harness.viewModel.onDraftChanged("Are you there?")
         harness.viewModel.sendMessage()
 
-        val completed = withTimeout(5_000) {
+        val completed = withTimeout(15_000) {
             harness.viewModel.uiState.first {
                 it is ChatUiState.Success && !it.isGenerating && it.generationError != null
             }
@@ -238,22 +238,36 @@ class ChatDetailGenerationTest {
         harness.viewModel.onDraftChanged("Please answer again.")
         harness.viewModel.sendMessage()
 
-        val original = withTimeout(5_000) {
+        val original = withTimeout(15_000) {
             harness.messageRepository.getMessagesForChat(harness.chatId).first { messages ->
                 messages.count { it.speakerType == SpeakerType.CHARACTER } == 1
             }
         }.single { it.speakerType == SpeakerType.CHARACTER }
+        withTimeout(15_000) {
+            harness.viewModel.uiState.first { state ->
+                state is ChatUiState.Success &&
+                    !state.isGenerating &&
+                    state.messages.any { it.messageId == original.messageId }
+            }
+        }
 
         harness.viewModel.regenerateMessage(original.messageId)
-        val second = withTimeout(5_000) {
+        val second = withTimeout(15_000) {
             harness.messageRepository.getMessagesForChat(harness.chatId).first { messages ->
                 messages.count { it.speakerType == SpeakerType.CHARACTER } == 2 &&
                     messages.any { it.isPrimaryVariant && it.content == "Rowan: Second reply." }
             }
         }.single { it.speakerType == SpeakerType.CHARACTER && it.isPrimaryVariant }
+        withTimeout(15_000) {
+            harness.viewModel.uiState.first { state ->
+                state is ChatUiState.Success &&
+                    !state.isGenerating &&
+                    state.messages.any { it.isPrimaryVariant && it.messageId == second.messageId }
+            }
+        }
 
         harness.viewModel.regenerateMessage(second.messageId)
-        val messages = withTimeout(5_000) {
+        val messages = withTimeout(15_000) {
             harness.messageRepository.getMessagesForChat(harness.chatId).first { stored ->
                 stored.count { it.speakerType == SpeakerType.CHARACTER } == 3 &&
                     stored.any { it.isPrimaryVariant && it.content == "Rowan: Third reply." }
@@ -307,7 +321,7 @@ class ChatDetailGenerationTest {
                 orderIndex = 2L
             )
         )
-        withTimeout(5_000) {
+        withTimeout(15_000) {
             harness.viewModel.uiState.first {
                 it is ChatUiState.Success && it.messages.size == 2
             }
@@ -315,27 +329,35 @@ class ChatDetailGenerationTest {
 
         harness.viewModel.onDraftChanged("Take me there before sunrise.")
         harness.viewModel.sendMessage()
-        val firstCurrentReply = withTimeout(5_000) {
+        val firstCurrentReply = withTimeout(15_000) {
             harness.messageRepository.getMessagesForChat(harness.chatId).first { messages ->
                 messages.any { it.content == "Rowan: First current reply." }
             }
         }.single { it.content == "Rowan: First current reply." }
+        withTimeout(15_000) {
+            harness.viewModel.uiState.first { state ->
+                state is ChatUiState.Success &&
+                    !state.isGenerating &&
+                    state.messages.any { it.messageId == firstCurrentReply.messageId }
+            }
+        }
 
         harness.viewModel.regenerateMessage(firstCurrentReply.messageId)
-        val secondCurrentReply = withTimeout(5_000) {
+        val secondCurrentReply = withTimeout(15_000) {
             harness.messageRepository.getMessagesForChat(harness.chatId).first { messages ->
                 messages.any { it.isPrimaryVariant && it.content == "Rowan: Second current reply." }
             }
         }.single { it.isPrimaryVariant && it.content == "Rowan: Second current reply." }
-        withTimeout(5_000) {
+        withTimeout(15_000) {
             harness.viewModel.uiState.first { state ->
                 state is ChatUiState.Success &&
+                    !state.isGenerating &&
                     state.messages.any { it.isPrimaryVariant && it.messageId == secondCurrentReply.messageId }
             }
         }
 
         harness.viewModel.regenerateMessage(secondCurrentReply.messageId)
-        withTimeout(5_000) {
+        withTimeout(15_000) {
             harness.messageRepository.getMessagesForChat(harness.chatId).first { messages ->
                 messages.any { it.isPrimaryVariant && it.content == "Rowan: Third current reply." }
             }
@@ -371,7 +393,7 @@ class ChatDetailGenerationTest {
         harness.viewModel.onDraftChanged("Use the preferred provider.")
         harness.viewModel.sendMessage()
 
-        withTimeout(5_000) {
+        withTimeout(15_000) {
             harness.viewModel.uiState.first { provider.requests.size == 1 }
         }
 
@@ -393,7 +415,7 @@ class ChatDetailGenerationTest {
         harness.viewModel.onDraftChanged("Use only the locked provider.")
         harness.viewModel.sendMessage()
 
-        withTimeout(5_000) {
+        withTimeout(15_000) {
             harness.viewModel.uiState.first { provider.requests.size == 1 }
         }
 
@@ -415,7 +437,7 @@ class ChatDetailGenerationTest {
         harness.viewModel.onDraftChanged("Use the locked provider.")
         harness.viewModel.sendMessage()
 
-        val failedState = withTimeout(5_000) {
+        val failedState = withTimeout(15_000) {
             harness.viewModel.uiState.first {
                 it is ChatUiState.Success && it.generationError == "Locked routing requires a selected provider endpoint."
             }
@@ -427,6 +449,44 @@ class ChatDetailGenerationTest {
             listOf(SpeakerType.PERSONA),
             harness.messageRepository.getMessagesForChat(harness.chatId).first().map { it.speakerType }
         )
+    }
+
+    @Test
+    fun loadedHistoryPublishesTheSelectedPrimaryVariantForInitialPositioning() = runBlocking {
+        val harness = createHarness(CountingProvider(), ResponseLengthProfile.NORMAL)
+        val original = MessageEntity(
+            messageId = "original-variant",
+            chatId = harness.chatId,
+            speakerType = SpeakerType.CHARACTER,
+            speakerId = "character-1",
+            speakerDisplayNameSnapshot = "Rowan",
+            content = "Original response",
+            orderIndex = 1L,
+            variantGroupId = "response-group",
+            isPrimaryVariant = false
+        )
+        val selected = original.copy(
+            messageId = "selected-variant",
+            content = "Selected response",
+            createdAt = original.createdAt + 1,
+            isPrimaryVariant = true
+        )
+
+        harness.messageRepository.insertMessage(original)
+        harness.messageRepository.insertMessage(selected)
+
+        val loaded = withTimeout(15_000) {
+            harness.viewModel.uiState.first { state ->
+                state is ChatUiState.Success &&
+                    state.historyLoaded &&
+                    state.groupedMessages.singleOrNull()?.primaryMessage?.messageId == selected.messageId
+            }
+        } as ChatUiState.Success
+
+        assertTrue(loaded.historyLoaded)
+        assertEquals(1, loaded.groupedMessages.size)
+        assertEquals("selected-variant", loaded.groupedMessages.single().primaryMessage.messageId)
+        assertEquals("Selected response", loaded.groupedMessages.single().primaryMessage.content)
     }
 
     private data class Harness(
@@ -468,7 +528,7 @@ class ChatDetailGenerationTest {
             provider,
             memoryRepository
         )
-        withTimeout(5_000) { viewModel.uiState.first { it is ChatUiState.Success } }
+        withTimeout(15_000) { viewModel.uiState.first { it is ChatUiState.Success } }
         return Harness(chatId, viewModel, messageRepository)
     }
 

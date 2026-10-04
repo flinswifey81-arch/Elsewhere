@@ -11,6 +11,9 @@ interface MessageDao {
     @Query("SELECT * FROM messages WHERE chatId = :chatId ORDER BY orderIndex ASC")
     fun getMessagesForChat(chatId: String): Flow<List<MessageEntity>>
 
+    @Query("SELECT * FROM messages WHERE chatId = :chatId ORDER BY orderIndex ASC")
+    suspend fun getMessagesForChatOnce(chatId: String): List<MessageEntity>
+
     @Query("SELECT * FROM messages WHERE variantGroupId = :variantGroupId ORDER BY createdAt ASC")
     fun getVariants(variantGroupId: String): Flow<List<MessageEntity>>
 

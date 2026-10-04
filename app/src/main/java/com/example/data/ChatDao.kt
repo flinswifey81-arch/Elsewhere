@@ -85,6 +85,52 @@ interface ChatDao {
     @Query("SELECT * FROM chat_participants WHERE chatId = :chatId ORDER BY sortPosition ASC")
     fun getParticipantsForChat(chatId: String): Flow<List<ChatParticipantEntity>>
 
+    @Query("SELECT * FROM chat_participants WHERE chatId = :chatId ORDER BY sortPosition ASC")
+    suspend fun getParticipantsForChatOnce(chatId: String): List<ChatParticipantEntity>
+
+    @Query("SELECT * FROM chat_participants WHERE chatId = :chatId AND characterId = :characterId")
+    suspend fun getChatParticipant(chatId: String, characterId: String): ChatParticipantEntity?
+
+    @Update
+    suspend fun updateChatParticipant(participant: ChatParticipantEntity)
+
+    @Query("DELETE FROM chat_participants WHERE chatId = :chatId AND characterId = :characterId")
+    suspend fun deleteChatParticipant(chatId: String, characterId: String)
+
+    @Transaction
+    suspend fun setChatParticipantActive(chatId: String, characterId: String, isActive: Boolean) {
+        getChatParticipant(chatId, characterId)?.let { participant ->
+            updateChatParticipant(participant.copy(isActive = isActive))
+        }
+    }
+
+    @Transaction
+    suspend fun addChatParticipantAtEnd(chatId: String, characterId: String) {
+        val nextPosition = (getParticipantsForChatOnce(chatId).maxOfOrNull { it.sortPosition } ?: -1) + 1
+        insertChatParticipant(
+            ChatParticipantEntity(
+                chatId = chatId,
+                characterId = characterId,
+                isActive = true,
+                sortPosition = nextPosition
+            )
+        )
+    }
+
+    @Transaction
+    suspend fun moveChatParticipant(chatId: String, characterId: String, direction: Int) {
+        val ordered = getParticipantsForChatOnce(chatId).sortedBy { it.sortPosition }
+        val currentIndex = ordered.indexOfFirst { it.characterId == characterId }
+        if (currentIndex < 0) return
+        val targetIndex = (currentIndex + direction).coerceIn(0, ordered.lastIndex)
+        if (targetIndex == currentIndex) return
+
+        val current = ordered[currentIndex]
+        val target = ordered[targetIndex]
+        updateChatParticipant(current.copy(sortPosition = target.sortPosition))
+        updateChatParticipant(target.copy(sortPosition = current.sortPosition))
+    }
+
     @Query("SELECT * FROM chat_persona_participants WHERE chatId = :chatId ORDER BY sortPosition ASC")
     fun getPersonaParticipantsForChat(chatId: String): Flow<List<ChatPersonaParticipantEntity>>
 
