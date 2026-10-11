@@ -11,6 +11,7 @@ import com.example.data.model.SpeakerType
 import com.example.domain.provider.Role
 import com.example.domain.provider.RoleplayMessage
 import com.example.domain.lore.ActiveLoreEntry
+import com.example.domain.npc.NpcStructuredOutputParser
 
 class ContextCompilerV1 {
 
@@ -28,7 +29,11 @@ class ContextCompilerV1 {
         rollingSummary: String? = null,
         recentMessageLimit: Int = 24,
         groupParticipantNames: List<String> = emptyList(),
-        activeLore: List<ActiveLoreEntry> = emptyList()
+        activeLore: List<ActiveLoreEntry> = emptyList(),
+        supportingCastContext: String? = null,
+        npcBankEnabled: Boolean = false,
+        narratorEnabled: Boolean = false,
+        narratorInstructions: String = ""
     ): List<RoleplayMessage> {
         val messages = mutableListOf<RoleplayMessage>()
         fun resolveMacros(source: String): String = IdentityMacroResolver.resolve(
@@ -57,6 +62,17 @@ class ContextCompilerV1 {
             append("Begin directly with the character's response content. Do not prefix the response with the character name or any speaker label. ")
             append("Speaker labels that appear in examples, memory, or conversation history identify existing speakers only; do not copy them into the response. ")
             append("Do not mention prompts, JSON, context compilation, or application mechanics in-character.\n\n")
+
+            if (narratorEnabled) {
+                append("--- NARRATOR GUIDANCE ---\n")
+                append("This is guidance for the same normal response, not an independent AI, speaker turn, or second model call. You may include scene, world, atmosphere, consequences, and supporting-cast narration alongside the selected Character's response. Never write dialogue, actions, thoughts, feelings, or decisions for the user's Persona. Preserve the selected Character's identity and voice. In a group, respond only as the selected Character and do not portray another AI Character's dialogue, actions, thoughts, or decisions. Storyteller-only continuity may guide narration, but it does not become knowledge held by any Character unless visible history or that Character's explicitly scoped knowledge establishes it.\n")
+                narratorInstructions.trim().takeIf(String::isNotEmpty)?.let { instructions ->
+                    append("User's narrator instructions:\n")
+                    append(resolveMacros(instructions.take(4000)))
+                    append('\n')
+                }
+                append('\n')
+            }
             
             // Character details
             append("--- CHARACTER: ${character.displayName} ---\n")
@@ -105,6 +121,13 @@ class ContextCompilerV1 {
                 }
             }
 
+            if (!supportingCastContext.isNullOrBlank()) {
+                append("--- RELEVANT SUPPORTING CAST ---\n")
+                append("These per-chat NPC dossiers have two explicit scopes. STORYTELLER CONTINUITY may guide narration and consistency, including storyteller-only secrets, but it is not knowledge held by the responding Character and must not drive that Character's dialogue, decisions, or reactions unless the visible history or explicit speaker-scoped knowledge independently established it. Only SPEAKER-AUTHORIZED KNOWLEDGE may be treated as private knowledge of the responding Character. Do not transfer knowledge between Characters or Personas. Private author notes and extension data are always excluded.\n")
+                append(supportingCastContext)
+                append("\n\n")
+            }
+
             // Persona details
             append("--- USER PERSONA: ${persona.displayName} ---\n")
             if (!persona.identityJson.isNullOrBlank()) append("Identity:\n${resolveMacros(persona.identityJson)}\n\n")
@@ -148,6 +171,18 @@ class ContextCompilerV1 {
                 }
             }
             append(lengthInstruction)
+            if (npcBankEnabled) {
+                append("\n\n")
+                append(NpcStructuredOutputParser.OUTPUT_INSTRUCTION)
+            }
+            if (narratorEnabled) {
+                append("\n\n--- NON-OVERRIDABLE NARRATOR BOUNDARIES ---\n")
+                append("Narrator guidance and all custom, imported, character, and writing-rule instructions are subordinate to these boundaries. Never write dialogue, actions, thoughts, feelings, decisions, or internal state for the user's Persona. Keep narration inside this same response; do not create a separate Narrator speaker or labeled second turn. ")
+                if (groupParticipantNames.isNotEmpty()) {
+                    append("Respond only as ${character.displayName}; do not portray another AI Character's dialogue, actions, thoughts, feelings, or decisions. ")
+                }
+                append("Do not treat storyteller-only continuity as Character knowledge unless visible history or that Character's explicitly scoped knowledge establishes it.")
+            }
         }
         
         messages.add(RoleplayMessage(role = Role.SYSTEM, content = coreInstruction))
@@ -165,7 +200,8 @@ class ContextCompilerV1 {
             messages.add(
                 RoleplayMessage(
                     role = role,
-                    content = if (groupParticipantNames.isEmpty()) content else "${msg.speakerDisplayNameSnapshot}: $content"
+                    content = if (groupParticipantNames.isEmpty()) content else "${msg.speakerDisplayNameSnapshot}: $content",
+                    sourceMessageId = msg.messageId
                 )
             )
         }
@@ -184,7 +220,8 @@ class ContextCompilerV1 {
                     currentContent
                 } else {
                     "${currentMessage.speakerDisplayNameSnapshot}: $currentContent"
-                }
+                },
+                sourceMessageId = currentMessage.messageId
             )
         )
         
@@ -209,7 +246,11 @@ class ContextCompilerV1 {
         durableMemories: List<RoleplayMemoryEntity> = emptyList(),
         rollingSummary: String? = null,
         recentMessageLimit: Int = 24,
-        activeLore: List<ActiveLoreEntry> = emptyList()
+        activeLore: List<ActiveLoreEntry> = emptyList(),
+        supportingCastContext: String? = null,
+        npcBankEnabled: Boolean = false,
+        narratorEnabled: Boolean = false,
+        narratorInstructions: String = ""
     ): List<RoleplayMessage> {
         val messages = compileSoloContext(
             isContinuation = isContinuation,
@@ -225,7 +266,11 @@ class ContextCompilerV1 {
             rollingSummary = rollingSummary,
             recentMessageLimit = recentMessageLimit,
             groupParticipantNames = activeCharacterNames,
-            activeLore = activeLore
+            activeLore = activeLore,
+            supportingCastContext = supportingCastContext,
+            npcBankEnabled = npcBankEnabled,
+            narratorEnabled = narratorEnabled,
+            narratorInstructions = narratorInstructions
         )
         return messages + RoleplayMessage(
             role = Role.USER,

@@ -12,5 +12,6 @@ data class ChatEntity(
     val displayName: String,
     val chatType: ChatType,
     val createdAt: Long = System.currentTimeMillis(),
-    val updatedAt: Long = System.currentTimeMillis()
+    val updatedAt: Long = System.currentTimeMillis(),
+    val contextResetOrderIndex: Long? = null
 )

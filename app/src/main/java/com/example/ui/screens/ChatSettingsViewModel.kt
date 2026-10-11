@@ -122,6 +122,19 @@ class ChatSettingsViewModel(
         updateSettings { it.copy(responseLengthProfile = profile) }
     }
 
+    fun onNarratorEnabledChanged(enabled: Boolean) {
+        updateSettings { it.copy(narratorEnabled = enabled) }
+    }
+
+    fun onNarratorInstructionsChanged(instructions: String) {
+        if (instructions.length > 4000) {
+            _uiState.update { it.copy(error = "Narrator instructions cannot exceed 4,000 characters.") }
+            return
+        }
+        updateSettings { it.copy(narratorInstructions = instructions) }
+        _uiState.update { it.copy(error = null) }
+    }
+
     fun onCustomLengthsChanged(min: Int, target: Int, max: Int) {
         if (isValidCustomLengths(min, target, max)) {
             updateSettings { 

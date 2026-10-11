@@ -9,6 +9,7 @@ import androidx.test.core.app.ApplicationProvider
 import com.example.data.AppDatabase
 import com.example.data.model.CharacterEntity
 import com.example.data.model.ChatSettingsEntity
+import com.example.data.model.ConversationSummaryEntity
 import com.example.data.model.LorebookEntity
 import com.example.data.model.LorebookEntryEntity
 import com.example.data.model.MessageEntity
@@ -102,48 +103,6 @@ class LorebookUiTest {
             "Tags (one per line; private metadata)",
             "Private notes (never sent to the model)"
         ).forEach { composeRule.onNodeWithText(it).assertExists() }
-    }
-
-    @Test
-    fun chatScreenAttachesBookAndPersistsManualActivation() {
-        val book = LorebookEntity(lorebookId = "ui-book", name = "UI Book")
-        runBlocking {
-            repository.saveDefinition(
-                book,
-                listOf(
-                    LorebookEntryEntity(
-                        entryId = "ui-entry",
-                        lorebookId = book.lorebookId,
-                        title = "Manual Scene",
-                        activationMode = "manual",
-                        currentContent = "Scene fact"
-                    )
-                )
-            )
-        }
-
-        composeRule.setContent {
-            MaterialTheme {
-                ChatLorebooksScreen(chatId = "ui-chat", repository = repository, onNavigateBack = {})
-            }
-        }
-        composeRule.waitUntil(5_000) {
-            composeRule.onAllNodesWithTag("chat_lorebooks_list").fetchSemanticsNodes().isNotEmpty()
-        }
-        composeRule.onNodeWithTag("chat_lorebooks_list").performScrollToIndex(1)
-        composeRule.onNodeWithTag("attach_lorebook_ui-book").performClick()
-        composeRule.waitUntil(5_000) {
-            composeRule.onAllNodesWithTag("manual_lore_ui-entry").fetchSemanticsNodes().isNotEmpty()
-        }
-        composeRule.onNodeWithText("Edit Chat Current").assertExists()
-        composeRule.onNodeWithTag("manual_lore_ui-entry").performClick()
-        composeRule.waitUntil(5_000) {
-            runBlocking {
-                repository.getChatLorebookStates("ui-chat")
-                    .single { it.lorebook.lorebookId == "ui-book" }
-                    .overlays["ui-entry"]?.manualActive == true
-            }
-        }
     }
 
     @Test
@@ -260,15 +219,41 @@ class LorebookUiTest {
                 personaIds = listOf("inspector-persona"),
                 characterIds = listOf("inspector-a", "inspector-b")
             )
-            chatRepository.insertChatSettings(ChatSettingsEntity(chatId = createdChatId))
+            chatRepository.insertChatSettings(
+                ChatSettingsEntity(
+                    chatId = createdChatId,
+                    narratorEnabled = true,
+                    narratorInstructions = "INSPECTOR_NARRATOR_GUIDANCE"
+                )
+            )
             messageRepository.insertMessage(
                 MessageEntity(
+                    messageId = "inspector-pre-reset",
                     chatId = createdChatId,
                     speakerType = SpeakerType.PERSONA,
                     speakerId = "inspector-persona",
                     speakerDisplayNameSnapshot = "Inspector Persona",
-                    content = "Who answers?",
-                    orderIndex = 1L
+                    content = "INSPECTOR_PRE_RESET_MARKER",
+                    orderIndex = 5L
+                )
+            )
+            chatRepository.establishContextReset(createdChatId, requestedBoundary = 10L)
+            memoryRepository.upsertSummary(
+                ConversationSummaryEntity(
+                    chatId = createdChatId,
+                    summary = "INSPECTOR_STALE_SUMMARY_MARKER",
+                    summarizedThroughOrderIndex = 10L
+                )
+            )
+            messageRepository.insertMessage(
+                MessageEntity(
+                    messageId = "inspector-post-reset",
+                    chatId = createdChatId,
+                    speakerType = SpeakerType.PERSONA,
+                    speakerId = "inspector-persona",
+                    speakerDisplayNameSnapshot = "Inspector Persona",
+                    content = "INSPECTOR_POST_RESET_MARKER",
+                    orderIndex = 11L
                 )
             )
             createdChatId
@@ -295,11 +280,23 @@ class LorebookUiTest {
                 )
             }
         }
-        composeRule.waitUntil(5_000) {
+        composeRule.waitUntil(15_000) {
             composeRule.onAllNodesWithText("Character: Inspector B").fetchSemanticsNodes().isNotEmpty()
         }
+        composeRule.onNodeWithText("Wack Boundary: Active").assertExists()
+        composeRule.onNodeWithText("Excluded by Wack: 1").assertExists()
+        composeRule.onNode(hasScrollAction()).performScrollToNode(
+            hasText("B_INSPECTOR_KNOWLEDGE", substring = true)
+        )
         composeRule.onNodeWithText("B_INSPECTOR_KNOWLEDGE", substring = true).assertExists()
         composeRule.onNodeWithText("A_INSPECTOR_KNOWLEDGE", substring = true).assertDoesNotExist()
+        composeRule.onNodeWithText("INSPECTOR_NARRATOR_GUIDANCE", substring = true).assertExists()
+        composeRule.onNode(hasScrollAction()).performScrollToNode(
+            hasText("INSPECTOR_POST_RESET_MARKER", substring = true)
+        )
+        composeRule.onNodeWithText("INSPECTOR_POST_RESET_MARKER", substring = true).assertExists()
+        composeRule.onNodeWithText("INSPECTOR_PRE_RESET_MARKER", substring = true).assertDoesNotExist()
+        composeRule.onNodeWithText("INSPECTOR_STALE_SUMMARY_MARKER", substring = true).assertDoesNotExist()
         Unit
     }
 

@@ -27,6 +27,9 @@ interface ChatDao {
     @Query("SELECT * FROM chats WHERE chatId = :id")
     suspend fun getChatById(id: String): ChatEntity?
 
+    @Query("SELECT MAX(orderIndex) FROM messages WHERE chatId = :chatId")
+    suspend fun getLatestMessageOrderIndex(chatId: String): Long?
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertChat(chat: ChatEntity)
 
@@ -42,8 +45,32 @@ interface ChatDao {
     @Query("DELETE FROM messages WHERE chatId = :chatId")
     suspend fun deleteMessagesForChat(chatId: String)
 
+    @Query("DELETE FROM message_attachments WHERE chatId = :chatId")
+    suspend fun deleteMessageAttachmentsForChat(chatId: String)
+
+    @Query("DELETE FROM npc_dossier_updates WHERE chatId = :chatId")
+    suspend fun deleteNpcUpdatesForChat(chatId: String)
+
+    @Query("DELETE FROM npc_dossiers WHERE chatId = :chatId")
+    suspend fun deleteNpcDossiersForChat(chatId: String)
+
+    @Query("DELETE FROM npc_bank_settings WHERE chatId = :chatId")
+    suspend fun deleteNpcSettingsForChat(chatId: String)
+
     @Query("DELETE FROM conversation_summaries WHERE chatId = :chatId")
     suspend fun deleteSummaryForChat(chatId: String)
+
+    @Query("UPDATE chats SET contextResetOrderIndex = :boundary, updatedAt = :updatedAt WHERE chatId = :chatId")
+    suspend fun setContextResetBoundary(chatId: String, boundary: Long, updatedAt: Long)
+
+    @Transaction
+    suspend fun establishContextReset(chatId: String, requestedBoundary: Long): ChatEntity? {
+        val latestOrderIndex = getLatestMessageOrderIndex(chatId)
+        val boundary = maxOf(requestedBoundary, latestOrderIndex ?: requestedBoundary)
+        setContextResetBoundary(chatId, boundary, requestedBoundary)
+        deleteSummaryForChat(chatId)
+        return getChatById(chatId)
+    }
 
     @Query("DELETE FROM roleplay_memories WHERE chatId = :chatId")
     suspend fun deleteMemoriesForChat(chatId: String)
@@ -66,12 +93,31 @@ interface ChatDao {
     @Query("DELETE FROM chat_lorebook_attachments WHERE chatId = :chatId")
     suspend fun deleteLorebookAttachmentsForChat(chatId: String)
 
+    @Query("DELETE FROM coop_events WHERE roomId IN (SELECT roomId FROM coop_rooms WHERE chatId = :chatId)")
+    suspend fun deleteCoopEventsForChat(chatId: String)
+
+    @Query("DELETE FROM coop_message_tombstones WHERE roomId IN (SELECT roomId FROM coop_rooms WHERE chatId = :chatId)")
+    suspend fun deleteCoopMessageTombstonesForChat(chatId: String)
+
+    @Query("DELETE FROM coop_persona_ownership WHERE roomId IN (SELECT roomId FROM coop_rooms WHERE chatId = :chatId)")
+    suspend fun deleteCoopOwnershipsForChat(chatId: String)
+
+    @Query("DELETE FROM coop_participants WHERE roomId IN (SELECT roomId FROM coop_rooms WHERE chatId = :chatId)")
+    suspend fun deleteCoopParticipantsForChat(chatId: String)
+
+    @Query("DELETE FROM coop_rooms WHERE chatId = :chatId")
+    suspend fun deleteCoopRoomsForChat(chatId: String)
+
     @Query("DELETE FROM chats WHERE chatId = :chatId")
     suspend fun deleteChatById(chatId: String)
 
     @Transaction
     suspend fun deleteChatAndOwnedData(chatId: String) {
         deleteGenerationMetadataForChat(chatId)
+        deleteMessageAttachmentsForChat(chatId)
+        deleteNpcUpdatesForChat(chatId)
+        deleteNpcDossiersForChat(chatId)
+        deleteNpcSettingsForChat(chatId)
         deleteMessagesForChat(chatId)
         deleteSummaryForChat(chatId)
         deleteMemoriesForChat(chatId)
@@ -79,6 +125,11 @@ interface ChatDao {
         deleteSettingsForChat(chatId)
         deleteLorebookOverlaysForChat(chatId)
         deleteLorebookAttachmentsForChat(chatId)
+        deleteCoopEventsForChat(chatId)
+        deleteCoopMessageTombstonesForChat(chatId)
+        deleteCoopOwnershipsForChat(chatId)
+        deleteCoopParticipantsForChat(chatId)
+        deleteCoopRoomsForChat(chatId)
         deleteCharacterParticipantsForChat(chatId)
         deletePersonaParticipantsForChat(chatId)
         deleteChatById(chatId)

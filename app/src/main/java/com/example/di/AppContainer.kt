@@ -6,11 +6,20 @@ import com.example.data.AppDatabase
 import com.example.domain.repository.AppearanceRepository
 import com.example.domain.repository.CharacterRepository
 import com.example.domain.repository.ChatRepository
+import com.example.domain.repository.CoopRepository
 import com.example.domain.repository.MessageRepository
 import com.example.domain.repository.MemoryRepository
+import com.example.domain.repository.MessageAttachmentRepository
+import com.example.domain.repository.NpcRepository
 import com.example.domain.repository.LorebookRepository
 import com.example.domain.repository.PersonaRepository
+import com.example.domain.repository.ProfileImageRepository
 import com.example.domain.repository.SettingsRepository
+import com.example.domain.coop.CoopDeviceIdentity
+import com.example.domain.coop.CoopSessionManager
+import com.example.domain.coop.AndroidCoopRoomIdentityStore
+import com.example.domain.coop.AndroidCoopParticipantIdentityStore
+import com.example.domain.npc.NpcStructuredOutputParser
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 
@@ -24,6 +33,12 @@ interface AppContainer {
     val messageRepository: MessageRepository
     val memoryRepository: MemoryRepository
     val lorebookRepository: LorebookRepository? get() = null
+    val coopRepository: CoopRepository? get() = null
+    val coopSessionManager: CoopSessionManager? get() = null
+    val messageAttachmentRepository: MessageAttachmentRepository? get() = null
+    val profileImageRepository: ProfileImageRepository? get() = null
+    val npcRepository: NpcRepository? get() = null
+    val npcOutputParser: NpcStructuredOutputParser? get() = null
 }
 
 class DefaultAppContainer(private val context: Context) : AppContainer {
@@ -41,16 +56,24 @@ class DefaultAppContainer(private val context: Context) : AppContainer {
 
     private val database: AppDatabase by lazy {
         Room.databaseBuilder(context, AppDatabase::class.java, "elsewhere_database")
-            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4)
+            .addMigrations(
+                AppDatabase.MIGRATION_1_2,
+                AppDatabase.MIGRATION_2_3,
+                AppDatabase.MIGRATION_3_4,
+                AppDatabase.MIGRATION_4_5,
+                AppDatabase.MIGRATION_5_6,
+                AppDatabase.MIGRATION_6_7,
+                AppDatabase.MIGRATION_7_8
+            )
             .build()
     }
 
     override val characterRepository: CharacterRepository by lazy {
-        CharacterRepository(database.characterDao(), moshi)
+        CharacterRepository(database.characterDao(), moshi, profileImageRepository)
     }
 
     override val personaRepository: PersonaRepository by lazy {
-        PersonaRepository(database.personaDao(), moshi)
+        PersonaRepository(database.personaDao(), moshi, profileImageRepository)
     }
 
     override val settingsRepository: SettingsRepository by lazy {
@@ -79,5 +102,34 @@ class DefaultAppContainer(private val context: Context) : AppContainer {
 
     override val lorebookRepository: LorebookRepository by lazy {
         LorebookRepository(database.lorebookDao(), moshi)
+    }
+
+    override val messageAttachmentRepository: MessageAttachmentRepository by lazy {
+        MessageAttachmentRepository(context, database)
+    }
+
+    override val profileImageRepository: ProfileImageRepository by lazy {
+        ProfileImageRepository(context)
+    }
+
+    override val npcRepository: NpcRepository by lazy {
+        NpcRepository(database, moshi)
+    }
+
+    override val npcOutputParser: NpcStructuredOutputParser by lazy {
+        NpcStructuredOutputParser(moshi)
+    }
+
+    override val coopRepository: CoopRepository by lazy {
+        CoopRepository(database, moshi, messageAttachmentRepository)
+    }
+
+    override val coopSessionManager: CoopSessionManager by lazy {
+        CoopSessionManager(
+            coopRepository,
+            CoopDeviceIdentity(context),
+            AndroidCoopRoomIdentityStore(),
+            AndroidCoopParticipantIdentityStore()
+        )
     }
 }

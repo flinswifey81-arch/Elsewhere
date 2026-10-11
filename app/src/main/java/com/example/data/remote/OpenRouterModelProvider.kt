@@ -19,6 +19,8 @@ import okhttp3.sse.EventSourceListener
 import okhttp3.sse.EventSources
 import java.io.IOException
 import java.util.UUID
+import java.util.Base64
+import java.util.concurrent.ConcurrentHashMap
 
 class OpenRouterModelProvider(
     private val client: OkHttpClient,
@@ -33,6 +35,7 @@ class OpenRouterModelProvider(
     ) : this(client, moshi, settingsRepository::getApiKey)
 
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
+    private val imageCapabilities = ConcurrentHashMap<String, Boolean>()
 
     override suspend fun getModels(): List<OpenRouterModel> = withContext(Dispatchers.IO) {
         val apiKey = apiKeyProvider() ?: throw IllegalStateException("API key not configured")
@@ -56,16 +59,27 @@ class OpenRouterModelProvider(
             
             data.map { item ->
                 val pricing = item["pricing"] as? Map<String, Any>
+                val architecture = item["architecture"] as? Map<*, *>
+                val inputModalities = (architecture?.get("input_modalities") as? List<*>)
+                    ?.mapNotNull { it?.toString()?.lowercase() }
+                    .orEmpty()
                 OpenRouterModel(
                     id = item["id"]?.toString() ?: "",
                     name = item["name"]?.toString() ?: "",
                     contextLength = (item["context_length"] as? Number)?.toInt() ?: 0,
                     pricingPrompt = pricing?.get("prompt")?.toString() ?: "0",
-                    pricingCompletion = pricing?.get("completion")?.toString() ?: "0"
-                )
+                    pricingCompletion = pricing?.get("completion")?.toString() ?: "0",
+                    inputModalities = inputModalities
+                ).also { model ->
+                    if (inputModalities.isNotEmpty()) {
+                        imageCapabilities[model.id] = "image" in inputModalities
+                    }
+                }
             }
         }
     }
+
+    override suspend fun supportsImageInput(modelId: String): Boolean? = imageCapabilities[modelId]
 
     override suspend fun getEndpoints(modelId: String): List<ProviderEndpoint> = withContext(Dispatchers.IO) {
         val apiKey = apiKeyProvider() ?: throw IllegalStateException("API key not configured")
@@ -118,6 +132,26 @@ class OpenRouterModelProvider(
         messages: List<RoleplayMessage>,
         options: GenerationOptions
     ): Flow<StreamEvent> = callbackFlow {
+        runCatching { ProviderImageLimits.validate(messages.flatMap { it.images }) }.exceptionOrNull()?.let { error ->
+            trySend(StreamEvent.Error(error))
+            close()
+            return@callbackFlow
+        }
+        if (messages.any { it.images.isNotEmpty() }) {
+            when (imageCapabilities[options.modelId]) {
+                false -> {
+                    trySend(StreamEvent.Error(UnsupportedImageModelException(options.modelId)))
+                    close()
+                    return@callbackFlow
+                }
+                null -> {
+                    trySend(StreamEvent.Error(UnconfirmedImageCapabilityException(options.modelId)))
+                    close()
+                    return@callbackFlow
+                }
+                true -> Unit
+            }
+        }
         val apiKey = apiKeyProvider()
         if (apiKey.isNullOrEmpty()) {
             trySend(StreamEvent.Error(IllegalStateException("API key not configured")))
@@ -129,7 +163,30 @@ class OpenRouterModelProvider(
             "model" to options.modelId,
             "stream" to true,
             "messages" to messages.map { msg ->
-                val m = mutableMapOf("role" to msg.role.name.lowercase(), "content" to msg.content)
+                val content: Any = if (msg.images.isEmpty()) {
+                    msg.content
+                } else {
+                    buildList<Map<String, Any>> {
+                        add(
+                            mapOf(
+                                "type" to "text",
+                                "text" to msg.content.ifBlank { "Please respond to the attached image(s)." }
+                            )
+                        )
+                        msg.images.forEach { image ->
+                            val base64 = Base64.getEncoder().encodeToString(image.bytes)
+                            add(
+                                mapOf(
+                                    "type" to "image_url",
+                                    "image_url" to mapOf(
+                                        "url" to "data:${image.mimeType};base64,$base64"
+                                    )
+                                )
+                            )
+                        }
+                    }
+                }
+                val m = mutableMapOf<String, Any>("role" to msg.role.name.lowercase(), "content" to content)
                 if (msg.name != null) m["name"] = msg.name
                 m
             }
@@ -173,8 +230,6 @@ class OpenRouterModelProvider(
         var cachedTokens: Int? = null
         var reportedCost: Double? = null
         var finishReason: String? = null
-        val accumulatedContent = StringBuilder()
-
         val listener = object : EventSourceListener() {
             override fun onEvent(eventSource: EventSource, id: String?, type: String?, data: String) {
                 if (data == "[DONE]") {
@@ -204,8 +259,8 @@ class OpenRouterModelProvider(
                     val content = delta?.get("content")?.toString()
                     
                     if (!content.isNullOrEmpty()) {
-                        // Keep text independent from metadata-only chunks; emit the complete stream once closed.
-                        accumulatedContent.append(content)
+                        // Emit each delta exactly once so cancellation can retain the text already received.
+                        trySendBlocking(StreamEvent.Content(content))
                     }
                     
                     (firstChoice?.get("finish_reason") as? String)?.let { finishReason = it }
@@ -239,6 +294,8 @@ class OpenRouterModelProvider(
                             provider = providerName,
                             generationTimeMs = System.currentTimeMillis() - startTime
                         )
+                        // Preserve identity/routing details already reported even if the user stops before Done.
+                        finalMetadata?.let { trySendBlocking(StreamEvent.Metadata(it)) }
                     }
                 } catch (e: Exception) {
                     // Ignore malformed chunks
@@ -246,9 +303,6 @@ class OpenRouterModelProvider(
             }
 
             override fun onClosed(eventSource: EventSource) {
-                if (accumulatedContent.isNotEmpty()) {
-                    trySendBlocking(StreamEvent.Content(accumulatedContent.toString()))
-                }
                 finalMetadata = finalMetadata?.copy(
                     generationTimeMs = System.currentTimeMillis() - startTime
                 )

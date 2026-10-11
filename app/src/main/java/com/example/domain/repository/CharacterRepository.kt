@@ -11,7 +11,8 @@ import java.util.UUID
 
 class CharacterRepository(
     private val characterDao: CharacterDao,
-    private val moshi: Moshi
+    private val moshi: Moshi,
+    private val profileImageRepository: ProfileImageRepository? = null
 ) {
     private val mapAdapter = moshi.adapter<Map<String, Any?>>(
         Types.newParameterizedType(Map::class.java, String::class.java, Any::class.java)
@@ -25,8 +26,13 @@ class CharacterRepository(
         characterDao.archiveCharacter(id)
     }
 
-    suspend fun deleteCharacterPermanently(id: String): ProfileDeletionResult =
-        characterDao.deleteCharacterPermanently(id).toProfileDeletionResult()
+    suspend fun deleteCharacterPermanently(id: String): ProfileDeletionResult {
+        val result = characterDao.deleteCharacterPermanently(id).toProfileDeletionResult()
+        if (result is ProfileDeletionResult.Deleted) {
+            runCatching { profileImageRepository?.removeImage(ProfileImageKind.CHARACTER, id) }
+        }
+        return result
+    }
 
     fun getManualFields(character: CharacterEntity): ManualCharacterFields =
         ManualCharacterFieldsCodec.toEditableFields(character)
@@ -82,6 +88,7 @@ class CharacterRepository(
             isArchived = false
         )
         characterDao.insertCharacter(duplicated)
+        runCatching { profileImageRepository?.copyImage(ProfileImageKind.CHARACTER, originalId, newId) }
         return newId
     }
 

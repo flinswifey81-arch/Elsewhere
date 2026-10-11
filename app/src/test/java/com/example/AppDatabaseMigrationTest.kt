@@ -132,7 +132,7 @@ class AppDatabaseMigrationTest {
     }
 
     @Test
-    fun migrationFrom3To4ValidatesAgainstRoomAndPreservesExistingChatData() = runBlocking {
+    fun migrationFrom3To8ValidatesAgainstRoomAndPreservesExistingChatData() = runBlocking {
         val helper = FrameworkSQLiteOpenHelperFactory().create(
             SupportSQLiteOpenHelper.Configuration.builder(context)
                 .name(databaseName)
@@ -160,17 +160,142 @@ class AppDatabaseMigrationTest {
         helper.close()
 
         val migrated = Room.databaseBuilder(context, AppDatabase::class.java, databaseName)
-            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4)
+            .addMigrations(
+                AppDatabase.MIGRATION_1_2,
+                AppDatabase.MIGRATION_2_3,
+                AppDatabase.MIGRATION_3_4,
+                AppDatabase.MIGRATION_4_5,
+                AppDatabase.MIGRATION_5_6,
+                AppDatabase.MIGRATION_6_7,
+                AppDatabase.MIGRATION_7_8
+            )
             .allowMainThreadQueries()
             .build()
         try {
-            // Opening through Room executes 3 -> 4 and validates the entire resulting schema.
+            // Opening through Room executes every migration through 8 and validates the resulting schema.
             migrated.openHelper.writableDatabase
             assertEquals("Keep Me", migrated.chatDao().getChatById("chat-keep")?.displayName)
             assertEquals("Preserve this", migrated.messageDao().getMessagesForChatOnce("chat-keep").single().content)
             assertTrue(migrated.lorebookDao().getLorebooksOnce().isEmpty())
+            assertTrue(migrated.coopDao().getRoomForChat("chat-keep") == null)
+            val preserved = migrated.messageDao().getMessagesForChatOnce("chat-keep").single()
+            assertTrue(preserved.responsibleParticipantId == null)
+            assertTrue(preserved.responsibleDeviceId == null)
+            assertTrue(preserved.coOpEventId == null)
+            assertTrue(migrated.messageAttachmentDao().getForChat("chat-keep").isEmpty())
+            assertTrue(migrated.npcDao().getDossiers("chat-keep").isEmpty())
+            assertTrue(migrated.chatDao().getChatById("chat-keep")?.contextResetOrderIndex == null)
         } finally {
             migrated.close()
+        }
+    }
+
+    @Test
+    fun migrationFrom6To7PreservesChatAndAddsEmptyContextResetBoundary() {
+        val helper = FrameworkSQLiteOpenHelperFactory().create(
+            SupportSQLiteOpenHelper.Configuration.builder(context)
+                .name(databaseName)
+                .callback(object : SupportSQLiteOpenHelper.Callback(6) {
+                    override fun onCreate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                        db.execSQL(
+                            "CREATE TABLE chats (" +
+                                "chatId TEXT NOT NULL PRIMARY KEY, displayName TEXT NOT NULL, " +
+                                "chatType TEXT NOT NULL, createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL)"
+                        )
+                    }
+
+                    override fun onUpgrade(
+                        db: androidx.sqlite.db.SupportSQLiteDatabase,
+                        oldVersion: Int,
+                        newVersion: Int
+                    ) = Unit
+                })
+                .build()
+        )
+
+        try {
+            val database = helper.writableDatabase
+            database.execSQL(
+                "INSERT INTO chats (chatId, displayName, chatType, createdAt, updatedAt) " +
+                    "VALUES ('chat-keep', 'Keep Me', 'SOLO', 1, 2)"
+            )
+
+            AppDatabase.MIGRATION_6_7.migrate(database)
+
+            database.query(
+                "SELECT displayName, contextResetOrderIndex FROM chats WHERE chatId = 'chat-keep'"
+            ).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals("Keep Me", cursor.getString(0))
+                assertTrue(cursor.isNull(1))
+            }
+        } finally {
+            helper.close()
+        }
+    }
+
+    @Test
+    fun migrationFrom7To8AddsDurableCoopDeletionTombstones() {
+        val helper = FrameworkSQLiteOpenHelperFactory().create(
+            SupportSQLiteOpenHelper.Configuration.builder(context)
+                .name(databaseName)
+                .callback(object : SupportSQLiteOpenHelper.Callback(7) {
+                    override fun onCreate(db: androidx.sqlite.db.SupportSQLiteDatabase) = Unit
+                    override fun onUpgrade(
+                        db: androidx.sqlite.db.SupportSQLiteDatabase,
+                        oldVersion: Int,
+                        newVersion: Int
+                    ) = Unit
+                })
+                .build()
+        )
+
+        try {
+            val database = helper.writableDatabase
+            database.execSQL(
+                """
+                CREATE TABLE coop_events (
+                    eventId TEXT NOT NULL PRIMARY KEY,
+                    roomId TEXT NOT NULL,
+                    sequence INTEGER NOT NULL,
+                    clientEventId TEXT NOT NULL,
+                    originParticipantId TEXT NOT NULL,
+                    eventType TEXT NOT NULL,
+                    payloadJson TEXT NOT NULL,
+                    createdAt INTEGER NOT NULL,
+                    originPayloadJson TEXT NOT NULL DEFAULT ''
+                )
+                """.trimIndent()
+            )
+            database.execSQL(
+                "INSERT INTO coop_events " +
+                    "(eventId, roomId, sequence, clientEventId, originParticipantId, eventType, payloadJson, createdAt) " +
+                    "VALUES ('delete-event', 'room', 7, 'delete-client', 'host', 'MESSAGE_DELETE', " +
+                    "'{\"messageId\":\"deleted-before-upgrade\"}', 8)"
+            )
+            AppDatabase.MIGRATION_7_8.migrate(database)
+            database.execSQL(
+                "INSERT INTO coop_message_tombstones " +
+                    "(roomId, messageId, deletedSequence, deletedAt) VALUES ('room', 'message', 9, 10)"
+            )
+            database.query(
+                "SELECT deletedSequence, deletedAt FROM coop_message_tombstones " +
+                    "WHERE roomId = 'room' AND messageId = 'message'"
+            ).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals(9L, cursor.getLong(0))
+                assertEquals(10L, cursor.getLong(1))
+            }
+            database.query(
+                "SELECT deletedSequence, deletedAt FROM coop_message_tombstones " +
+                    "WHERE roomId = 'room' AND messageId = 'deleted-before-upgrade'"
+            ).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals(7L, cursor.getLong(0))
+                assertEquals(8L, cursor.getLong(1))
+            }
+        } finally {
+            helper.close()
         }
     }
 

@@ -11,7 +11,8 @@ import java.util.UUID
 
 class PersonaRepository(
     private val personaDao: PersonaDao,
-    private val moshi: Moshi
+    private val moshi: Moshi,
+    private val profileImageRepository: ProfileImageRepository? = null
 ) {
     private val mapAdapter = moshi.adapter<Map<String, Any?>>(
         Types.newParameterizedType(Map::class.java, String::class.java, Any::class.java)
@@ -25,8 +26,13 @@ class PersonaRepository(
         personaDao.archivePersona(id)
     }
 
-    suspend fun deletePersonaPermanently(id: String): ProfileDeletionResult =
-        personaDao.deletePersonaPermanently(id).toProfileDeletionResult()
+    suspend fun deletePersonaPermanently(id: String): ProfileDeletionResult {
+        val result = personaDao.deletePersonaPermanently(id).toProfileDeletionResult()
+        if (result is ProfileDeletionResult.Deleted) {
+            runCatching { profileImageRepository?.removeImage(ProfileImageKind.PERSONA, id) }
+        }
+        return result
+    }
 
     fun getManualFields(persona: PersonaEntity): ManualPersonaFields =
         ManualPersonaFieldsCodec.toEditableFields(persona)
@@ -74,6 +80,7 @@ class PersonaRepository(
             isArchived = false
         )
         personaDao.insertPersona(duplicated)
+        runCatching { profileImageRepository?.copyImage(ProfileImageKind.PERSONA, originalId, newId) }
         return newId
     }
 

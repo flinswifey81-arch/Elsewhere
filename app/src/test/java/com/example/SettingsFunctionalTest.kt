@@ -48,9 +48,15 @@ class SettingsFunctionalTest {
         
         composeTestRule.waitForIdle()
         
-        // Appearance: Theme Mode
-        composeTestRule.onNodeWithText("Theme Mode").assertExists()
-        composeTestRule.onNodeWithText("Dark").performClick()
+        // Appearance: mode and per-device palette selection.
+        composeTestRule.onNodeWithText("Appearance mode").assertExists()
+        composeTestRule.onNodeWithText("Dark").performScrollTo().performClick()
+
+        composeTestRule.onNodeWithText("Ocean Blue").performScrollTo().assertExists()
+        composeTestRule.onNodeWithText("Forest Green").assertExists()
+        composeTestRule.onNodeWithText("Rose").assertExists()
+        composeTestRule.onNodeWithText("Slate").assertExists()
+        composeTestRule.onNodeWithText("Ocean Blue").performClick()
         
         // Legacy accent controls are intentionally hidden in the Regular build.
         composeTestRule.onNodeWithText("Accent Color").assertDoesNotExist()

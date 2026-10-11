@@ -22,8 +22,6 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import com.example.ui.theme.DestructiveBlush
-import com.example.ui.theme.DestructiveWine
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -59,10 +57,10 @@ fun elsewhereTextFieldColors(): TextFieldColors = OutlinedTextFieldDefaults.colo
 
 @Composable
 fun elsewhereDestructiveButtonColors(): ButtonColors = ButtonDefaults.buttonColors(
-    containerColor = DestructiveWine,
-    contentColor = DestructiveBlush,
-    disabledContainerColor = DestructiveWine.copy(alpha = 0.38f),
-    disabledContentColor = DestructiveBlush.copy(alpha = 0.6f)
+    containerColor = MaterialTheme.colorScheme.error,
+    contentColor = MaterialTheme.colorScheme.onError,
+    disabledContainerColor = MaterialTheme.colorScheme.error.copy(alpha = 0.38f),
+    disabledContentColor = MaterialTheme.colorScheme.onError.copy(alpha = 0.6f)
 )
 
 @Composable

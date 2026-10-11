@@ -54,6 +54,7 @@ import org.robolectric.RobolectricTestRunner
 @RunWith(RobolectricTestRunner::class)
 class LorebookGenerationIntegrationTest {
     private lateinit var database: AppDatabase
+    private lateinit var viewModels: TestViewModelOwner
     private val mainDispatcher = UnconfinedTestDispatcher()
     private val moshi = Moshi.Builder().addLast(KotlinJsonAdapterFactory()).build()
 
@@ -64,10 +65,12 @@ class LorebookGenerationIntegrationTest {
         database = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
             .allowMainThreadQueries()
             .build()
+        viewModels = TestViewModelOwner()
     }
 
     @After
     fun tearDown() {
+        viewModels.close()
         database.close()
         Dispatchers.resetMain()
     }
@@ -181,16 +184,18 @@ class LorebookGenerationIntegrationTest {
         val chatId = chatRepository.createSoloChat("Solo", "persona-1", "character-1")
         chatRepository.insertChatSettings(ChatSettingsEntity(chatId = chatId, selectedModelId = "mock/model"))
         installLorebook(chatId, lorebookRepository)
-        val viewModel = ChatDetailViewModel(
-            chatId = chatId,
-            chatRepository = chatRepository,
-            messageRepository = messageRepository,
-            characterRepository = characterRepository,
-            personaRepository = personaRepository,
-            modelProvider = provider,
-            memoryRepository = memoryRepository,
-            lorebookRepository = lorebookRepository
-        )
+        val viewModel = viewModels.create(ChatDetailViewModel::class.java) {
+            ChatDetailViewModel(
+                chatId = chatId,
+                chatRepository = chatRepository,
+                messageRepository = messageRepository,
+                characterRepository = characterRepository,
+                personaRepository = personaRepository,
+                modelProvider = provider,
+                memoryRepository = memoryRepository,
+                lorebookRepository = lorebookRepository
+            )
+        }
         withTimeout(30_000) {
             viewModel.uiState.first { state ->
                 state is ChatUiState.Success && state.historyLoaded

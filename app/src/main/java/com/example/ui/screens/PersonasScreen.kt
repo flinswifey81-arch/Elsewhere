@@ -24,18 +24,23 @@ import androidx.compose.ui.unit.dp
 import com.example.data.model.ManualPersonaFields
 import com.example.data.model.PersonaEntity
 import com.example.domain.repository.PersonaRepository
+import com.example.domain.repository.ProfileImageKind
+import com.example.domain.repository.ProfileImageRepository
 import com.example.domain.repository.ProfileDeletionResult
 import com.example.ui.components.ElsewhereEmptyState
 import com.example.ui.components.elsewhereCardBorder
 import com.example.ui.components.elsewhereDestructiveButtonColors
 import com.example.ui.components.elsewhereTextFieldColors
 import com.example.ui.components.elsewhereTopAppBarColors
+import com.example.ui.components.ProfileImageAvatar
+import com.example.ui.components.ProfileImageEditor
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PersonasScreen(
     repository: PersonaRepository,
+    profileImageRepository: ProfileImageRepository? = null,
     modifier: Modifier = Modifier,
     onPersonaSelected: (String) -> Unit
 ) {
@@ -237,6 +242,8 @@ fun PersonasScreen(
     if (showEditor) {
         ManualPersonaEditor(
             initialFields = editingPersona?.let(repository::getManualFields) ?: ManualPersonaFields(),
+            profileId = editingPersona?.personaId,
+            profileImageRepository = profileImageRepository,
             isEditing = editingPersona != null,
             onCancel = {
                 showEditor = false
@@ -353,18 +360,13 @@ fun PersonasScreen(
                         border = elsewhereCardBorder()
                     ) {
                         Row(modifier = Modifier.padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Surface(
-                                shape = RoundedCornerShape(12.dp),
-                                color = MaterialTheme.colorScheme.secondaryContainer,
-                                modifier = Modifier.size(48.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Face,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
-                                    modifier = Modifier.padding(12.dp)
-                                )
-                            }
+                            ProfileImageAvatar(
+                                repository = profileImageRepository,
+                                kind = ProfileImageKind.PERSONA,
+                                profileId = persona.personaId,
+                                displayName = persona.displayName,
+                                size = 48.dp
+                            )
                             Spacer(modifier = Modifier.width(16.dp))
                             Column(modifier = Modifier.weight(1f)) {
                                 Row(
@@ -437,6 +439,8 @@ fun PersonasScreen(
 @Composable
 private fun ManualPersonaEditor(
     initialFields: ManualPersonaFields,
+    profileId: String?,
+    profileImageRepository: ProfileImageRepository?,
     isEditing: Boolean,
     onCancel: () -> Unit,
     onSave: (ManualPersonaFields) -> Unit,
@@ -477,6 +481,13 @@ private fun ManualPersonaEditor(
                 modifier = Modifier.fillMaxSize().padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
+                ProfileImageEditor(
+                    repository = profileImageRepository,
+                    kind = ProfileImageKind.PERSONA,
+                    profileId = profileId,
+                    displayName = fields.name.ifBlank { "Persona" },
+                    modifier = Modifier.fillMaxWidth()
+                )
                 OutlinedTextField(
                     value = fields.name,
                     onValueChange = { fields = fields.copy(name = it) },

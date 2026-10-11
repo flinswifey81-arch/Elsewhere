@@ -85,6 +85,9 @@ class ChatRepository(
     fun getParticipantsForChat(chatId: String): Flow<List<ChatParticipantEntity>> =
         chatDao.getParticipantsForChat(chatId)
 
+    suspend fun getParticipantsForChatOnce(chatId: String): List<ChatParticipantEntity> =
+        withContext(Dispatchers.IO) { chatDao.getParticipantsForChatOnce(chatId) }
+
     fun getPersonaParticipantsForChat(chatId: String): Flow<List<ChatPersonaParticipantEntity>> =
         chatDao.getPersonaParticipantsForChat(chatId)
 
@@ -111,6 +114,11 @@ class ChatRepository(
     suspend fun updateChat(chat: ChatEntity) = withContext(Dispatchers.IO) {
         chatDao.updateChat(chat)
     }
+
+    suspend fun establishContextReset(chatId: String, requestedBoundary: Long = System.currentTimeMillis()): ChatEntity? =
+        withContext(Dispatchers.IO) {
+            chatDao.establishContextReset(chatId, requestedBoundary)
+        }
 
     suspend fun deleteChat(chatId: String) = withContext(Dispatchers.IO) {
         chatDao.deleteChatAndOwnedData(chatId)

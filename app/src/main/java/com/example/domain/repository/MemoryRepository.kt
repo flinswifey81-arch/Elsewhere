@@ -19,9 +19,12 @@ class MemoryRepository(private val memoryDao: MemoryDao) {
     suspend fun getSummaryOnce(chatId: String): ConversationSummaryEntity? =
         withContext(Dispatchers.IO) { memoryDao.getSummaryOnce(chatId) }
 
-    suspend fun insertIfNew(memory: RoleplayMemoryEntity) = withContext(Dispatchers.IO) {
+    suspend fun insertIfNew(memory: RoleplayMemoryEntity): Boolean = withContext(Dispatchers.IO) {
         if (memoryDao.countMatchingMemory(memory.chatId, memory.characterId, memory.content) == 0) {
             memoryDao.insertMemory(memory)
+            true
+        } else {
+            false
         }
     }
 
@@ -32,5 +35,8 @@ class MemoryRepository(private val memoryDao: MemoryDao) {
     suspend fun upsertSummary(summary: ConversationSummaryEntity) = withContext(Dispatchers.IO) {
         memoryDao.upsertSummary(summary)
     }
-}
 
+    suspend fun deleteSummary(chatId: String) = withContext(Dispatchers.IO) {
+        memoryDao.deleteSummary(chatId)
+    }
+}

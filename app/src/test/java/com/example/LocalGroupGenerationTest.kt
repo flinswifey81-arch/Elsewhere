@@ -1,6 +1,8 @@
 package com.example
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.net.Uri
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.example.data.AppDatabase
@@ -19,10 +21,14 @@ import com.example.domain.provider.ProviderEndpoint
 import com.example.domain.provider.Role
 import com.example.domain.provider.RoleplayMessage
 import com.example.domain.provider.StreamEvent
+import com.example.domain.coop.CoopDeviceIdentity
+import com.example.domain.coop.CoopSessionManager
 import com.example.domain.repository.CharacterRepository
 import com.example.domain.repository.ChatRepository
+import com.example.domain.repository.CoopRepository
 import com.example.domain.repository.MemoryRepository
 import com.example.domain.repository.MessageRepository
+import com.example.domain.repository.MessageAttachmentRepository
 import com.example.domain.repository.LorebookRepository
 import com.example.domain.repository.PersonaRepository
 import com.example.ui.screens.ChatDetailViewModel
@@ -52,19 +58,23 @@ import org.robolectric.RobolectricTestRunner
 @RunWith(RobolectricTestRunner::class)
 class LocalGroupGenerationTest {
     private lateinit var database: AppDatabase
+    private lateinit var context: Context
+    private lateinit var viewModels: TestViewModelOwner
     private val mainDispatcher = UnconfinedTestDispatcher()
 
     @Before
     fun setUp() {
         Dispatchers.setMain(mainDispatcher)
-        val context = ApplicationProvider.getApplicationContext<Context>()
+        context = ApplicationProvider.getApplicationContext()
         database = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
             .allowMainThreadQueries()
             .build()
+        viewModels = TestViewModelOwner()
     }
 
     @After
     fun tearDown() {
+        viewModels.close()
         database.close()
         Dispatchers.resetMain()
     }
@@ -151,6 +161,48 @@ class LocalGroupGenerationTest {
     }
 
     @Test
+    fun groupCharactersAndRegenerationReuseOriginImageButContinueDoesNot() = runBlocking {
+        val provider = SequentialGroupProvider(listOf("A reply", "B reply", "B regenerated", " continued"))
+        val harness = createHarness(provider)
+        val source = java.io.File(context.cacheDir, "group-origin-image.png")
+        val bitmap = Bitmap.createBitmap(4, 4, Bitmap.Config.ARGB_8888)
+        source.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        bitmap.recycle()
+        harness.viewModel.addDraftImage(Uri.fromFile(source))
+        withTimeout(15_000) {
+            harness.viewModel.uiState.first { it is ChatUiState.Success && it.draftAttachments.size == 1 }
+        }
+        harness.viewModel.onDraftChanged("Both of you, inspect this.")
+        harness.viewModel.sendMessage()
+        withTimeout(15_000) { harness.messageRepository.getMessagesForChat(harness.chatId).first { it.size == 1 } }
+
+        harness.viewModel.generateGroupResponse("character-a")
+        awaitMessages(harness, 2)
+        harness.viewModel.generateGroupResponse("character-b")
+        val replyB = awaitMessages(harness, 3).last()
+        harness.viewModel.regenerateMessage(replyB.messageId)
+        val regenerated = withTimeout(15_000) {
+            harness.messageRepository.getMessagesForChat(harness.chatId).first { messages ->
+                messages.any { it.content == "B regenerated" && it.isPrimaryVariant }
+            }
+        }.single { it.content == "B regenerated" }
+        harness.viewModel.continueMessage(regenerated.messageId)
+        withTimeout(15_000) {
+            harness.messageRepository.getMessagesForChat(harness.chatId).first { messages ->
+                messages.any { it.messageId == regenerated.messageId && it.content == "B regenerated continued" }
+            }
+        }
+
+        val hash = provider.requests.first().single { it.images.isNotEmpty() }.images.single().sha256
+        provider.requests.take(3).forEach { request ->
+            assertEquals(hash, request.single { it.images.isNotEmpty() }.images.single().sha256)
+        }
+        assertTrue(provider.requests.last().all { it.images.isEmpty() })
+        source.delete()
+        Unit
+    }
+
+    @Test
     fun participantControlsPersistOrderMuteRemoveAndReaddWithoutDeletingHistory() = runBlocking {
         val chatRepository = ChatRepository(database.chatDao(), database.messageDao())
         val messageRepository = MessageRepository(database.messageDao())
@@ -196,6 +248,119 @@ class LocalGroupGenerationTest {
         val restored = database.chatDao().getParticipantsForChatOnce(chatId)
         assertEquals(listOf("character-b", "character-a"), restored.map { it.characterId })
         assertTrue(restored.single { it.characterId == "character-a" }.isActive)
+    }
+
+    @Test
+    fun disabledCoopRoomNeverCallsProvider() = runBlocking {
+        val provider = SequentialGroupProvider(listOf("must not run"))
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val moshi = Moshi.Builder().addLast(KotlinJsonAdapterFactory()).build()
+        val coopRepository = CoopRepository(database, moshi)
+        val manager = CoopSessionManager(
+            repository = coopRepository,
+            deviceIdentity = CoopDeviceIdentity(context),
+            networkingEnabled = { false }
+        )
+        val harness = createHarness(provider, coopSessionManager = manager)
+        coopRepository.createHostRoom(
+            harness.chatId,
+            "room-device",
+            "Host",
+            "persona",
+            "Persona"
+        )
+        harness.messageRepository.insertMessage(
+            MessageEntity(
+                chatId = harness.chatId,
+                speakerType = SpeakerType.PERSONA,
+                speakerId = "persona",
+                speakerDisplayNameSnapshot = "Persona",
+                content = "Do not spend credits.",
+                orderIndex = 1L
+            )
+        )
+
+        harness.viewModel.selectGroupCharacter("character-a")
+        harness.viewModel.generateGroupResponse()
+
+        withTimeout(5_000) {
+            harness.viewModel.uiState.first { state ->
+                state is ChatUiState.Success && state.generationError?.contains("disabled") == true
+            }
+        }
+        assertTrue(provider.requests.isEmpty())
+    }
+
+    @Test
+    fun privateWackAndMemoryToolsCannotMutateStateWhileCoopIsConfigured() = runBlocking {
+        val provider = SequentialGroupProvider(emptyList())
+        val moshi = Moshi.Builder().addLast(KotlinJsonAdapterFactory()).build()
+        val coopRepository = CoopRepository(database, moshi)
+        val manager = CoopSessionManager(
+            repository = coopRepository,
+            deviceIdentity = CoopDeviceIdentity(context),
+            networkingEnabled = { false }
+        )
+        val harness = createHarness(provider, coopSessionManager = manager)
+        val invite = coopRepository.createHostRoom(
+            harness.chatId,
+            "room-device",
+            "Host",
+            "persona",
+            "Persona"
+        )
+        manager.load(harness.chatId)
+        assertEquals(invite.room.roomId, manager.state.value.room?.roomId)
+
+        harness.viewModel.wackContext()
+        val wackBlocked = withTimeout(5_000) {
+            harness.viewModel.uiState.first { state ->
+                state is ChatUiState.Success &&
+                    state.inChatToolStatus?.message?.contains("End local co-op") == true
+            } as ChatUiState.Success
+        }
+        assertTrue(wackBlocked.inChatToolStatus?.message?.contains("partner's reset boundary") == true)
+        assertEquals(null, database.chatDao().getChatById(harness.chatId)?.contextResetOrderIndex)
+
+        harness.viewModel.updateMemoryNow()
+        val memoryBlocked = harness.viewModel.uiState.value as ChatUiState.Success
+        assertTrue(memoryBlocked.inChatToolStatus?.message?.contains("End local co-op") == true)
+        assertTrue(database.memoryDao().getMemoriesOnce(harness.chatId, "character-a").isEmpty())
+        assertEquals(null, database.memoryDao().getSummaryOnce(harness.chatId))
+    }
+
+    @Test
+    fun narratorGroupGenerationUsesOneRequestForSelectedCharacterIdentity() = runBlocking {
+        val provider = SequentialGroupProvider(listOf("C narrated reply"))
+        val harness = createHarness(
+            provider = provider,
+            narratorEnabled = true,
+            narratorInstructions = "Keep the storm visible in the shared scene."
+        )
+        database.characterDao().insertCharacter(character("character-c", "Character C", "C_ONLY_KNOWLEDGE"))
+        harness.chatRepository.addGroupCharacter(harness.chatId, "character-c")
+        withTimeout(30_000) {
+            harness.viewModel.uiState.first { state ->
+                state is ChatUiState.Success &&
+                    state.groupCharacters.any { it.character.characterId == "character-c" }
+            }
+        }
+
+        harness.viewModel.onDraftChanged("C, narrate what happens next.")
+        harness.viewModel.sendMessage()
+        withTimeout(15_000) {
+            harness.messageRepository.getMessagesForChat(harness.chatId).first { it.size == 1 }
+        }
+        harness.viewModel.selectGroupCharacter("character-c")
+        harness.viewModel.generateGroupResponse()
+        val completed = awaitMessages(harness, 2)
+
+        assertEquals(1, provider.requests.size)
+        assertEquals("character-c", completed.last().speakerId)
+        val systemContext = provider.requests.single().first().content
+        assertTrue(systemContext.contains("Keep the storm visible in the shared scene."))
+        assertTrue(systemContext.contains("C_ONLY_KNOWLEDGE"))
+        assertFalse(systemContext.contains("A_ONLY_KNOWLEDGE"))
     }
 
     @Test
@@ -419,7 +584,10 @@ class LocalGroupGenerationTest {
         provider: ModelProvider,
         routingMode: ProviderRoutingMode = ProviderRoutingMode.AUTO,
         providerEndpoint: String? = null,
-        installLorebook: Boolean = false
+        installLorebook: Boolean = false,
+        coopSessionManager: CoopSessionManager? = null,
+        narratorEnabled: Boolean = false,
+        narratorInstructions: String = ""
     ): Harness {
         val moshi = Moshi.Builder().addLast(KotlinJsonAdapterFactory()).build()
         val characterRepository = CharacterRepository(database.characterDao(), moshi)
@@ -428,6 +596,7 @@ class LocalGroupGenerationTest {
         val messageRepository = MessageRepository(database.messageDao())
         val memoryRepository = MemoryRepository(database.memoryDao())
         val lorebookRepository = LorebookRepository(database.lorebookDao(), moshi)
+        val attachmentRepository = MessageAttachmentRepository(context, database)
 
         database.characterDao().insertCharacter(character("character-a", "Character A", "A_ONLY_KNOWLEDGE"))
         database.characterDao().insertCharacter(character("character-b", "Character B", "B_ONLY_KNOWLEDGE"))
@@ -442,7 +611,9 @@ class LocalGroupGenerationTest {
                 chatId = chatId,
                 selectedModelId = "mock/model",
                 providerRoutingMode = routingMode,
-                providerEndpoint = providerEndpoint
+                providerEndpoint = providerEndpoint,
+                narratorEnabled = narratorEnabled,
+                narratorInstructions = narratorInstructions
             )
         )
         if (installLorebook) {
@@ -473,16 +644,20 @@ class LocalGroupGenerationTest {
             lorebookRepository.attachLorebook(chatId, lorebook.lorebookId)
         }
 
-        val viewModel = ChatDetailViewModel(
-            chatId = chatId,
-            chatRepository = chatRepository,
-            messageRepository = messageRepository,
-            characterRepository = characterRepository,
-            personaRepository = personaRepository,
-            modelProvider = provider,
-            memoryRepository = memoryRepository,
-            lorebookRepository = lorebookRepository
-        )
+        val viewModel = viewModels.create(ChatDetailViewModel::class.java) {
+            ChatDetailViewModel(
+                chatId = chatId,
+                chatRepository = chatRepository,
+                messageRepository = messageRepository,
+                characterRepository = characterRepository,
+                personaRepository = personaRepository,
+                modelProvider = provider,
+                memoryRepository = memoryRepository,
+                lorebookRepository = lorebookRepository,
+                coopSessionManager = coopSessionManager,
+                messageAttachmentRepository = attachmentRepository
+            )
+        }
         withTimeout(30_000) {
             viewModel.uiState.first { state ->
                 state is ChatUiState.Success &&
@@ -490,7 +665,7 @@ class LocalGroupGenerationTest {
                     state.groupCharacters.size == 2
             }
         }
-        return Harness(chatId, viewModel, messageRepository, chatRepository, lorebookRepository)
+        return Harness(chatId, viewModel, messageRepository, chatRepository, lorebookRepository, attachmentRepository)
     }
 
     private data class Harness(
@@ -498,7 +673,8 @@ class LocalGroupGenerationTest {
         val viewModel: ChatDetailViewModel,
         val messageRepository: MessageRepository,
         val chatRepository: ChatRepository,
-        val lorebookRepository: LorebookRepository
+        val lorebookRepository: LorebookRepository,
+        val attachmentRepository: MessageAttachmentRepository
     )
 
     private class SequentialGroupProvider(
@@ -511,6 +687,7 @@ class LocalGroupGenerationTest {
 
         override suspend fun getModels(): List<OpenRouterModel> = emptyList()
         override suspend fun getEndpoints(modelId: String): List<ProviderEndpoint> = emptyList()
+        override suspend fun supportsImageInput(modelId: String): Boolean = true
 
         override fun streamResponse(
             messages: List<RoleplayMessage>,

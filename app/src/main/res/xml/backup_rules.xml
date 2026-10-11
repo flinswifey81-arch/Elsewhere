@@ -7,4 +7,6 @@
 -->
 <full-backup-content>
     <exclude domain="file" path="encrypted_api_key.dat" />
+    <exclude domain="file" path="message_attachments/" />
+    <exclude domain="file" path="profile_images/" />
 </full-backup-content>

@@ -24,18 +24,23 @@ import androidx.compose.ui.unit.dp
 import com.example.data.model.CharacterEntity
 import com.example.data.model.ManualCharacterFields
 import com.example.domain.repository.CharacterRepository
+import com.example.domain.repository.ProfileImageKind
+import com.example.domain.repository.ProfileImageRepository
 import com.example.domain.repository.ProfileDeletionResult
 import com.example.ui.components.ElsewhereEmptyState
 import com.example.ui.components.elsewhereCardBorder
 import com.example.ui.components.elsewhereDestructiveButtonColors
 import com.example.ui.components.elsewhereTextFieldColors
 import com.example.ui.components.elsewhereTopAppBarColors
+import com.example.ui.components.ProfileImageAvatar
+import com.example.ui.components.ProfileImageEditor
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CharactersScreen(
     repository: CharacterRepository,
+    profileImageRepository: ProfileImageRepository? = null,
     modifier: Modifier = Modifier,
     onCharacterSelected: (String) -> Unit
 ) {
@@ -238,6 +243,8 @@ fun CharactersScreen(
     if (showEditor) {
         ManualCharacterEditor(
             initialFields = editingCharacter?.let(repository::getManualFields) ?: ManualCharacterFields(),
+            profileId = editingCharacter?.characterId,
+            profileImageRepository = profileImageRepository,
             isEditing = editingCharacter != null,
             onCancel = {
                 showEditor = false
@@ -348,18 +355,13 @@ fun CharactersScreen(
                         border = elsewhereCardBorder()
                     ) {
                         Row(modifier = Modifier.padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Surface(
-                                shape = RoundedCornerShape(12.dp),
-                                color = MaterialTheme.colorScheme.primaryContainer,
-                                modifier = Modifier.size(48.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Person,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                    modifier = Modifier.padding(12.dp)
-                                )
-                            }
+                            ProfileImageAvatar(
+                                repository = profileImageRepository,
+                                kind = ProfileImageKind.CHARACTER,
+                                profileId = character.characterId,
+                                displayName = character.displayName,
+                                size = 48.dp
+                            )
                             Spacer(modifier = Modifier.width(16.dp))
                             Column(modifier = Modifier.weight(1f)) {
                                 Row(
@@ -432,6 +434,8 @@ fun CharactersScreen(
 @Composable
 private fun ManualCharacterEditor(
     initialFields: ManualCharacterFields,
+    profileId: String?,
+    profileImageRepository: ProfileImageRepository?,
     isEditing: Boolean,
     onCancel: () -> Unit,
     onSave: (ManualCharacterFields) -> Unit,
@@ -468,6 +472,15 @@ private fun ManualCharacterEditor(
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
+            item {
+                ProfileImageEditor(
+                    repository = profileImageRepository,
+                    kind = ProfileImageKind.CHARACTER,
+                    profileId = profileId,
+                    displayName = fields.name.ifBlank { "Character" },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
             item { EditorSectionTitle("Identity & Opening") }
             item {
                 CharacterTextField("Name", fields.name, { fields = fields.copy(name = it) }, singleLine = true)

@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -8,17 +9,20 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.example.domain.repository.AppearanceSettings
 import com.example.domain.repository.AppearanceRepository
 import com.example.domain.repository.ApiKeyRepository
+import com.example.domain.repository.ColorPalette
 import kotlinx.coroutines.launch
 import com.example.domain.repository.ThemeMode
 import com.example.ui.components.elsewhereCardBorder
 import com.example.ui.components.elsewhereDestructiveButtonColors
 import com.example.ui.components.elsewhereTextFieldColors
 import com.example.ui.components.elsewhereTopAppBarColors
+import com.example.ui.theme.getLightColorScheme
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -69,10 +73,10 @@ fun SettingsScreen(
                     border = elsewhereCardBorder()
                 ) {
                     Column(modifier = Modifier.padding(20.dp)) {
-                        Text("Theme Mode", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Row(
+                        Text("Appearance mode", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Column(
                             modifier = Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 16.dp),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             listOf(
                                 ThemeMode.SYSTEM to "System",
@@ -84,9 +88,42 @@ fun SettingsScreen(
                                     onClick = {
                                         coroutineScope.launch { appearanceRepository.updateThemeMode(mode) }
                                     },
-                                    label = { Text(label) }
+                                    label = { Text(label) },
+                                    modifier = Modifier.fillMaxWidth().testTag("appearance_mode_${mode.name.lowercase()}")
                                 )
                             }
+                        }
+
+                        Text(
+                            "Color palette",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            "Saved on this device only.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 2.dp, bottom = 8.dp)
+                        )
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            ColorPalette.selectable.forEach { palette ->
+                                PaletteChoice(
+                                    palette = palette,
+                                    selected = appearanceSettings.colorPalette == palette &&
+                                        appearanceSettings.legacyAccentOverride == null,
+                                    onClick = {
+                                        coroutineScope.launch { appearanceRepository.updateColorPalette(palette) }
+                                    }
+                                )
+                            }
+                        }
+                        appearanceSettings.legacyAccentOverride?.let { legacy ->
+                            Text(
+                                "Existing $legacy customization is preserved until you choose a palette above.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(top = 8.dp)
+                            )
                         }
 
                         Text("Font Size: ${appearanceSettings.fontSize.toInt()}sp", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -193,6 +230,52 @@ fun SettingsScreen(
                         Spacer(modifier = Modifier.height(8.dp))
                         Text("Version 1.0", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PaletteChoice(
+    palette: ColorPalette,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    val preview = getLightColorScheme(palette)
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .selectable(selected = selected, onClick = onClick, role = Role.RadioButton)
+            .testTag("palette_${palette.storageId}"),
+        colors = CardDefaults.cardColors(
+            containerColor = if (selected) MaterialTheme.colorScheme.primaryContainer
+                else MaterialTheme.colorScheme.surfaceContainer
+        ),
+        border = elsewhereCardBorder()
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                RadioButton(selected = selected, onClick = null)
+                Text(palette.displayName, modifier = Modifier.weight(1f))
+            }
+            Row(
+                modifier = Modifier.padding(start = 50.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                listOf(preview.primary, preview.primaryContainer, preview.secondary, preview.surface).forEach { color ->
+                    Surface(
+                        modifier = Modifier.size(22.dp),
+                        shape = RoundedCornerShape(11.dp),
+                        color = color,
+                        border = androidx.compose.foundation.BorderStroke(1.dp, preview.outline)
+                    ) {}
                 }
             }
         }

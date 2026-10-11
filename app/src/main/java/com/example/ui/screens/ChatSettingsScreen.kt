@@ -85,6 +85,44 @@ fun ChatSettingsScreen(
                     }
                 }
 
+                Text("Narrator", style = MaterialTheme.typography.titleMedium)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Add narrator guidance")
+                    Switch(
+                        checked = uiState.settings?.narratorEnabled == true,
+                        onCheckedChange = viewModel::onNarratorEnabledChanged
+                    )
+                }
+                Text(
+                    "Adds scene and world narration to the same normal Character reply. It is not an independent AI, speaker turn, second request, or hard knowledge-isolation boundary. Turning it off keeps these instructions and the NPC Bank intact.",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                var narratorInstructions by remember(uiState.settings?.chatId) {
+                    mutableStateOf(uiState.settings?.narratorInstructions.orEmpty())
+                }
+                LaunchedEffect(uiState.settings?.narratorInstructions) {
+                    narratorInstructions = uiState.settings?.narratorInstructions.orEmpty()
+                }
+                OutlinedTextField(
+                    value = narratorInstructions,
+                    onValueChange = { if (it.length <= 4000) narratorInstructions = it },
+                    label = { Text("Narrator instructions") },
+                    supportingText = { Text("${narratorInstructions.length}/4000") },
+                    minLines = 3,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = elsewhereTextFieldColors()
+                )
+                Button(
+                    onClick = { viewModel.onNarratorInstructionsChanged(narratorInstructions) },
+                    enabled = narratorInstructions != uiState.settings?.narratorInstructions
+                ) { Text("Save Narrator Instructions") }
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
                 // Advanced Generation Params
                 Text("Generation Parameters", style = MaterialTheme.typography.titleMedium)
                 

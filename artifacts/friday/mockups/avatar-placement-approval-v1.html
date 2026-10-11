@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Elsewhere avatar placement approval</title>
+  <style>
+    :root {
+      --board: #0b0d12;
+      --ink: #f0ded8;
+      --muted: #b5adb5;
+      --phone: #11171d;
+      --surface: #1c252d;
+      --surface-high: #303c47;
+      --line: #48545f;
+      --accent: #bbc9d5;
+      --accent-ink: #11171d;
+      --persona: #435363;
+      --character: #303c47;
+      --gold: #f8cea3;
+      --danger: #f2b7c3;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; width: 100%; min-height: 100%; background: var(--board); color: var(--ink); }
+    body { font-family: Inter, "Segoe UI", sans-serif; }
+    .board { width: 1760px; min-height: 1040px; padding: 42px 46px 50px; }
+    .board-head { display: flex; align-items: flex-end; justify-content: space-between; margin: 0 16px 26px; }
+    h1 { margin: 0 0 5px; font: 600 31px Georgia, serif; letter-spacing: .2px; }
+    .subtitle { color: var(--muted); font-size: 15px; }
+    .legend { color: var(--gold); border: 1px solid #7a654f; border-radius: 999px; padding: 9px 15px; font-size: 12px; letter-spacing: .8px; text-transform: uppercase; }
+    .phones { display: grid; grid-template-columns: repeat(4, 390px); gap: 34px; align-items: start; }
+    .panel-label { color: var(--accent); font: 600 17px Georgia, serif; margin: 0 0 10px 14px; }
+    .phone { position: relative; height: 844px; overflow: hidden; border-radius: 36px; background: var(--phone); border: 2px solid #39434c; box-shadow: 0 24px 55px rgba(0,0,0,.42); }
+    .status { height: 31px; display: flex; align-items: center; justify-content: space-between; padding: 0 22px; font-size: 11px; color: #d3ced3; }
+    .topbar { height: 62px; display: flex; align-items: center; gap: 12px; padding: 0 16px; background: #151d24; border-bottom: 1px solid #2c3740; }
+    .topbar.center { justify-content: center; }
+    .topbar h2 { margin: 0; font: 600 23px Georgia, serif; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .topbar .spacer { flex: 1; }
+    .icon { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 50%; color: var(--accent); font-size: 22px; }
+    .content { height: calc(100% - 31px - 62px); padding: 16px; overflow: hidden; }
+    .content.with-nav { height: calc(100% - 31px - 62px - 69px); }
+    .profile-card { display: grid; grid-template-columns: 52px minmax(0,1fr) 32px 32px; gap: 11px; align-items: center; min-height: 94px; padding: 14px; margin-bottom: 12px; background: var(--surface); border: 1px solid #38434d; border-radius: 17px; }
+    .avatar { position: relative; flex: 0 0 auto; display: grid; place-items: center; overflow: hidden; background: linear-gradient(145deg,#5b6571,#26313b); color: #fff; border: 1px solid rgba(255,255,255,.16); box-shadow: inset 0 0 0 1px rgba(0,0,0,.12); font: 600 19px Georgia, serif; }
+    .avatar.list { width: 52px; height: 52px; border-radius: 13px; }
+    .avatar.editor { width: 102px; height: 102px; border-radius: 24px; font-size: 34px; }
+    .avatar.chat { width: 36px; height: 36px; border-radius: 10px; margin-top: 19px; }
+    .avatar.a { background: radial-gradient(circle at 54% 32%,#e0b79d 0 13%,transparent 14%), radial-gradient(circle at 50% 40%,#c88973 0 23%,transparent 24%), linear-gradient(150deg,#7c5770,#332c46); }
+    .avatar.b { background: radial-gradient(circle at 50% 33%,#e4c3aa 0 13%,transparent 14%), radial-gradient(circle at 50% 42%,#8a533d 0 24%,transparent 25%), linear-gradient(150deg,#476979,#252d45); }
+    .avatar.c { background: radial-gradient(circle at 48% 33%,#bd8d70 0 13%,transparent 14%), radial-gradient(circle at 49% 42%,#2e2933 0 25%,transparent 26%), linear-gradient(150deg,#596a53,#26332b); }
+    .avatar.d { background: radial-gradient(circle at 50% 32%,#efc8ae 0 13%,transparent 14%), radial-gradient(circle at 50% 42%,#c7cbd0 0 25%,transparent 26%), linear-gradient(150deg,#6e567b,#302b40); }
+    .profile-copy { min-width: 0; }
+    .profile-name { font: 600 18px Georgia, serif; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .profile-sub { margin-top: 5px; color: var(--muted); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .mini-action { color: #c7c0c8; font-size: 18px; text-align: center; }
+    .mini-action.delete { color: var(--danger); }
+    .fab { position: absolute; right: 18px; min-width: 138px; height: 47px; padding: 0 18px; display: flex; align-items: center; justify-content: center; gap: 8px; background: var(--accent); color: var(--accent-ink); border-radius: 15px; font-weight: 700; font-size: 13px; box-shadow: 0 8px 18px rgba(0,0,0,.32); }
+    .fab.new { bottom: 143px; }
+    .fab.import { bottom: 84px; background: var(--surface-high); color: var(--ink); border: 1px solid #53616c; }
+    .bottom-nav { position: absolute; inset: auto 0 0; height: 69px; display: grid; grid-template-columns: repeat(5,1fr); align-items: center; background: #151d24; border-top: 1px solid #2c3740; color: #8f99a1; }
+    .nav-item { text-align: center; font-size: 10px; line-height: 1.4; }
+    .nav-item b { display: block; font-size: 20px; color: inherit; }
+    .nav-item.active { color: var(--accent); }
+    .editor-card { border: 1px solid #3a4650; border-radius: 20px; background: var(--surface); padding: 18px; }
+    .editor-avatar-row { display: grid; grid-template-columns: 102px 1fr; gap: 18px; align-items: center; margin-bottom: 22px; }
+    .eyebrow { color: var(--muted); font-size: 11px; letter-spacing: .7px; text-transform: uppercase; }
+    .editor-note { margin-top: 6px; color: var(--muted); font-size: 12px; line-height: 1.4; }
+    .button-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 11px; }
+    .button { border-radius: 10px; border: 1px solid #66727d; padding: 8px 10px; font-weight: 650; color: var(--accent); font-size: 12px; }
+    .button.remove { color: var(--danger); border-color: #80515c; }
+    .field { height: 58px; margin: 12px 0; padding: 9px 13px; border: 1px solid #52606a; border-radius: 14px; color: var(--muted); font-size: 11px; }
+    .field strong { display: block; color: var(--ink); font-size: 14px; margin-top: 5px; font-weight: 500; }
+    .field.tall { height: 144px; }
+    .save { margin-left: auto; color: var(--accent); font-weight: 700; }
+    .chat-content { height: calc(100% - 31px - 62px - 98px); padding: 14px 12px 4px; overflow: hidden; }
+    .message { display: flex; gap: 8px; align-items: flex-start; margin-bottom: 13px; }
+    .message.persona { flex-direction: row-reverse; }
+    .message-stack { max-width: calc(100% - 48px); }
+    .message.persona .message-stack { display: flex; flex-direction: column; align-items: flex-end; }
+    .speaker { margin: 0 8px 4px; color: var(--muted); font-size: 11px; }
+    .bubble { max-width: 292px; padding: 11px 13px; border-radius: 16px 16px 16px 3px; background: var(--character); color: #ded9de; font-size: 13px; line-height: 1.43; }
+    .persona .bubble { border-radius: 16px 16px 3px 16px; background: var(--persona); color: #f0e9e2; }
+    .bubble em { color: #c5bdc6; }
+    .variant { margin: 5px 8px 0; color: #8f9aa3; font-size: 10px; }
+    .composer { position: absolute; inset: auto 0 0; min-height: 98px; padding: 10px 12px 15px; background: #151d24; border-top: 1px solid #2c3740; }
+    .composer-box { height: 52px; border-radius: 17px; background: var(--surface); border: 1px solid #424e58; display: grid; grid-template-columns: 36px 1fr 42px; align-items: center; padding: 0 7px; color: #8f99a1; font-size: 12px; }
+    .send { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 12px; background: var(--accent); color: var(--accent-ink); font-size: 18px; }
+    .group-strip { display: flex; align-items: center; gap: 8px; margin: 0 0 12px; padding: 8px 9px; border-radius: 14px; background: var(--surface); border: 1px solid #36414a; }
+    .group-strip .avatar { width: 31px; height: 31px; border-radius: 9px; font-size: 12px; margin: 0; }
+    .group-strip span { font-size: 11px; color: var(--muted); }
+    .group-strip strong { color: var(--accent); }
+    .callout { position: absolute; left: 15px; right: 15px; bottom: 13px; color: #8e989f; font-size: 11px; text-align: center; }
+  </style>
+</head>
+<body>
+  <main class="board">
+    <header class="board-head">
+      <div>
+        <h1>Elsewhere · local profile portraits</h1>
+        <div class="subtitle">Approval mockup — rounded-square images reuse the current avatar slots with minimal layout change.</div>
+      </div>
+      <div class="legend">Illustrative portraits only · not user-selected art</div>
+    </header>
+    <section class="phones">
+      <article>
+        <div class="panel-label">1 · Persona / Character lists</div>
+        <div class="phone">
+          <div class="status"><span>9:41</span><span>● ● ▰</span></div>
+          <div class="topbar center"><h2>Personas</h2></div>
+          <div class="content with-nav">
+            <div class="profile-card">
+              <div class="avatar list a" aria-label="illustrative portrait"></div>
+              <div class="profile-copy"><div class="profile-name">Mara · Wayfarer</div><div class="profile-sub">Mara Venn · aliases: Mars</div></div>
+              <div class="mini-action">✎</div><div class="mini-action delete">⌫</div>
+            </div>
+            <div class="profile-card">
+              <div class="avatar list c" aria-label="illustrative portrait"></div>
+              <div class="profile-copy"><div class="profile-name">Talia · Archive AU</div><div class="profile-sub">Talia Rowan</div></div>
+              <div class="mini-action">✎</div><div class="mini-action delete">⌫</div>
+            </div>
+            <div class="profile-card">
+              <div class="avatar list">EV</div>
+              <div class="profile-copy"><div class="profile-name">Evelyn · Canon</div><div class="profile-sub">No portrait — initials fallback</div></div>
+              <div class="mini-action">✎</div><div class="mini-action delete">⌫</div>
+            </div>
+          </div>
+          <div class="fab"><span>＋</span><span>New Persona</span></div>
+          <div class="bottom-nav">
+            <div class="nav-item"><b>⌂</b>Home</div><div class="nav-item"><b>☵</b>Chats</div><div class="nav-item active"><b>☺</b>Personas</div><div class="nav-item"><b>♙</b>Characters</div>
+          </div>
+        </div>
+      </article>
+
+      <article>
+        <div class="panel-label">2 · Profile editor control</div>
+        <div class="phone">
+          <div class="status"><span>9:41</span><span>● ● ▰</span></div>
+          <div class="topbar"><span class="icon">‹</span><h2>Edit Character</h2><span class="spacer"></span><span class="save">Save</span></div>
+          <div class="content">
+            <div class="editor-card">
+              <div class="editor-avatar-row">
+                <div class="avatar editor b" aria-label="illustrative portrait"></div>
+                <div>
+                  <div class="eyebrow">Profile picture</div>
+                  <div class="editor-note">Stored only on this device. Display-only; never added to model context or JSON export.</div>
+                  <div class="button-row"><div class="button">Replace image</div><div class="button remove">Remove</div></div>
+                </div>
+              </div>
+              <div class="field">Name<strong>Cael · North Harbor</strong></div>
+              <div class="field">Short Backstory<strong>Keeper of the midnight archive…</strong></div>
+              <div class="field tall">Initial Message<strong>“You found the door after all.”</strong></div>
+              <div class="field">System Instructions<strong>Portray Cael only…</strong></div>
+            </div>
+            <div class="callout">Picker cancellation keeps the current portrait unchanged.</div>
+          </div>
+        </div>
+      </article>
+
+      <article>
+        <div class="panel-label">3 · Solo chat</div>
+        <div class="phone">
+          <div class="status"><span>9:41</span><span>● ● ▰</span></div>
+          <div class="topbar"><span class="icon">‹</span><h2>North Harbor</h2><span class="spacer"></span><span class="icon">⋮</span></div>
+          <div class="chat-content">
+            <div class="message">
+              <div class="avatar chat b" aria-label="Cael illustrative portrait"></div>
+              <div class="message-stack"><div class="speaker">Cael</div><div class="bubble"><em>The archive door yields with a hush of old hinges.</em> “You found the door after all.”</div></div>
+            </div>
+            <div class="message persona">
+              <div class="avatar chat a" aria-label="Mara illustrative portrait"></div>
+              <div class="message-stack"><div class="speaker">Mara</div><div class="bubble">“I nearly turned back.” She keeps one hand on the doorframe.</div></div>
+            </div>
+            <div class="message">
+              <div class="avatar chat b" aria-label="Cael illustrative portrait"></div>
+              <div class="message-stack"><div class="speaker">Cael</div><div class="bubble">His expression softens. “But you didn’t.”</div><div class="variant">‹ 1 / 2 ›</div></div>
+            </div>
+          </div>
+          <div class="composer"><div class="composer-box"><span>＋</span><span>Write as Mara…</span><div class="send">➤</div></div></div>
+        </div>
+      </article>
+
+      <article>
+        <div class="panel-label">4 · Ordinary Group chat</div>
+        <div class="phone">
+          <div class="status"><span>9:41</span><span>● ● ▰</span></div>
+          <div class="topbar"><span class="icon">‹</span><h2>Midnight Council</h2><span class="spacer"></span><span class="icon">⋮</span></div>
+          <div class="chat-content">
+            <div class="group-strip"><div class="avatar b"></div><div class="avatar d"></div><span>Next: <strong>Cael</strong> · choose character</span></div>
+            <div class="message">
+              <div class="avatar chat b" aria-label="Cael illustrative portrait"></div>
+              <div class="message-stack"><div class="speaker">Cael</div><div class="bubble">“We should hear her account before deciding.”</div></div>
+            </div>
+            <div class="message">
+              <div class="avatar chat d" aria-label="Ilyra illustrative portrait"></div>
+              <div class="message-stack"><div class="speaker">Ilyra</div><div class="bubble">Ilyra folds the map. “Then let her speak.”</div></div>
+            </div>
+            <div class="message persona">
+              <div class="avatar chat a" aria-label="Mara illustrative portrait"></div>
+              <div class="message-stack"><div class="speaker">Mara</div><div class="bubble">“The east gate was already open when I arrived.”</div></div>
+            </div>
+            <div class="message">
+              <div class="avatar chat">N</div>
+              <div class="message-stack"><div class="speaker">Narrator</div><div class="bubble"><em>Rain taps steadily against the high windows.</em></div></div>
+            </div>
+          </div>
+          <div class="composer"><div class="composer-box"><span>＋</span><span>Write as Mara…</span><div class="send">➤</div></div></div>
+        </div>
+      </article>
+    </section>
+  </main>
+</body>
+</html>

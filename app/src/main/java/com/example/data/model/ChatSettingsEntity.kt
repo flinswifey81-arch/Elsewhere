@@ -2,6 +2,7 @@ package com.example.data.model
 
 import androidx.room.Entity
 import androidx.room.PrimaryKey
+import androidx.room.ColumnInfo
 
 enum class ProviderRoutingMode { AUTO, PREFER, LOCK }
 enum class ResponseLengthProfile { SHORT, NORMAL, LONG, CUSTOM }
@@ -18,5 +19,7 @@ data class ChatSettingsEntity(
     val customMin: Int? = null,
     val customTargetMax: Int? = null,
     val customHardMax: Int? = null,
-    val draftMessage: String? = null
+    val draftMessage: String? = null,
+    @ColumnInfo(defaultValue = "0") val narratorEnabled: Boolean = false,
+    @ColumnInfo(defaultValue = "''") val narratorInstructions: String = ""
 )

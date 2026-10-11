@@ -14,6 +14,8 @@ import com.example.ui.components.BrandedLaunchSurface
 import com.example.ui.navigation.ElsewhereApp
 import com.example.ui.theme.AppTheme
 import kotlinx.coroutines.flow.collect
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -49,6 +51,14 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
+        }
+    }
+
+    override fun onStop() {
+        super.onStop()
+        if (!isChangingConfigurations) {
+            val appContainer = (application as ElsewhereApplication).container
+            lifecycleScope.launch { appContainer.coopSessionManager?.stopForBackground() }
         }
     }
 }

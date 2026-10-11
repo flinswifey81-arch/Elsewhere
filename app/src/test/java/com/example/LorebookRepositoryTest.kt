@@ -15,6 +15,7 @@ import com.example.data.model.MemoryCategory
 import com.example.data.model.SpeakerType
 import com.example.domain.compiler.ContextCompilerV1
 import com.example.domain.lore.LorebookActivationEngine
+import com.example.domain.memory.ContextResetPolicy
 import com.example.domain.provider.Role
 import com.example.domain.repository.LorebookImportMode
 import com.example.domain.repository.LorebookRepository
@@ -244,6 +245,54 @@ class LorebookRepositoryTest {
         val exported = repository.exportJson("book-1")
         assertFalse(exported.contains("manualActive"))
         assertFalse(exported.contains("hasCurrentOverride"))
+    }
+
+    @Test
+    fun wackFilteredHistoryStillAllowsAlwaysAndManualLoreWithoutOldKeywordLeakage() = runBlocking {
+        repository.importJson(completeJson(), LorebookImportMode.REJECT_DUPLICATE)
+        database.lorebookDao().insertEntry(
+            LorebookEntryEntity(
+                entryId = "entry-always",
+                lorebookId = "book-1",
+                title = "Always Present",
+                activationMode = "always",
+                currentContent = "ALWAYS_CONTENT"
+            )
+        )
+        repository.attachLorebook("chat-reset", "book-1")
+        repository.setManualActive("chat-reset", "entry-manual", true)
+
+        val preResetKeyword = message("chat-reset", "The moon gate opens.").copy(orderIndex = 5L)
+        val neutralPostReset = message("chat-reset", "The road is quiet.").copy(
+            messageId = "post-reset-neutral",
+            orderIndex = 11L
+        )
+        val eligibleNeutral = ContextResetPolicy.eligiblePrimaryMessages(
+            listOf(preResetKeyword, neutralPostReset),
+            boundary = 10L
+        )
+        val neutralLore = repository.resolveActiveLore(
+            chatId = "chat-reset",
+            chatHistory = eligibleNeutral.dropLast(1),
+            currentMessage = eligibleNeutral.last()
+        )
+
+        assertEquals(setOf("Always Present", "Manual Empty"), neutralLore.map { it.title }.toSet())
+        assertFalse(neutralLore.any { it.title == "Moon Gate" })
+
+        val postResetKeyword = neutralPostReset.copy(
+            messageId = "post-reset-keyword",
+            content = "The moon gate opens again.",
+            orderIndex = 12L
+        )
+        val keywordLore = repository.resolveActiveLore(
+            chatId = "chat-reset",
+            chatHistory = listOf(neutralPostReset),
+            currentMessage = postResetKeyword
+        )
+        assertTrue(keywordLore.any { it.title == "Moon Gate" })
+        assertTrue(keywordLore.any { it.title == "Always Present" })
+        assertTrue(keywordLore.any { it.title == "Manual Empty" })
     }
 
     @Test

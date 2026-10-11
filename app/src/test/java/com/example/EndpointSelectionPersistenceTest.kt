@@ -27,6 +27,8 @@ import kotlinx.coroutines.test.setMain
 import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -37,6 +39,7 @@ import org.robolectric.RobolectricTestRunner
 class EndpointSelectionPersistenceTest {
     private lateinit var database: AppDatabase
     private lateinit var chatRepository: ChatRepository
+    private lateinit var viewModels: TestViewModelOwner
     private val mainDispatcher = UnconfinedTestDispatcher()
 
     @Before
@@ -47,10 +50,12 @@ class EndpointSelectionPersistenceTest {
             .allowMainThreadQueries()
             .build()
         chatRepository = ChatRepository(database.chatDao())
+        viewModels = TestViewModelOwner()
     }
 
     @After
     fun tearDown() {
+        viewModels.close()
         database.close()
         Dispatchers.resetMain()
     }
@@ -73,7 +78,9 @@ class EndpointSelectionPersistenceTest {
         )
         chatRepository.insertChatSettings(unrelatedSettings)
 
-        val firstViewModel = ChatSettingsViewModel("chat-a", chatRepository, EndpointProvider)
+        val firstViewModel = viewModels.create(ChatSettingsViewModel::class.java) {
+            ChatSettingsViewModel("chat-a", chatRepository, EndpointProvider)
+        }
         withTimeout(5_000) {
             firstViewModel.uiState.first { !it.isLoading && it.endpoints.size == 2 }
         }
@@ -88,7 +95,9 @@ class EndpointSelectionPersistenceTest {
             }
         }
 
-        val reopenedViewModel = ChatSettingsViewModel("chat-a", chatRepository, EndpointProvider)
+        val reopenedViewModel = viewModels.create(ChatSettingsViewModel::class.java) {
+            ChatSettingsViewModel("chat-a", chatRepository, EndpointProvider)
+        }
         val reopenedState = withTimeout(5_000) {
             reopenedViewModel.uiState.first {
                 !it.isLoading && it.endpoints.size == 2 && it.settings?.providerEndpoint == "provider-a"
@@ -118,6 +127,32 @@ class EndpointSelectionPersistenceTest {
         assertEquals("Provider A", selectedEndpointDisplayName("provider-a", endpoints))
         assertEquals("unknown-provider", selectedEndpointDisplayName("unknown-provider", endpoints))
         assertEquals("Select Endpoint", selectedEndpointDisplayName(null, endpoints))
+    }
+
+    @Test
+    fun narratorSettingsPersistPerChatAndDefaultOff() = runBlocking {
+        val defaults = ChatSettingsEntity(chatId = "narrator-chat")
+        chatRepository.insertChatSettings(defaults)
+        assertFalse(chatRepository.getChatSettings("narrator-chat")!!.narratorEnabled)
+
+        val viewModel = viewModels.create(ChatSettingsViewModel::class.java) {
+            ChatSettingsViewModel("narrator-chat", chatRepository, EndpointProvider)
+        }
+        withTimeout(5_000) { viewModel.uiState.first { !it.isLoading } }
+        viewModel.onNarratorInstructionsChanged("Use restrained atmospheric narration.")
+        viewModel.onNarratorEnabledChanged(true)
+
+        val saved = withTimeout(5_000) {
+            chatRepository.getChatSettingsFlow("narrator-chat").first {
+                it?.narratorEnabled == true && it.narratorInstructions.contains("atmospheric")
+            }
+        }!!
+        assertTrue(saved.narratorEnabled)
+        viewModel.onNarratorEnabledChanged(false)
+        val disabled = withTimeout(5_000) {
+            chatRepository.getChatSettingsFlow("narrator-chat").first { it?.narratorEnabled == false && it.narratorInstructions.isNotBlank() }
+        }!!
+        assertEquals("Use restrained atmospheric narration.", disabled.narratorInstructions)
     }
 
     private object EndpointProvider : ModelProvider {

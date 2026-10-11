@@ -32,6 +32,9 @@ class MessageRepository(private val messageDao: MessageDao) {
     
     fun getVariants(variantGroupId: String): kotlinx.coroutines.flow.Flow<List<com.example.data.model.MessageEntity>> = messageDao.getVariants(variantGroupId)
 
+    suspend fun getVariantsOnce(variantGroupId: String): List<MessageEntity> =
+        messageDao.getVariantsOnce(variantGroupId)
+
     suspend fun setPrimaryVariant(variantGroupId: String, messageId: String) {
         messageDao.clearPrimaryVariants(variantGroupId)
         messageDao.setPrimaryVariant(messageId)

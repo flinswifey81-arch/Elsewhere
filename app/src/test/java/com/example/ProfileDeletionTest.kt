@@ -1,6 +1,9 @@
 package com.example
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.Color
+import android.net.Uri
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.example.data.AppDatabase
@@ -12,12 +15,15 @@ import com.example.domain.repository.CharacterRepository
 import com.example.domain.repository.ChatRepository
 import com.example.domain.repository.PersonaRepository
 import com.example.domain.repository.ProfileDeletionResult
+import com.example.domain.repository.ProfileImageKind
+import com.example.domain.repository.ProfileImageRepository
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Before
 import org.junit.Test
@@ -26,26 +32,31 @@ import org.robolectric.RobolectricTestRunner
 
 @RunWith(RobolectricTestRunner::class)
 class ProfileDeletionTest {
+    private lateinit var context: Context
     private lateinit var database: AppDatabase
     private lateinit var characterRepository: CharacterRepository
     private lateinit var personaRepository: PersonaRepository
     private lateinit var chatRepository: ChatRepository
+    private lateinit var profileImageRepository: ProfileImageRepository
 
     @Before
     fun setUp() {
-        val context = ApplicationProvider.getApplicationContext<Context>()
+        context = ApplicationProvider.getApplicationContext()
+        java.io.File(context.filesDir, "profile_images").deleteRecursively()
         database = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
             .allowMainThreadQueries()
             .build()
         val moshi = Moshi.Builder().addLast(KotlinJsonAdapterFactory()).build()
-        characterRepository = CharacterRepository(database.characterDao(), moshi)
-        personaRepository = PersonaRepository(database.personaDao(), moshi)
+        profileImageRepository = ProfileImageRepository(context)
+        characterRepository = CharacterRepository(database.characterDao(), moshi, profileImageRepository)
+        personaRepository = PersonaRepository(database.personaDao(), moshi, profileImageRepository)
         chatRepository = ChatRepository(database.chatDao(), database.messageDao())
     }
 
     @After
     fun tearDown() {
         database.close()
+        java.io.File(context.filesDir, "profile_images").deleteRecursively()
     }
 
     @Test
@@ -57,6 +68,30 @@ class ProfileDeletionTest {
         assertEquals(ProfileDeletionResult.Deleted(0, 0), result)
         assertNull(characterRepository.getCharacterById(characterId))
         assertEquals(emptyList<Any>(), characterRepository.getAllCharacters().first())
+    }
+
+    @Test
+    fun deletingProfilesAlsoRemovesTheirDeviceLocalPictures() = runBlocking {
+        val characterId = characterRepository.createManualCharacter(ManualCharacterFields(name = "Portrait Character"))
+        val personaId = personaRepository.createManualPersona(ManualPersonaFields(name = "Portrait Persona"))
+        val source = java.io.File(context.cacheDir, "profile-delete-picture-${System.nanoTime()}.png")
+        try {
+            Bitmap.createBitmap(4, 4, Bitmap.Config.ARGB_8888).let { bitmap ->
+                bitmap.eraseColor(Color.MAGENTA)
+                source.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+                bitmap.recycle()
+            }
+            profileImageRepository.replaceImage(ProfileImageKind.CHARACTER, characterId, Uri.fromFile(source))
+            profileImageRepository.replaceImage(ProfileImageKind.PERSONA, personaId, Uri.fromFile(source))
+
+            characterRepository.deleteCharacterPermanently(characterId)
+            personaRepository.deletePersonaPermanently(personaId)
+
+            assertFalse(profileImageRepository.resolveImage(ProfileImageKind.CHARACTER, characterId)?.exists() == true)
+            assertFalse(profileImageRepository.resolveImage(ProfileImageKind.PERSONA, personaId)?.exists() == true)
+        } finally {
+            source.delete()
+        }
     }
 
     @Test

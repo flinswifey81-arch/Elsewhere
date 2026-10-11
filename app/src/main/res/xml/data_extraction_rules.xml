@@ -6,8 +6,12 @@
 <data-extraction-rules>
     <cloud-backup>
         <exclude domain="file" path="encrypted_api_key.dat" />
+        <exclude domain="file" path="message_attachments/" />
+        <exclude domain="file" path="profile_images/" />
     </cloud-backup>
     <device-transfer>
         <exclude domain="file" path="encrypted_api_key.dat" />
+        <exclude domain="file" path="message_attachments/" />
+        <exclude domain="file" path="profile_images/" />
     </device-transfer>
 </data-extraction-rules>

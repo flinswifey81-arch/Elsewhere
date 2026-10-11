@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "npcs": [
+    {
+      "npc_id": "48df9259-940f-42e4-ab8f-3df94a62f562",
+      "display_name": "Mara Voss",
+      "aliases": [
+        "Archivist Voss",
+        "Mara"
+      ],
+      "role": "Keeper of the western archive",
+      "appearance": "Ink-stained gloves and a brass chain of office",
+      "personality": "Measured, observant, and unwilling to waste words",
+      "relationship_to_persona": "",
+      "persona_relationships": {
+        "persona-id-alex": "Trusts Alex with restricted ledgers",
+        "persona-id-bella": "Polite but still guarded around Bella"
+      },
+      "character_knowledge": {
+        "character-id-rowan": "Rowan knows Mara hid the brass key beneath the west stair",
+        "character-id-sylus": "Sylus knows Mara once worked for the crown"
+      },
+      "goals": "Keep the archive independent and locate the missing ledger",
+      "secrets": "The western stacks contain a sealed doorway",
+      "author_notes": "Private planning note: reveal the doorway only after the winter gala",
+      "keep_in_scene": true,
+      "extension_fields": {}
+    }
+  ]
+}

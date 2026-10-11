@@ -1,15 +1,26 @@
 package com.example
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.net.Uri
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.example.data.AppDatabase
 import com.example.data.model.CharacterEntity
+import com.example.data.model.ChatLorebookAttachmentEntity
+import com.example.data.model.ChatLorebookEntryOverlayEntity
 import com.example.data.model.ChatSettingsEntity
 import com.example.data.model.ConversationSummaryEntity
 import com.example.data.model.GenerationMetadataEntity
+import com.example.data.model.LorebookEntity
+import com.example.data.model.LorebookEntryEntity
 import com.example.data.model.MemoryCategory
+import com.example.data.model.MessageAttachmentEntity
 import com.example.data.model.MessageEntity
+import com.example.data.model.NpcBankSettingsEntity
+import com.example.data.model.NpcDossier
+import com.example.data.model.NpcDossierEntity
+import com.example.data.model.NpcDossierUpdateEntity
 import com.example.data.model.PersonaEntity
 import com.example.data.model.ProviderRoutingMode
 import com.example.data.model.RoleplayMemoryEntity
@@ -26,6 +37,9 @@ import com.example.domain.repository.CharacterRepository
 import com.example.domain.repository.ChatRepository
 import com.example.domain.repository.MemoryRepository
 import com.example.domain.repository.MessageRepository
+import com.example.domain.repository.MessageAttachmentRepository
+import com.example.domain.repository.NpcRepository
+import com.example.domain.npc.NpcStructuredOutputParser
 import com.example.domain.repository.PersonaRepository
 import com.example.ui.screens.ChatDetailViewModel
 import com.example.ui.screens.ChatUiState
@@ -33,6 +47,7 @@ import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
@@ -50,24 +65,29 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import java.io.File
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(RobolectricTestRunner::class)
 class ChatDetailGenerationTest {
+    private lateinit var context: Context
     private lateinit var database: AppDatabase
+    private lateinit var viewModels: TestViewModelOwner
     private val mainDispatcher = UnconfinedTestDispatcher()
 
     @Before
     fun setUp() {
         Dispatchers.setMain(mainDispatcher)
-        val context = ApplicationProvider.getApplicationContext<Context>()
+        context = ApplicationProvider.getApplicationContext()
         database = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
             .allowMainThreadQueries()
             .build()
+        viewModels = TestViewModelOwner()
     }
 
     @After
     fun tearDown() {
+        viewModels.close()
         database.close()
         Dispatchers.resetMain()
     }
@@ -98,15 +118,17 @@ class ChatDetailGenerationTest {
         )
 
         val provider = RecordingStreamingProvider()
-        val viewModel = ChatDetailViewModel(
-            chatId,
-            chatRepository,
-            messageRepository,
-            characterRepository,
-            personaRepository,
-            provider,
-            memoryRepository
-        )
+        val viewModel = viewModels.create(ChatDetailViewModel::class.java) {
+            ChatDetailViewModel(
+                chatId,
+                chatRepository,
+                messageRepository,
+                characterRepository,
+                personaRepository,
+                provider,
+                memoryRepository
+            )
+        }
         withTimeout(15_000) { viewModel.uiState.first { it is ChatUiState.Success } }
         chatRepository.insertChatSettings(
             (viewModel.uiState.value as ChatUiState.Success).chatSettings.copy(
@@ -384,6 +406,28 @@ class ChatDetailGenerationTest {
     }
 
     @Test
+    fun narratorSoloGenerationUsesOneRequestAndKeepsCharacterSpeakerIdentity() = runBlocking {
+        val provider = RecordingStreamingProvider()
+        val harness = createHarness(
+            provider = provider,
+            responseLengthProfile = ResponseLengthProfile.NORMAL,
+            narratorEnabled = true,
+            narratorInstructions = "Keep the rain present as quiet scene texture."
+        )
+
+        harness.viewModel.onDraftChanged("What do you hear?")
+        harness.viewModel.sendMessage()
+
+        val completed = withTimeout(15_000) {
+            harness.messageRepository.getMessagesForChat(harness.chatId).first { it.size == 2 }
+        }
+
+        assertEquals(1, provider.requests.size)
+        assertTrue(provider.requests.single().first().content.contains("Keep the rain present as quiet scene texture."))
+        assertEquals("character-1", completed.last().speakerId)
+    }
+
+    @Test
     fun persistedPreferEndpointIsConsumedWithFallbackEnabled() = runBlocking {
         val provider = RecordingStreamingProvider()
         val harness = createHarness(
@@ -492,23 +536,838 @@ class ChatDetailGenerationTest {
         assertEquals("Selected response", loaded.groupedMessages.single().primaryMessage.content)
     }
 
+    @Test
+    fun retryAndRegenerateReuseOriginImageWhileContinueDoesNotResendIt() = runBlocking {
+        val provider = RequestSequenceProvider(
+            listOf(
+                listOf(StreamEvent.Error(IllegalStateException("mock failure"))),
+                listOf(StreamEvent.Content("Original image reply."), StreamEvent.Done(null)),
+                listOf(StreamEvent.Content("Regenerated image reply."), StreamEvent.Done(null)),
+                listOf(StreamEvent.Content(" Continued."), StreamEvent.Done(null))
+            )
+        )
+        val harness = createHarness(provider, ResponseLengthProfile.NORMAL)
+        val source = java.io.File(context.cacheDir, "view-model-image.png")
+        val bitmap = Bitmap.createBitmap(4, 4, Bitmap.Config.ARGB_8888)
+        source.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        bitmap.recycle()
+        harness.viewModel.addDraftImage(Uri.fromFile(source))
+        withTimeout(30_000) {
+            harness.viewModel.uiState.first { it is ChatUiState.Success && it.draftAttachments.size == 1 }
+        }
+
+        harness.viewModel.onDraftChanged("What do you see?")
+        harness.viewModel.sendMessage()
+        withTimeout(30_000) {
+            harness.viewModel.uiState.first {
+                it is ChatUiState.Success && !it.isGenerating && it.generationError == "mock failure"
+            }
+        }
+        harness.viewModel.retryGeneration()
+        val original = withTimeout(30_000) {
+            harness.messageRepository.getMessagesForChat(harness.chatId).first { messages ->
+                messages.any { it.content == "Original image reply." }
+            }
+        }.single { it.content == "Original image reply." }
+        withTimeout(30_000) {
+            harness.viewModel.uiState.first { it is ChatUiState.Success && !it.isGenerating }
+        }
+
+        harness.viewModel.regenerateMessage(original.messageId)
+        val regenerated = withTimeout(30_000) {
+            harness.messageRepository.getMessagesForChat(harness.chatId).first { messages ->
+                messages.any { it.content == "Regenerated image reply." && it.isPrimaryVariant }
+            }
+        }.single { it.content == "Regenerated image reply." }
+        withTimeout(30_000) {
+            harness.viewModel.uiState.first { it is ChatUiState.Success && !it.isGenerating }
+        }
+
+        harness.viewModel.continueMessage(regenerated.messageId)
+        withTimeout(30_000) {
+            harness.messageRepository.getMessagesForChat(harness.chatId).first { messages ->
+                messages.any { it.messageId == regenerated.messageId && it.content == "Regenerated image reply. Continued." }
+            }
+        }
+
+        assertEquals(4, provider.requests.size)
+        val firstHash = provider.requests.first().single { it.images.isNotEmpty() }.images.single().sha256
+        provider.requests.take(3).forEach { request ->
+            val imageMessage = request.single { it.sourceMessageId != null && it.role == Role.USER }
+            assertEquals(1, imageMessage.images.size)
+            assertEquals(firstHash, imageMessage.images.single().sha256)
+        }
+        assertTrue(provider.requests.last().all { it.images.isEmpty() })
+        val personaMessage = harness.messageRepository.getMessagesForChatOnce(harness.chatId)
+            .single { it.speakerType == SpeakerType.PERSONA }
+        assertEquals(1, harness.attachmentRepository.getForMessage(personaMessage.messageId).size)
+        source.delete()
+        Unit
+    }
+
+    @Test
+    fun regeneratingOlderResponseCompilesNpcContextOnlyFromBeforeTargetTurn() = runBlocking {
+        fun reply(goal: String) = "Story $goal\n<elsewhere_npc_updates>" +
+            "{\"schema_version\":1,\"updates\":[{\"npc_id\":\"npc\",\"goals\":\"$goal\"}]}" +
+            "</elsewhere_npc_updates>"
+        val provider = SequentialResponseProvider(listOf(reply("PAST_STATE"), reply("FUTURE_STATE"), "Regenerated safely."))
+        val harness = createHarness(provider, ResponseLengthProfile.NORMAL)
+        harness.npcRepository.saveManual(
+            com.example.data.model.NpcDossier(
+                npcId = "npc",
+                chatId = harness.chatId,
+                displayName = "Mara",
+                aliases = emptyList(),
+                role = "Guide",
+                appearance = "",
+                personality = "",
+                relationshipToPersona = "",
+                personaRelationships = emptyMap(),
+                characterKnowledge = emptyMap(),
+                goals = "INITIAL_STATE",
+                secrets = "",
+                authorNotes = "",
+                keepInScene = true,
+                isManualBase = true,
+                createdAt = 1,
+                updatedAt = 1
+            )
+        )
+        harness.npcRepository.setEnabled(harness.chatId, true)
+
+        harness.viewModel.onDraftChanged("First turn")
+        harness.viewModel.sendMessage()
+        val firstReply = withTimeout(15_000) {
+            harness.viewModel.uiState.first { state ->
+                state is ChatUiState.Success && !state.isGenerating && state.messages.size == 2
+            }
+        }.let { it as ChatUiState.Success }.messages.single { it.speakerType == SpeakerType.CHARACTER }
+        harness.viewModel.onDraftChanged("Second turn")
+        harness.viewModel.sendMessage()
+        withTimeout(15_000) {
+            harness.viewModel.uiState.first { state ->
+                state is ChatUiState.Success && !state.isGenerating && state.messages.size == 4
+            }
+        }
+
+        harness.viewModel.regenerateMessage(firstReply.messageId)
+        withTimeout(15_000) {
+            harness.messageRepository.getMessagesForChat(harness.chatId).first { messages ->
+                messages.any { it.content == "Regenerated safely." && it.isPrimaryVariant }
+            }
+        }
+
+        val regeneratedPrompt = provider.requests[2].first().content
+        assertTrue(regeneratedPrompt.contains("INITIAL_STATE"))
+        assertFalse(regeneratedPrompt.contains("PAST_STATE"))
+        assertFalse(regeneratedPrompt.contains("FUTURE_STATE"))
+    }
+
+    @Test
+    fun disabledNpcBankDoesNotParseOrApplyTerminalControlBlock() = runBlocking {
+        val raw = "Story text\n<elsewhere_npc_updates>{\"schema_version\":1,\"updates\":[{\"display_name\":\"Mara\"}]}</elsewhere_npc_updates>"
+        val harness = createHarness(
+            ScriptedStreamingProvider(listOf(StreamEvent.Content(raw), StreamEvent.Done(null))),
+            ResponseLengthProfile.NORMAL
+        )
+        assertFalse(harness.npcRepository.getSettings(harness.chatId).isEnabled)
+
+        harness.viewModel.onDraftChanged("Continue.")
+        harness.viewModel.sendMessage()
+
+        val assistant = withTimeout(15_000) {
+            harness.messageRepository.getMessagesForChat(harness.chatId).first { messages ->
+                messages.any { it.speakerType == SpeakerType.CHARACTER }
+            }
+        }.single { it.speakerType == SpeakerType.CHARACTER }
+        assertEquals(raw, assistant.content)
+        assertTrue(harness.npcRepository.getProjectedDossiers(harness.chatId).isEmpty())
+    }
+
+    @Test
+    fun knownTextOnlyModelBlocksImageGenerationBeforeProviderRequest() = runBlocking {
+        val provider = TextOnlyProvider()
+        val harness = createHarness(provider, ResponseLengthProfile.NORMAL)
+        val source = java.io.File(context.cacheDir, "unsupported-image.png")
+        val bitmap = Bitmap.createBitmap(3, 3, Bitmap.Config.ARGB_8888)
+        source.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        bitmap.recycle()
+        harness.viewModel.addDraftImage(Uri.fromFile(source))
+        withTimeout(15_000) {
+            harness.viewModel.uiState.first { it is ChatUiState.Success && it.draftAttachments.size == 1 }
+        }
+
+        harness.viewModel.onDraftChanged("Can you see this?")
+        harness.viewModel.sendMessage()
+
+        val failed = withTimeout(15_000) {
+            harness.viewModel.uiState.first {
+                it is ChatUiState.Success && it.generationError?.contains("does not support image input") == true
+            }
+        } as ChatUiState.Success
+        assertTrue(failed.generationError.orEmpty().contains("vision-capable"))
+        assertEquals(0, provider.requestCount)
+        assertEquals(listOf(SpeakerType.PERSONA), harness.messageRepository.getMessagesForChatOnce(harness.chatId).map { it.speakerType })
+        source.delete()
+        Unit
+    }
+
+    @Test
+    fun unknownImageCapabilityFailsClosedBeforeProviderRequest() = runBlocking {
+        val provider = CountingProvider()
+        val harness = createHarness(provider, ResponseLengthProfile.NORMAL)
+        val source = java.io.File(context.cacheDir, "unknown-capability-image.png")
+        val bitmap = Bitmap.createBitmap(3, 3, Bitmap.Config.ARGB_8888)
+        source.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        bitmap.recycle()
+        harness.viewModel.addDraftImage(Uri.fromFile(source))
+        withTimeout(15_000) {
+            harness.viewModel.uiState.first { it is ChatUiState.Success && it.draftAttachments.size == 1 }
+        }
+
+        harness.viewModel.onDraftChanged("Can you see this?")
+        harness.viewModel.sendMessage()
+
+        withTimeout(15_000) {
+            harness.viewModel.uiState.first {
+                it is ChatUiState.Success && it.generationError?.contains("has not been confirmed") == true
+            }
+        }
+        assertEquals(0, provider.requestCount)
+        source.delete()
+        Unit
+    }
+
+    @Test
+    fun stoppedNpcStreamNeverDisplaysOrKeepsHiddenMetadata() = runBlocking {
+        val hidden = "Visible story\n<elsewhere_npc_updates>{\"schema_version\":1,\"updates\":[{\"display_name\":\"Mara\",\"secrets\":\"NEVER_VISIBLE\"}]}"
+        val harness = createHarness(
+            ScriptedStreamingProvider(
+                listOf(
+                    StreamEvent.Content(hidden),
+                    StreamEvent.Done(
+                        GenerationMetadataEntity(
+                            messageId = "provider-partial",
+                            requestedModelId = "mock/model",
+                            resolvedModelId = "resolved/model",
+                            promptTokens = 123,
+                            completionTokens = 7,
+                            totalTokens = 130,
+                            reportedCost = 0.004,
+                            finishReason = "provider_partial"
+                        )
+                    ),
+                    StreamEvent.Error(IllegalStateException("stopped"))
+                )
+            ),
+            ResponseLengthProfile.NORMAL
+        )
+        harness.npcRepository.setEnabled(harness.chatId, true)
+        harness.viewModel.onDraftChanged("Continue.")
+        harness.viewModel.sendMessage()
+
+        val stopped = withTimeout(15_000) {
+            harness.viewModel.uiState.first { it is ChatUiState.Success && it.partialStopped }
+        } as ChatUiState.Success
+        assertEquals("Visible story", stopped.streamingContent)
+        assertFalse(stopped.streamingContent.orEmpty().contains("NEVER_VISIBLE"))
+
+        harness.viewModel.keepPartial()
+        val assistant = withTimeout(15_000) {
+            harness.messageRepository.getMessagesForChat(harness.chatId).first { messages ->
+                messages.any { it.speakerType == SpeakerType.CHARACTER }
+            }
+        }.single { it.speakerType == SpeakerType.CHARACTER }
+        assertEquals("Visible story", assistant.content)
+        assertTrue(harness.npcRepository.getProjectedDossiers(harness.chatId).isEmpty())
+        val metadata = requireNotNull(harness.messageRepository.getGenerationMetadata(assistant.messageId))
+        assertEquals("mock/model", metadata.requestedModelId)
+        assertEquals("resolved/model", metadata.resolvedModelId)
+        assertEquals(130, metadata.totalTokens)
+        assertEquals(0.004, metadata.reportedCost)
+        assertEquals("provider_partial", metadata.finishReason)
+        assertTrue(metadata.isPartial)
+        assertFalse(metadata.wasUserStopped)
+        Unit
+    }
+
+    @Test
+    fun keepUserStoppedPartialPersistsExplicitStoppedMetadata() = runBlocking {
+        val harness = createHarness(CancellablePartialProvider(), ResponseLengthProfile.NORMAL)
+        harness.viewModel.onDraftChanged("Begin.")
+        harness.viewModel.sendMessage()
+        withTimeout(15_000) {
+            harness.viewModel.uiState.first {
+                it is ChatUiState.Success && it.isGenerating && it.streamingContent == "Partial response"
+            }
+        }
+
+        harness.viewModel.stopGeneration()
+        withTimeout(15_000) {
+            harness.viewModel.uiState.first { it is ChatUiState.Success && it.partialStopped }
+        }
+        harness.viewModel.keepPartial()
+        // Resolution is single-flight: rapid repeated Keep/Discard taps must be inert.
+        harness.viewModel.discardPartial()
+        harness.viewModel.keepPartial()
+        val assistant = withTimeout(15_000) {
+            harness.messageRepository.getMessagesForChat(harness.chatId).first { messages ->
+                messages.any { it.speakerType == SpeakerType.CHARACTER }
+            }
+        }.single { it.speakerType == SpeakerType.CHARACTER }
+        val metadata = requireNotNull(harness.messageRepository.getGenerationMetadata(assistant.messageId))
+        assertTrue(metadata.isPartial)
+        assertTrue(metadata.wasUserStopped)
+        assertEquals("user_stopped", metadata.finishReason)
+        assertEquals("mock/model", metadata.requestedModelId)
+    }
+
+    @Test
+    fun enabledNpcBankStripsTerminalMetadataAndAppliesIt() = runBlocking {
+        val raw = "Story text\n<elsewhere_npc_updates>{\"schema_version\":1,\"updates\":[{\"display_name\":\"Mara\",\"role\":\"Archivist\"}]}</elsewhere_npc_updates>"
+        val harness = createHarness(
+            ScriptedStreamingProvider(listOf(StreamEvent.Content(raw), StreamEvent.Done(null))),
+            ResponseLengthProfile.NORMAL
+        )
+        harness.npcRepository.setEnabled(harness.chatId, true)
+
+        harness.viewModel.onDraftChanged("Continue.")
+        harness.viewModel.sendMessage()
+
+        val assistant = withTimeout(15_000) {
+            harness.messageRepository.getMessagesForChat(harness.chatId).first { messages ->
+                messages.any { it.speakerType == SpeakerType.CHARACTER }
+            }
+        }.single { it.speakerType == SpeakerType.CHARACTER }
+        assertEquals("Story text", assistant.content)
+        assertEquals("Archivist", harness.npcRepository.getProjectedDossiers(harness.chatId).single().role)
+    }
+
+    @Test
+    fun finishedMisspelledNpcMarkerIsNotPersistedOrAppliedToExistingNpc() = runBlocking {
+        val story = "Mara, wearing ink-stained gloves and a brass chain of office, confronts Rhaien in the western stacks about the missing ledger."
+        val raw = "$story\n<elsewisere_npc_updates>"
+        val harness = createHarness(
+            ScriptedStreamingProvider(listOf(StreamEvent.Content(raw), StreamEvent.Done(null))),
+            ResponseLengthProfile.NORMAL
+        )
+        harness.npcRepository.setEnabled(harness.chatId, true)
+        harness.npcRepository.saveManual(
+            NpcDossier(
+                npcId = "mara-existing",
+                chatId = harness.chatId,
+                displayName = "Mara Voss",
+                aliases = listOf("Mara"),
+                role = "Keeper of the western archive",
+                appearance = "Ink-stained gloves and a brass chain of office",
+                personality = "Measured",
+                relationshipToPersona = "",
+                personaRelationships = emptyMap(),
+                characterKnowledge = emptyMap(),
+                goals = "Locate the missing ledger",
+                secrets = "",
+                authorNotes = "",
+                keepInScene = false,
+                isManualBase = true,
+                createdAt = 1L,
+                updatedAt = 1L
+            )
+        )
+
+        harness.viewModel.onDraftChanged("Continue.")
+        harness.viewModel.sendMessage()
+
+        val assistant = withTimeout(15_000) {
+            harness.messageRepository.getMessagesForChat(harness.chatId).first { messages ->
+                messages.any { it.speakerType == SpeakerType.CHARACTER }
+            }
+        }.single { it.speakerType == SpeakerType.CHARACTER }
+        assertEquals(story, assistant.content)
+        val mara = harness.npcRepository.getProjectedDossiers(harness.chatId).single()
+        assertEquals("Keeper of the western archive", mara.role)
+        assertEquals("Locate the missing ledger", mara.goals)
+        assertTrue(database.npcDao().getUpdates(harness.chatId).isEmpty())
+    }
+
+    @Test
+    fun stoppedTruncatedNpcMarkerIsNotDisplayedOrKept() = runBlocking {
+        val harness = createHarness(
+            CancellablePartialProvider("Visible story\n<elsewhere_npc_upd"),
+            ResponseLengthProfile.NORMAL
+        )
+        harness.npcRepository.setEnabled(harness.chatId, true)
+        harness.viewModel.onDraftChanged("Continue.")
+        harness.viewModel.sendMessage()
+
+        withTimeout(15_000) {
+            harness.viewModel.uiState.first {
+                it is ChatUiState.Success && it.isGenerating && it.streamingContent == "Visible story"
+            }
+        }
+        harness.viewModel.stopGeneration()
+        val stopped = withTimeout(15_000) {
+            harness.viewModel.uiState.first { it is ChatUiState.Success && it.partialStopped }
+        } as ChatUiState.Success
+        assertEquals("Visible story", stopped.streamingContent)
+
+        harness.viewModel.keepPartial()
+        val assistant = withTimeout(15_000) {
+            harness.messageRepository.getMessagesForChat(harness.chatId).first { messages ->
+                messages.any { it.speakerType == SpeakerType.CHARACTER }
+            }
+        }.single { it.speakerType == SpeakerType.CHARACTER }
+        assertEquals("Visible story", assistant.content)
+        assertTrue(harness.npcRepository.getProjectedDossiers(harness.chatId).isEmpty())
+    }
+
+    @Test
+    fun loadingEnabledNpcChatHidesPreviouslyPersistedLeakWithoutRewritingHistory() = runBlocking {
+        val story = "Mara asks Rhaien about the missing ledger."
+        val raw = "$story\n<elsewisere_npc_updates>"
+        val provider = RecordingStreamingProvider()
+        val harness = createHarness(
+            provider = provider,
+            responseLengthProfile = ResponseLengthProfile.NORMAL,
+            npcBankEnabledInitially = true,
+            initialStoredCharacterContent = raw
+        )
+
+        val loaded = withTimeout(15_000) {
+            harness.viewModel.uiState.first { state ->
+                state is ChatUiState.Success && state.historyLoaded &&
+                    state.messages.any { it.speakerType == SpeakerType.CHARACTER && it.content == story }
+            }
+        } as ChatUiState.Success
+        assertFalse(loaded.messages.any { it.content.contains("elsewisere_npc_updates") })
+        val stored = harness.messageRepository.getMessagesForChatOnce(harness.chatId)
+            .single { it.speakerType == SpeakerType.CHARACTER }
+        assertEquals(raw, stored.content)
+        assertTrue(harness.npcRepository.getProjectedDossiers(harness.chatId).isEmpty())
+        assertTrue(database.npcDao().getUpdates(harness.chatId).isEmpty())
+
+        harness.viewModel.onDraftChanged("Continue without repeating internal metadata.")
+        harness.viewModel.sendMessage()
+        withTimeout(15_000) {
+            harness.viewModel.uiState.first { provider.requests.size == 1 }
+        }
+        assertFalse(provider.requests.single().any { it.content.contains("elsewisere_npc_updates") })
+    }
+
+    @Test
+    fun loadingDisabledNpcChatStillHidesLegacyLeakFromDisplayAndContext() = runBlocking {
+        val story = "Mara asks Rhaien about the missing ledger."
+        val raw = "$story\n<elsewisere_npc_updates>"
+        val provider = RecordingStreamingProvider()
+        val harness = createHarness(
+            provider = provider,
+            responseLengthProfile = ResponseLengthProfile.NORMAL,
+            npcBankEnabledInitially = false,
+            initialStoredCharacterContent = raw
+        )
+
+        val loaded = withTimeout(15_000) {
+            harness.viewModel.uiState.first { state ->
+                state is ChatUiState.Success && state.historyLoaded &&
+                    state.messages.any { it.speakerType == SpeakerType.CHARACTER && it.content == story }
+            }
+        } as ChatUiState.Success
+        assertFalse(loaded.messages.any { it.content.contains("elsewisere_npc_updates") })
+        assertEquals(
+            raw,
+            harness.messageRepository.getMessagesForChatOnce(harness.chatId)
+                .single { it.speakerType == SpeakerType.CHARACTER }
+                .content
+        )
+
+        harness.viewModel.onDraftChanged("Continue without repeating internal metadata.")
+        harness.viewModel.sendMessage()
+        withTimeout(15_000) {
+            harness.viewModel.uiState.first { provider.requests.size == 1 }
+        }
+        assertFalse(provider.requests.single().any { it.content.contains("elsewisere_npc_updates") })
+        assertTrue(harness.npcRepository.getProjectedDossiers(harness.chatId).isEmpty())
+        assertTrue(database.npcDao().getUpdates(harness.chatId).isEmpty())
+    }
+
+    @Test
+    fun loadingEnabledNpcChatDoesNotRewriteOrdinaryShortLiteralPrefix() = runBlocking {
+        val literal = "The inscription ends below.\n<"
+        val harness = createHarness(
+            provider = RecordingStreamingProvider(),
+            responseLengthProfile = ResponseLengthProfile.NORMAL,
+            npcBankEnabledInitially = true,
+            initialStoredCharacterContent = literal
+        )
+
+        val loaded = withTimeout(15_000) {
+            harness.viewModel.uiState.first { state ->
+                state is ChatUiState.Success && state.historyLoaded &&
+                    state.messages.any { it.speakerType == SpeakerType.CHARACTER }
+            }
+        } as ChatUiState.Success
+        assertEquals(literal, loaded.messages.single { it.speakerType == SpeakerType.CHARACTER }.content)
+        assertEquals(
+            literal,
+            harness.messageRepository.getMessagesForChatOnce(harness.chatId)
+                .single { it.speakerType == SpeakerType.CHARACTER }
+                .content
+        )
+    }
+
+    @Test
+    fun wackPreservesSavedDataAndBlocksPreResetGenerationTools() = runBlocking {
+        val provider = RecordingStreamingProvider()
+        val harness = createHarness(
+            provider = provider,
+            responseLengthProfile = ResponseLengthProfile.NORMAL,
+            narratorEnabled = true,
+            narratorInstructions = "NARRATOR_SETTINGS_STAY"
+        )
+        val oldPersona = MessageEntity(
+            messageId = "old-persona",
+            chatId = harness.chatId,
+            speakerType = SpeakerType.PERSONA,
+            speakerId = "persona-1",
+            speakerDisplayNameSnapshot = "Mara",
+            content = "OLD_TRANSCRIPT_PERSONA",
+            orderIndex = 1L
+        )
+        val oldCharacter = MessageEntity(
+            messageId = "old-character",
+            chatId = harness.chatId,
+            speakerType = SpeakerType.CHARACTER,
+            speakerId = "character-1",
+            speakerDisplayNameSnapshot = "Rowan",
+            content = "OLD_TRANSCRIPT_CHARACTER",
+            orderIndex = 2L,
+            variantGroupId = "old-character-group"
+        )
+        val oldAlternate = oldCharacter.copy(
+            messageId = "old-character-alternate",
+            content = "OLD_ALTERNATE_VARIANT",
+            isPrimaryVariant = false
+        )
+        harness.messageRepository.insertMessage(oldPersona)
+        harness.messageRepository.insertMessage(oldCharacter)
+        harness.messageRepository.insertMessage(oldAlternate)
+        harness.memoryRepository.insertIfNew(
+            RoleplayMemoryEntity(
+                chatId = harness.chatId,
+                characterId = "character-1",
+                category = MemoryCategory.DETAIL,
+                content = "DURABLE_MEMORY_STAYS"
+            )
+        )
+        harness.memoryRepository.upsertSummary(
+            ConversationSummaryEntity(harness.chatId, "OLD_ROLLING_SUMMARY", 2L)
+        )
+        database.lorebookDao().insertLorebook(
+            LorebookEntity(lorebookId = "wack-lorebook", name = "Preserved Lorebook")
+        )
+        database.lorebookDao().insertEntry(
+            LorebookEntryEntity(
+                entryId = "wack-lore-entry",
+                lorebookId = "wack-lorebook",
+                title = "Preserved Lore",
+                activationMode = "manual",
+                currentContent = "LORE_STAYS"
+            )
+        )
+        database.lorebookDao().upsertAttachment(
+            ChatLorebookAttachmentEntity(harness.chatId, "wack-lorebook")
+        )
+        database.lorebookDao().upsertOverlay(
+            ChatLorebookEntryOverlayEntity(
+                chatId = harness.chatId,
+                entryId = "wack-lore-entry",
+                hasCurrentOverride = true,
+                currentContent = "LORE_OVERRIDE_STAYS",
+                manualActive = true
+            )
+        )
+        database.npcDao().insertDossier(
+            NpcDossierEntity(
+                npcId = "wack-npc",
+                chatId = harness.chatId,
+                displayName = "Preserved NPC",
+                role = "Archivist"
+            )
+        )
+        database.npcDao().upsertSettings(NpcBankSettingsEntity(harness.chatId, isEnabled = true))
+        database.npcDao().insertUpdates(
+            listOf(
+                NpcDossierUpdateEntity(
+                    updateId = "wack-npc-update",
+                    chatId = harness.chatId,
+                    npcId = "wack-npc",
+                    sourceMessageId = oldCharacter.messageId,
+                    variantGroupId = oldCharacter.variantGroupId,
+                    sourceOrderIndex = oldCharacter.orderIndex,
+                    sourceRevision = 0,
+                    fieldName = "role",
+                    oldValue = null,
+                    newValue = "Keeper",
+                    isApplied = true
+                )
+            )
+        )
+        val preservedImage = File(
+            context.filesDir,
+            "elsewhere_message_images/wack-preserved-${System.nanoTime()}.png"
+        ).apply {
+            parentFile?.mkdirs()
+            writeBytes(byteArrayOf(1, 2, 3))
+        }
+        database.messageAttachmentDao().insert(
+            MessageAttachmentEntity(
+                attachmentId = "wack-preserved-attachment",
+                chatId = harness.chatId,
+                messageId = oldPersona.messageId,
+                relativePath = preservedImage.relativeTo(context.filesDir).invariantSeparatorsPath,
+                mimeType = "image/png",
+                byteSize = preservedImage.length(),
+                pixelWidth = 1,
+                pixelHeight = 1,
+                sha256 = "preserved-image-hash",
+                sortPosition = 0
+            )
+        )
+        withTimeout(15_000) {
+            harness.viewModel.uiState.first { it is ChatUiState.Success && it.messages.size == 3 }
+        }
+
+        harness.viewModel.wackContext()
+        val resetState = withTimeout(15_000) {
+            harness.viewModel.uiState.first {
+                it is ChatUiState.Success &&
+                    it.inChatToolStatus?.kind == com.example.ui.screens.InChatToolStatusKind.SUCCESS
+            }
+        } as ChatUiState.Success
+
+        val persistedChat = requireNotNull(harness.chatRepository.getChatSummaryById(harness.chatId)).chat
+        assertTrue(requireNotNull(persistedChat.contextResetOrderIndex) >= 2L)
+        assertEquals(3, harness.messageRepository.getMessagesForChatOnce(harness.chatId).size)
+        assertEquals(2, harness.messageRepository.getVariantsOnce(oldCharacter.variantGroupId).size)
+        assertEquals(1, harness.memoryRepository.getMemoriesOnce(harness.chatId, "character-1").size)
+        assertNull(harness.memoryRepository.getSummaryOnce(harness.chatId))
+        assertEquals(3, resetState.messages.size)
+        val preservedSettings = requireNotNull(harness.chatRepository.getChatSettings(harness.chatId))
+        assertEquals("mock/model", preservedSettings.selectedModelId)
+        assertTrue(preservedSettings.narratorEnabled)
+        assertEquals("NARRATOR_SETTINGS_STAY", preservedSettings.narratorInstructions)
+        assertEquals("wack-lorebook", database.lorebookDao().getAttachments(harness.chatId).single().lorebookId)
+        assertEquals(
+            "LORE_OVERRIDE_STAYS",
+            database.lorebookDao().getOverlays(harness.chatId).single().currentContent
+        )
+        assertEquals("Preserved NPC", database.npcDao().getDossiers(harness.chatId).single().displayName)
+        assertTrue(requireNotNull(database.npcDao().getSettings(harness.chatId)).isEnabled)
+        assertEquals("wack-npc-update", database.npcDao().getUpdates(harness.chatId).single().updateId)
+        assertEquals(
+            "wack-preserved-attachment",
+            harness.attachmentRepository.getForChat(harness.chatId).single().attachmentId
+        )
+        assertTrue(preservedImage.isFile)
+
+        harness.viewModel.retryGeneration()
+        harness.viewModel.regenerateMessage(oldCharacter.messageId)
+        harness.viewModel.continueMessage(oldCharacter.messageId)
+        assertTrue(provider.requests.isEmpty())
+
+        harness.viewModel.onDraftChanged("POST_RESET_PERSONA")
+        harness.viewModel.sendMessage()
+        withTimeout(15_000) {
+            harness.messageRepository.getMessagesForChat(harness.chatId).first { it.size == 5 }
+        }
+        val postResetMessages = harness.messageRepository.getMessagesForChatOnce(harness.chatId)
+            .filter { it.messageId !in setOf(oldPersona.messageId, oldCharacter.messageId, oldAlternate.messageId) }
+        assertTrue(postResetMessages.all { it.orderIndex > requireNotNull(persistedChat.contextResetOrderIndex) })
+        val requestText = provider.requests.single().joinToString("\n") { it.content }
+        assertFalse(requestText.contains("OLD_TRANSCRIPT_PERSONA"))
+        assertFalse(requestText.contains("OLD_TRANSCRIPT_CHARACTER"))
+        assertFalse(requestText.contains("OLD_ALTERNATE_VARIANT"))
+        assertFalse(requestText.contains("OLD_ROLLING_SUMMARY"))
+        assertTrue(requestText.contains("DURABLE_MEMORY_STAYS"))
+        assertTrue(requestText.contains("POST_RESET_PERSONA"))
+        preservedImage.delete()
+        Unit
+    }
+
+    @Test
+    fun updateMemoryNowInSoloUsesOnlyPostWackMessagesWithoutProviderCall() = runBlocking {
+        val provider = CountingProvider()
+        val harness = createHarness(provider, ResponseLengthProfile.NORMAL)
+        harness.messageRepository.insertMessage(
+            MessageEntity(
+                messageId = "solo-pre-reset",
+                chatId = harness.chatId,
+                speakerType = SpeakerType.PERSONA,
+                speakerId = "persona-1",
+                speakerDisplayNameSnapshot = "Mara",
+                content = "I prefer old tea.",
+                orderIndex = 1L
+            )
+        )
+        withTimeout(15_000) {
+            harness.viewModel.uiState.first { it is ChatUiState.Success && it.messages.size == 1 }
+        }
+
+        harness.viewModel.wackContext()
+        withTimeout(15_000) {
+            harness.viewModel.uiState.first {
+                it is ChatUiState.Success && it.inChatToolStatus?.kind == com.example.ui.screens.InChatToolStatusKind.SUCCESS
+            }
+        }
+        val boundary = requireNotNull(
+            harness.chatRepository.getChatSummaryById(harness.chatId)?.chat?.contextResetOrderIndex
+        )
+        harness.messageRepository.insertMessage(
+            MessageEntity(
+                messageId = "solo-post-reset",
+                chatId = harness.chatId,
+                speakerType = SpeakerType.PERSONA,
+                speakerId = "persona-1",
+                speakerDisplayNameSnapshot = "Mara",
+                content = "I prefer new tea.",
+                orderIndex = boundary + 1L
+            )
+        )
+        withTimeout(15_000) {
+            harness.viewModel.uiState.first { it is ChatUiState.Success && it.messages.size == 2 }
+        }
+
+        harness.viewModel.updateMemoryNow()
+        val status = withTimeout(15_000) {
+            harness.viewModel.uiState.first {
+                it is ChatUiState.Success && it.inChatToolStatus?.message?.contains("saved 1 new durable memory") == true
+            }
+        } as ChatUiState.Success
+        val memories = harness.memoryRepository.getMemoriesOnce(harness.chatId, "character-1")
+
+        assertTrue(status.inChatToolStatus!!.message.contains("Rowan"))
+        assertEquals(listOf("new tea"), memories.map { it.content })
+        assertEquals(0, provider.requestCount)
+    }
+
+    @Test
+    fun updateMemoryNowInGroupUpdatesOnlySelectedCharacterAndReportsDeduplication() = runBlocking {
+        val moshi = Moshi.Builder().addLast(KotlinJsonAdapterFactory()).build()
+        val characterRepository = CharacterRepository(database.characterDao(), moshi)
+        val personaRepository = PersonaRepository(database.personaDao(), moshi)
+        val chatRepository = ChatRepository(database.chatDao())
+        val messageRepository = MessageRepository(database.messageDao())
+        val memoryRepository = MemoryRepository(database.memoryDao())
+        val provider = CountingProvider()
+        database.characterDao().insertCharacter(character())
+        database.characterDao().insertCharacter(
+            character().copy(characterId = "character-2", displayName = "Iris", characterName = "Iris")
+        )
+        database.personaDao().insertPersona(persona())
+        val chatId = chatRepository.createGroupChat(
+            displayName = "Memory Group",
+            personaIds = listOf("persona-1"),
+            characterIds = listOf("character-1", "character-2")
+        )
+        chatRepository.insertChatSettings(ChatSettingsEntity(chatId = chatId, selectedModelId = "mock/model"))
+        messageRepository.insertMessage(
+            MessageEntity(
+                chatId = chatId,
+                speakerType = SpeakerType.PERSONA,
+                speakerId = "persona-1",
+                speakerDisplayNameSnapshot = "Mara",
+                content = "I prefer mint tea.",
+                orderIndex = 1L
+            )
+        )
+        val viewModel = viewModels.create(ChatDetailViewModel::class.java) {
+            ChatDetailViewModel(
+                chatId,
+                chatRepository,
+                messageRepository,
+                characterRepository,
+                personaRepository,
+                provider,
+                memoryRepository
+            )
+        }
+        withTimeout(15_000) {
+            viewModel.uiState.first { it is ChatUiState.Success && it.groupParticipantsLoaded }
+        }
+        viewModel.selectGroupCharacter("character-2")
+        viewModel.updateMemoryNow()
+        val firstStatus = withTimeout(15_000) {
+            viewModel.uiState.first {
+                it is ChatUiState.Success && it.inChatToolStatus?.message?.contains("saved 1 new durable memory") == true
+            }
+        } as ChatUiState.Success
+
+        assertTrue(firstStatus.inChatToolStatus!!.message.contains("Iris"))
+        assertTrue(memoryRepository.getMemoriesOnce(chatId, "character-1").isEmpty())
+        assertEquals("mint tea", memoryRepository.getMemoriesOnce(chatId, "character-2").single().content)
+        assertEquals(0, provider.requestCount)
+
+        viewModel.updateMemoryNow()
+        val secondStatus = withTimeout(15_000) {
+            viewModel.uiState.first {
+                it is ChatUiState.Success && it.inChatToolStatus?.message?.contains("No new durable memory was saved") == true
+            }
+        } as ChatUiState.Success
+        assertTrue(secondStatus.inChatToolStatus!!.message.contains("Iris"))
+        assertEquals(1, memoryRepository.getMemoriesOnce(chatId, "character-2").size)
+    }
+
+    @Test
+    fun inChatToolsAreBlockedDuringGenerationAndUnresolvedPartialReply() = runBlocking {
+        val harness = createHarness(CancellablePartialProvider(), ResponseLengthProfile.NORMAL)
+        harness.viewModel.onDraftChanged("Start a long response.")
+        harness.viewModel.sendMessage()
+        withTimeout(15_000) {
+            harness.viewModel.uiState.first { it is ChatUiState.Success && it.isGenerating }
+        }
+
+        harness.viewModel.wackContext()
+        val generationBlocked = harness.viewModel.uiState.value as ChatUiState.Success
+        assertTrue(generationBlocked.inChatToolStatus?.message?.contains("generation to finish") == true)
+        assertNull(harness.chatRepository.getChatSummaryById(harness.chatId)?.chat?.contextResetOrderIndex)
+
+        harness.viewModel.stopGeneration()
+        withTimeout(15_000) {
+            harness.viewModel.uiState.first { it is ChatUiState.Success && it.partialStopped }
+        }
+        harness.viewModel.updateMemoryNow()
+        val partialBlocked = harness.viewModel.uiState.value as ChatUiState.Success
+        assertTrue(partialBlocked.inChatToolStatus?.message?.contains("unresolved partial reply") == true)
+        harness.viewModel.discardPartial()
+    }
+
     private data class Harness(
         val chatId: String,
         val viewModel: ChatDetailViewModel,
-        val messageRepository: MessageRepository
+        val chatRepository: ChatRepository,
+        val messageRepository: MessageRepository,
+        val memoryRepository: MemoryRepository,
+        val attachmentRepository: MessageAttachmentRepository,
+        val npcRepository: NpcRepository
     )
 
     private suspend fun createHarness(
         provider: ModelProvider,
         responseLengthProfile: ResponseLengthProfile,
         routingMode: ProviderRoutingMode = ProviderRoutingMode.AUTO,
-        providerEndpoint: String? = null
+        providerEndpoint: String? = null,
+        narratorEnabled: Boolean = false,
+        narratorInstructions: String = "",
+        npcBankEnabledInitially: Boolean = false,
+        initialStoredCharacterContent: String? = null
     ): Harness {
         val moshi = Moshi.Builder().addLast(KotlinJsonAdapterFactory()).build()
         val characterRepository = CharacterRepository(database.characterDao(), moshi)
         val personaRepository = PersonaRepository(database.personaDao(), moshi)
         val chatRepository = ChatRepository(database.chatDao())
         val messageRepository = MessageRepository(database.messageDao())
+        val attachmentRepository = MessageAttachmentRepository(context, database)
+        val npcRepository = NpcRepository(database, moshi)
+        val npcParser = NpcStructuredOutputParser(moshi)
         val memoryRepository = MemoryRepository(database.memoryDao())
         database.characterDao().insertCharacter(character())
         database.personaDao().insertPersona(persona())
@@ -519,20 +1378,48 @@ class ChatDetailGenerationTest {
                 selectedModelId = "mock/model",
                 providerRoutingMode = routingMode,
                 providerEndpoint = providerEndpoint,
-                responseLengthProfile = responseLengthProfile
+                responseLengthProfile = responseLengthProfile,
+                narratorEnabled = narratorEnabled,
+                narratorInstructions = narratorInstructions
             )
         )
-        val viewModel = ChatDetailViewModel(
+        if (npcBankEnabledInitially) npcRepository.setEnabled(chatId, true)
+        initialStoredCharacterContent?.let { content ->
+            messageRepository.insertMessage(
+                MessageEntity(
+                    chatId = chatId,
+                    speakerType = SpeakerType.CHARACTER,
+                    speakerId = "character-1",
+                    speakerDisplayNameSnapshot = "Character",
+                    content = content,
+                    orderIndex = 1L
+                )
+            )
+        }
+        val viewModel = viewModels.create(ChatDetailViewModel::class.java) {
+            ChatDetailViewModel(
+                chatId,
+                chatRepository,
+                messageRepository,
+                characterRepository,
+                personaRepository,
+                provider,
+                memoryRepository,
+                messageAttachmentRepository = attachmentRepository,
+                npcRepository = npcRepository,
+                npcOutputParser = npcParser
+            )
+        }
+        withTimeout(15_000) { viewModel.uiState.first { it is ChatUiState.Success } }
+        return Harness(
             chatId,
+            viewModel,
             chatRepository,
             messageRepository,
-            characterRepository,
-            personaRepository,
-            provider,
-            memoryRepository
+            memoryRepository,
+            attachmentRepository,
+            npcRepository
         )
-        withTimeout(15_000) { viewModel.uiState.first { it is ChatUiState.Success } }
-        return Harness(chatId, viewModel, messageRepository)
     }
 
     private class RecordingStreamingProvider : ModelProvider {
@@ -542,6 +1429,7 @@ class ChatDetailGenerationTest {
 
         override suspend fun getModels(): List<OpenRouterModel> = emptyList()
         override suspend fun getEndpoints(modelId: String): List<ProviderEndpoint> = emptyList()
+        override suspend fun supportsImageInput(modelId: String): Boolean = true
 
         override fun streamResponse(
             messages: List<RoleplayMessage>,
@@ -592,6 +1480,25 @@ class ChatDetailGenerationTest {
         }
     }
 
+    private class RequestSequenceProvider(
+        private val scripts: List<List<StreamEvent>>
+    ) : ModelProvider {
+        val requests = mutableListOf<List<RoleplayMessage>>()
+        private var index = 0
+
+        override suspend fun getModels(): List<OpenRouterModel> = emptyList()
+        override suspend fun getEndpoints(modelId: String): List<ProviderEndpoint> = emptyList()
+        override suspend fun supportsImageInput(modelId: String): Boolean = true
+
+        override fun streamResponse(
+            messages: List<RoleplayMessage>,
+            options: GenerationOptions
+        ): Flow<StreamEvent> = flow {
+            requests += messages
+            scripts[index++].forEach { emit(it) }
+        }
+    }
+
     private class CountingProvider : ModelProvider {
         var requestCount = 0
 
@@ -604,6 +1511,34 @@ class ChatDetailGenerationTest {
         ): Flow<StreamEvent> = flow {
             requestCount += 1
         }
+    }
+
+    private class CancellablePartialProvider(
+        private val content: String = "Partial response"
+    ) : ModelProvider {
+        override suspend fun getModels(): List<OpenRouterModel> = emptyList()
+        override suspend fun getEndpoints(modelId: String): List<ProviderEndpoint> = emptyList()
+
+        override fun streamResponse(
+            messages: List<RoleplayMessage>,
+            options: GenerationOptions
+        ): Flow<StreamEvent> = flow {
+            emit(StreamEvent.Content(content))
+            awaitCancellation()
+        }
+    }
+
+    private class TextOnlyProvider : ModelProvider {
+        var requestCount = 0
+
+        override suspend fun getModels(): List<OpenRouterModel> = emptyList()
+        override suspend fun getEndpoints(modelId: String): List<ProviderEndpoint> = emptyList()
+        override suspend fun supportsImageInput(modelId: String): Boolean = false
+
+        override fun streamResponse(
+            messages: List<RoleplayMessage>,
+            options: GenerationOptions
+        ): Flow<StreamEvent> = flow { requestCount++ }
     }
 
     private fun character() = CharacterEntity(

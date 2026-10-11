@@ -70,6 +70,8 @@ class ChatSettingsScreenInitTest {
             composeTestRule.onAllNodesWithTag("chat_settings_content").fetchSemanticsNodes().isNotEmpty()
         }
         composeTestRule.onNodeWithTag("chat_settings_content").assertExists()
+        composeTestRule.onNodeWithText("Narrator").assertExists()
+        composeTestRule.onNodeWithText("Add narrator guidance").assertExists()
         composeTestRule.onNodeWithText("Generation Parameters").assertExists()
         composeTestRule.onNodeWithText("Failed to fetch models: API key not configured").assertExists()
     }
