@@ -48,10 +48,14 @@ data class AppearanceSettings(
 )
 
 class AppearanceRepository private constructor(
-    private val dataStore: DataStore<Preferences>
+    private val dataStore: DataStore<Preferences>,
+    private val dataCoordinator: AppDataMaintenanceCoordinator
 ) {
 
-    constructor(context: Context) : this(context.dataStore)
+    constructor(
+        context: Context,
+        dataCoordinator: AppDataMaintenanceCoordinator = AppDataMaintenanceCoordinator.Global
+    ) : this(context.dataStore, dataCoordinator)
 
     companion object {
         val THEME_MODE_KEY = stringPreferencesKey("theme_mode")
@@ -60,7 +64,10 @@ class AppearanceRepository private constructor(
         // Retained for a nondestructive read of preferences written by earlier builds.
         val ACCENT_PRESET_KEY = stringPreferencesKey("accent_preset")
 
-        internal fun forDataStore(dataStore: DataStore<Preferences>) = AppearanceRepository(dataStore)
+        internal fun forDataStore(
+            dataStore: DataStore<Preferences>,
+            dataCoordinator: AppDataMaintenanceCoordinator = AppDataMaintenanceCoordinator.Global
+        ) = AppearanceRepository(dataStore, dataCoordinator)
     }
 
     val appearanceSettings: Flow<AppearanceSettings> = dataStore.data
@@ -91,32 +98,40 @@ class AppearanceRepository private constructor(
         }
 
     suspend fun updateThemeMode(mode: ThemeMode) {
-        dataStore.edit { prefs ->
-            prefs[THEME_MODE_KEY] = mode.name
+        dataCoordinator.withMutation {
+            dataStore.edit { prefs ->
+                prefs[THEME_MODE_KEY] = mode.name
+            }
         }
     }
 
     suspend fun updateFontSize(size: Float) {
-        dataStore.edit { prefs ->
-            prefs[FONT_SIZE_KEY] = size.coerceIn(12f, 24f)
+        dataCoordinator.withMutation {
+            dataStore.edit { prefs ->
+                prefs[FONT_SIZE_KEY] = size.coerceIn(12f, 24f)
+            }
         }
     }
 
     suspend fun updateColorPalette(palette: ColorPalette) {
-        dataStore.edit { prefs ->
-            prefs[COLOR_PALETTE_KEY] = palette.storageId
+        dataCoordinator.withMutation {
+            dataStore.edit { prefs ->
+                prefs[COLOR_PALETTE_KEY] = palette.storageId
+            }
         }
     }
 
     suspend fun replaceSettings(settings: AppearanceSettings) {
-        dataStore.edit { prefs ->
-            prefs[THEME_MODE_KEY] = settings.themeMode.name
-            prefs[FONT_SIZE_KEY] = settings.fontSize.coerceIn(12f, 24f)
-            prefs[COLOR_PALETTE_KEY] = settings.colorPalette.storageId
-            if (settings.legacyAccentOverride == null) {
-                prefs.remove(ACCENT_PRESET_KEY)
-            } else {
-                prefs[ACCENT_PRESET_KEY] = settings.legacyAccentOverride
+        dataCoordinator.withMutation {
+            dataStore.edit { prefs ->
+                prefs[THEME_MODE_KEY] = settings.themeMode.name
+                prefs[FONT_SIZE_KEY] = settings.fontSize.coerceIn(12f, 24f)
+                prefs[COLOR_PALETTE_KEY] = settings.colorPalette.storageId
+                if (settings.legacyAccentOverride == null) {
+                    prefs.remove(ACCENT_PRESET_KEY)
+                } else {
+                    prefs[ACCENT_PRESET_KEY] = settings.legacyAccentOverride
+                }
             }
         }
     }

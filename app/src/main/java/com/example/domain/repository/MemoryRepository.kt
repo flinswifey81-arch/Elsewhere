@@ -7,7 +7,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
 
-class MemoryRepository(private val memoryDao: MemoryDao) {
+class MemoryRepository(
+    private val memoryDao: MemoryDao,
+    private val dataCoordinator: AppDataMaintenanceCoordinator = AppDataMaintenanceCoordinator.Global
+) {
     fun getMemories(chatId: String, characterId: String): Flow<List<RoleplayMemoryEntity>> =
         memoryDao.getMemories(chatId, characterId)
 
@@ -19,24 +22,27 @@ class MemoryRepository(private val memoryDao: MemoryDao) {
     suspend fun getSummaryOnce(chatId: String): ConversationSummaryEntity? =
         withContext(Dispatchers.IO) { memoryDao.getSummaryOnce(chatId) }
 
-    suspend fun insertIfNew(memory: RoleplayMemoryEntity): Boolean = withContext(Dispatchers.IO) {
-        if (memoryDao.countMatchingMemory(memory.chatId, memory.characterId, memory.content) == 0) {
-            memoryDao.insertMemory(memory)
-            true
-        } else {
-            false
+    suspend fun insertIfNew(memory: RoleplayMemoryEntity): Boolean =
+        dataCoordinator.withMutation {
+            withContext(Dispatchers.IO) {
+                if (memoryDao.countMatchingMemory(memory.chatId, memory.characterId, memory.content) == 0) {
+                    memoryDao.insertMemory(memory)
+                    true
+                } else {
+                    false
+                }
+            }
         }
+
+    suspend fun deleteMemory(memory: RoleplayMemoryEntity) = dataCoordinator.withMutation {
+        withContext(Dispatchers.IO) { memoryDao.deleteMemory(memory) }
     }
 
-    suspend fun deleteMemory(memory: RoleplayMemoryEntity) = withContext(Dispatchers.IO) {
-        memoryDao.deleteMemory(memory)
+    suspend fun upsertSummary(summary: ConversationSummaryEntity) = dataCoordinator.withMutation {
+        withContext(Dispatchers.IO) { memoryDao.upsertSummary(summary) }
     }
 
-    suspend fun upsertSummary(summary: ConversationSummaryEntity) = withContext(Dispatchers.IO) {
-        memoryDao.upsertSummary(summary)
-    }
-
-    suspend fun deleteSummary(chatId: String) = withContext(Dispatchers.IO) {
-        memoryDao.deleteSummary(chatId)
+    suspend fun deleteSummary(chatId: String) = dataCoordinator.withMutation {
+        withContext(Dispatchers.IO) { memoryDao.deleteSummary(chatId) }
     }
 }

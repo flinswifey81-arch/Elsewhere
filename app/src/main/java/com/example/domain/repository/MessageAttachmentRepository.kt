@@ -25,14 +25,17 @@ import kotlinx.coroutines.withContext
 
 class MessageAttachmentRepository(
     private val context: Context,
-    private val database: AppDatabase
+    private val database: AppDatabase,
+    private val dataCoordinator: AppDataMaintenanceCoordinator = AppDataMaintenanceCoordinator.Global
 ) {
     private val dao: MessageAttachmentDao get() = database.messageAttachmentDao()
     private val storageMutex = Mutex()
     fun observeForChat(chatId: String): Flow<List<MessageAttachmentEntity>> = dao.observeForChat(chatId)
 
-    suspend fun importDraftImage(chatId: String, uri: Uri): MessageAttachmentEntity = storageMutex.withLock {
-        withContext(Dispatchers.IO) {
+    suspend fun importDraftImage(chatId: String, uri: Uri): MessageAttachmentEntity =
+        dataCoordinator.withMutation {
+            storageMutex.withLock {
+                withContext(Dispatchers.IO) {
             val existingDrafts = dao.getDrafts(chatId)
             require(existingDrafts.size < MAX_IMAGES_PER_MESSAGE) {
                 "A message can contain at most $MAX_IMAGES_PER_MESSAGE images."
@@ -148,12 +151,14 @@ class MessageAttachmentRepository(
                 File(directory, "$id.normalized").delete()
                 throw error
             }
+                }
+            }
         }
-    }
 
-    suspend fun persistMessageWithDrafts(message: MessageEntity) = withContext(Dispatchers.IO) {
-        dao.insertMessageAndAttachDrafts(message)
-    }
+    suspend fun persistMessageWithDrafts(message: MessageEntity) =
+        dataCoordinator.withMutation {
+            withContext(Dispatchers.IO) { dao.insertMessageAndAttachDrafts(message) }
+        }
 
     suspend fun getDrafts(chatId: String): List<MessageAttachmentEntity> = withContext(Dispatchers.IO) {
         dao.getDrafts(chatId)
@@ -167,54 +172,68 @@ class MessageAttachmentRepository(
         dao.getForMessage(messageId)
     }
 
-    suspend fun removeDraft(attachment: MessageAttachmentEntity) = storageMutex.withLock {
-        withContext(Dispatchers.IO) {
-            require(attachment.messageId == null) { "Only draft attachments can be removed from the composer." }
-            dao.deleteById(attachment.attachmentId)
-            resolveFile(attachment)?.delete()
-        }
-    }
-
-    suspend fun deleteFiles(attachments: List<MessageAttachmentEntity>) = storageMutex.withLock {
-        withContext(Dispatchers.IO) { deleteFilesLocked(attachments) }
-    }
-
-    suspend fun deleteFilesAndReconcile(attachments: List<MessageAttachmentEntity>) = storageMutex.withLock {
-        withContext(Dispatchers.IO) {
-            deleteFilesLocked(attachments)
-            reconcileOrphanFilesLocked()
-        }
-    }
-
-    suspend fun deleteMessageAndOwnedFiles(message: MessageEntity) = storageMutex.withLock {
-        withContext(Dispatchers.IO) {
-            val attachments = dao.getForMessage(message.messageId)
-            database.withTransaction {
-                database.npcDao().deleteUpdatesForMessage(message.messageId)
-                database.messageDao().deleteMessageAndRepair(message)
-                if (message.isPrimaryVariant) {
-                    database.messageDao().getVariantsOnce(message.variantGroupId)
-                        .firstOrNull { it.isPrimaryVariant }
-                        ?.let { database.npcDao().setMessageUpdatesApplied(it.messageId, true) }
+    suspend fun removeDraft(attachment: MessageAttachmentEntity) =
+        dataCoordinator.withMutation {
+            storageMutex.withLock {
+                withContext(Dispatchers.IO) {
+                    require(attachment.messageId == null) { "Only draft attachments can be removed from the composer." }
+                    dao.deleteById(attachment.attachmentId)
+                    resolveFile(attachment)?.delete()
                 }
             }
-            deleteFilesLocked(attachments)
-            reconcileOrphanFilesLocked()
         }
-    }
 
-    suspend fun deleteChatAndOwnedFiles(chatId: String) = storageMutex.withLock {
-        withContext(Dispatchers.IO) {
-            val attachments = dao.getForChat(chatId)
-            database.chatDao().deleteChatAndOwnedData(chatId)
-            deleteFilesLocked(attachments)
-            reconcileOrphanFilesLocked()
+    suspend fun deleteFiles(attachments: List<MessageAttachmentEntity>) =
+        dataCoordinator.withMutation {
+            storageMutex.withLock { withContext(Dispatchers.IO) { deleteFilesLocked(attachments) } }
         }
-    }
 
-    suspend fun reconcileOrphanFiles() = storageMutex.withLock {
-        withContext(Dispatchers.IO) { reconcileOrphanFilesLocked() }
-    }
+    suspend fun deleteFilesAndReconcile(attachments: List<MessageAttachmentEntity>) =
+        dataCoordinator.withMutation {
+            storageMutex.withLock {
+                withContext(Dispatchers.IO) {
+                    deleteFilesLocked(attachments)
+                    reconcileOrphanFilesLocked()
+                }
+            }
+        }
+
+    suspend fun deleteMessageAndOwnedFiles(message: MessageEntity) =
+        dataCoordinator.withMutation {
+            storageMutex.withLock {
+                withContext(Dispatchers.IO) {
+                    val attachments = dao.getForMessage(message.messageId)
+                    database.withTransaction {
+                        database.npcDao().deleteUpdatesForMessage(message.messageId)
+                        database.messageDao().deleteMessageAndRepair(message)
+                        if (message.isPrimaryVariant) {
+                            database.messageDao().getVariantsOnce(message.variantGroupId)
+                                .firstOrNull { it.isPrimaryVariant }
+                                ?.let { database.npcDao().setMessageUpdatesApplied(it.messageId, true) }
+                        }
+                    }
+                    deleteFilesLocked(attachments)
+                    reconcileOrphanFilesLocked()
+                }
+            }
+        }
+
+    suspend fun deleteChatAndOwnedFiles(chatId: String) =
+        dataCoordinator.withMutation {
+            storageMutex.withLock {
+                withContext(Dispatchers.IO) {
+                    val attachments = dao.getForChat(chatId)
+                    database.chatDao().deleteChatAndOwnedData(chatId)
+                    deleteFilesLocked(attachments)
+                    reconcileOrphanFilesLocked()
+                }
+            }
+        }
+
+    suspend fun reconcileOrphanFiles() =
+        dataCoordinator.withMutation {
+            storageMutex.withLock { withContext(Dispatchers.IO) { reconcileOrphanFilesLocked() } }
+        }
 
     private fun deleteFilesLocked(attachments: List<MessageAttachmentEntity>) {
         attachments.forEach { resolveFile(it)?.delete() }

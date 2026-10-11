@@ -41,7 +41,10 @@ data class ProfileImageState(
  * from entering exports or model context. Replacements are normalized to metadata-free PNG and
  * atomically moved over the prior image only after all validation succeeds.
  */
-class ProfileImageRepository(private val context: Context) {
+class ProfileImageRepository(
+    private val context: Context,
+    private val dataCoordinator: AppDataMaintenanceCoordinator = AppDataMaintenanceCoordinator.Global
+) {
     private val storageMutex = Mutex()
     private val revision = MutableStateFlow(0L)
 
@@ -52,8 +55,9 @@ class ProfileImageRepository(private val context: Context) {
         ProfileImageState(resolveImage(kind, profileId), revision.value)
 
     suspend fun replaceImage(kind: ProfileImageKind, profileId: String, source: Uri): File =
-        storageMutex.withLock {
-            withContext(Dispatchers.IO) {
+        dataCoordinator.withMutation {
+            storageMutex.withLock {
+                withContext(Dispatchers.IO) {
                 requireValidProfileId(profileId)
                 val directory = imageDirectory(kind).apply { mkdirs() }
                 require(directory.isDirectory) { "Profile picture storage is unavailable." }
@@ -138,21 +142,26 @@ class ProfileImageRepository(private val context: Context) {
                     incoming.delete()
                     normalized.delete()
                 }
+                }
             }
         }
 
-    suspend fun removeImage(kind: ProfileImageKind, profileId: String): Boolean = storageMutex.withLock {
-        withContext(Dispatchers.IO) {
-            requireValidProfileId(profileId)
-            val removed = resolveImage(kind, profileId)?.delete() == true
-            if (removed) revision.value += 1
-            removed
+    suspend fun removeImage(kind: ProfileImageKind, profileId: String): Boolean =
+        dataCoordinator.withMutation {
+            storageMutex.withLock {
+                withContext(Dispatchers.IO) {
+                    requireValidProfileId(profileId)
+                    val removed = resolveImage(kind, profileId)?.delete() == true
+                    if (removed) revision.value += 1
+                    removed
+                }
+            }
         }
-    }
 
     suspend fun copyImage(kind: ProfileImageKind, sourceProfileId: String, targetProfileId: String): Boolean =
-        storageMutex.withLock {
-            withContext(Dispatchers.IO) {
+        dataCoordinator.withMutation {
+            storageMutex.withLock {
+                withContext(Dispatchers.IO) {
                 requireValidProfileId(sourceProfileId)
                 requireValidProfileId(targetProfileId)
                 val source = resolveImage(kind, sourceProfileId) ?: return@withContext false
@@ -175,6 +184,7 @@ class ProfileImageRepository(private val context: Context) {
                     true
                 } finally {
                     temporary.delete()
+                }
                 }
             }
         }

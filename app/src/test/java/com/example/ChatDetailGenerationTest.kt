@@ -34,6 +34,7 @@ import com.example.domain.provider.Role
 import com.example.domain.provider.RoleplayMessage
 import com.example.domain.provider.StreamEvent
 import com.example.domain.repository.CharacterRepository
+import com.example.domain.repository.AppDataMaintenanceCoordinator
 import com.example.domain.repository.ChatRepository
 import com.example.domain.repository.MemoryRepository
 import com.example.domain.repository.MessageRepository
@@ -73,11 +74,13 @@ class ChatDetailGenerationTest {
     private lateinit var context: Context
     private lateinit var database: AppDatabase
     private lateinit var viewModels: TestViewModelOwner
+    private lateinit var dataCoordinator: AppDataMaintenanceCoordinator
     private val mainDispatcher = UnconfinedTestDispatcher()
 
     @Before
     fun setUp() {
         Dispatchers.setMain(mainDispatcher)
+        dataCoordinator = AppDataMaintenanceCoordinator()
         context = ApplicationProvider.getApplicationContext()
         database = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
             .allowMainThreadQueries()
@@ -95,11 +98,11 @@ class ChatDetailGenerationTest {
     @Test
     fun streamedResponseIsPersistedAndCompiledContextIncludesMemory() = runBlocking {
         val moshi = Moshi.Builder().addLast(KotlinJsonAdapterFactory()).build()
-        val characterRepository = CharacterRepository(database.characterDao(), moshi)
-        val personaRepository = PersonaRepository(database.personaDao(), moshi)
-        val chatRepository = ChatRepository(database.chatDao())
-        val messageRepository = MessageRepository(database.messageDao())
-        val memoryRepository = MemoryRepository(database.memoryDao())
+        val characterRepository = CharacterRepository(database.characterDao(), moshi, dataCoordinator = dataCoordinator)
+        val personaRepository = PersonaRepository(database.personaDao(), moshi, dataCoordinator = dataCoordinator)
+        val chatRepository = ChatRepository(database.chatDao(), dataCoordinator = dataCoordinator)
+        val messageRepository = MessageRepository(database.messageDao(), dataCoordinator)
+        val memoryRepository = MemoryRepository(database.memoryDao(), dataCoordinator)
 
         database.characterDao().insertCharacter(character())
         database.personaDao().insertPersona(persona())
@@ -126,7 +129,8 @@ class ChatDetailGenerationTest {
                 characterRepository,
                 personaRepository,
                 provider,
-                memoryRepository
+                memoryRepository,
+                dataCoordinator = dataCoordinator
             )
         }
         withTimeout(15_000) { viewModel.uiState.first { it is ChatUiState.Success } }
@@ -1252,11 +1256,11 @@ class ChatDetailGenerationTest {
     @Test
     fun updateMemoryNowInGroupUpdatesOnlySelectedCharacterAndReportsDeduplication() = runBlocking {
         val moshi = Moshi.Builder().addLast(KotlinJsonAdapterFactory()).build()
-        val characterRepository = CharacterRepository(database.characterDao(), moshi)
-        val personaRepository = PersonaRepository(database.personaDao(), moshi)
-        val chatRepository = ChatRepository(database.chatDao())
-        val messageRepository = MessageRepository(database.messageDao())
-        val memoryRepository = MemoryRepository(database.memoryDao())
+        val characterRepository = CharacterRepository(database.characterDao(), moshi, dataCoordinator = dataCoordinator)
+        val personaRepository = PersonaRepository(database.personaDao(), moshi, dataCoordinator = dataCoordinator)
+        val chatRepository = ChatRepository(database.chatDao(), dataCoordinator = dataCoordinator)
+        val messageRepository = MessageRepository(database.messageDao(), dataCoordinator)
+        val memoryRepository = MemoryRepository(database.memoryDao(), dataCoordinator)
         val provider = CountingProvider()
         database.characterDao().insertCharacter(character())
         database.characterDao().insertCharacter(
@@ -1287,7 +1291,8 @@ class ChatDetailGenerationTest {
                 characterRepository,
                 personaRepository,
                 provider,
-                memoryRepository
+                memoryRepository,
+                dataCoordinator = dataCoordinator
             )
         }
         withTimeout(15_000) {
@@ -1361,14 +1366,14 @@ class ChatDetailGenerationTest {
         initialStoredCharacterContent: String? = null
     ): Harness {
         val moshi = Moshi.Builder().addLast(KotlinJsonAdapterFactory()).build()
-        val characterRepository = CharacterRepository(database.characterDao(), moshi)
-        val personaRepository = PersonaRepository(database.personaDao(), moshi)
-        val chatRepository = ChatRepository(database.chatDao())
-        val messageRepository = MessageRepository(database.messageDao())
-        val attachmentRepository = MessageAttachmentRepository(context, database)
-        val npcRepository = NpcRepository(database, moshi)
+        val characterRepository = CharacterRepository(database.characterDao(), moshi, dataCoordinator = dataCoordinator)
+        val personaRepository = PersonaRepository(database.personaDao(), moshi, dataCoordinator = dataCoordinator)
+        val chatRepository = ChatRepository(database.chatDao(), dataCoordinator = dataCoordinator)
+        val messageRepository = MessageRepository(database.messageDao(), dataCoordinator)
+        val attachmentRepository = MessageAttachmentRepository(context, database, dataCoordinator)
+        val npcRepository = NpcRepository(database, moshi, dataCoordinator)
         val npcParser = NpcStructuredOutputParser(moshi)
-        val memoryRepository = MemoryRepository(database.memoryDao())
+        val memoryRepository = MemoryRepository(database.memoryDao(), dataCoordinator)
         database.characterDao().insertCharacter(character())
         database.personaDao().insertPersona(persona())
         val chatId = chatRepository.createSoloChat("Cutoff Test", "persona-1", "character-1")
@@ -1407,7 +1412,8 @@ class ChatDetailGenerationTest {
                 memoryRepository,
                 messageAttachmentRepository = attachmentRepository,
                 npcRepository = npcRepository,
-                npcOutputParser = npcParser
+                npcOutputParser = npcParser,
+                dataCoordinator = dataCoordinator
             )
         }
         withTimeout(15_000) { viewModel.uiState.first { it is ChatUiState.Success } }

@@ -9,6 +9,7 @@ import com.example.data.AppDatabase
 import com.example.data.model.*
 import com.example.domain.repository.AppearanceRepository
 import com.example.domain.repository.AppearanceSettings
+import com.example.domain.repository.AppDataMaintenanceCoordinator
 import com.example.domain.repository.ColorPalette
 import com.example.domain.repository.MessageAttachmentRepository
 import com.example.domain.repository.ProfileImageKind
@@ -39,7 +40,10 @@ class BackupRepository internal constructor(
     private val messageAttachmentRepository: MessageAttachmentRepository,
     private val profileImageRepository: ProfileImageRepository,
     moshi: Moshi,
-    private val faultInjector: (RestoreStage) -> Unit = {}
+    private val faultInjector: (RestoreStage) -> Unit = {},
+    private val dataCoordinator: AppDataMaintenanceCoordinator = AppDataMaintenanceCoordinator.Global,
+    private val snapshotHook: suspend () -> Unit = {},
+    private val beforeDataReplacement: suspend () -> Unit = {}
 ) {
     private val archiveIO = BackupArchiveIO(moshi, BuildConfig.APPLICATION_ID)
     private val coopCodec = CoopCodec(moshi)
@@ -103,31 +107,34 @@ class BackupRepository internal constructor(
                             "The selected backup changed after it was reviewed. Validate it again before restoring."
                         )
                     }
-                    validatePayload(validated.payload, validated.manifest)
-                    validateExtractedFiles(validated)
-                    writeSafetyBackup()
-                    restoreMarkerFile.parentFile?.mkdirs()
-                    restoreMarkerFile.writeText("restore_started_at=${System.currentTimeMillis()}\n")
-                    faultInjector(RestoreStage.AFTER_SAFETY_BACKUP)
-                    try {
-                        val result = applyValidatedBackup(
-                            validated,
-                            injectFaults = true,
-                            sanitizePortable = true
-                        )
-                        restoreMarkerFile.delete()
-                        result.copy(safetyBackupAvailable = safetyBackupFile.isFile)
-                    } catch (restoreError: Exception) {
-                        val recoveryAttempt = runCatching { applySafetyBackupInternal() }
-                        val recovered = recoveryAttempt.isSuccess
-                        recoveryAttempt.exceptionOrNull()?.let(restoreError::addSuppressed)
-                        if (recovered) restoreMarkerFile.delete()
-                        val message = if (recovered) {
-                            "Restore failed and the previous local data was recovered."
-                        } else {
-                            "Restore was interrupted. The pre-restore safety copy is still available."
+                    dataCoordinator.withDataReplacement {
+                        beforeDataReplacement()
+                        validatePayload(validated.payload, validated.manifest)
+                        validateExtractedFiles(validated)
+                        writeSafetyBackup()
+                        restoreMarkerFile.parentFile?.mkdirs()
+                        restoreMarkerFile.writeText("restore_started_at=${System.currentTimeMillis()}\n")
+                        faultInjector(RestoreStage.AFTER_SAFETY_BACKUP)
+                        try {
+                            val result = applyValidatedBackup(
+                                validated,
+                                injectFaults = true,
+                                sanitizePortable = true
+                            )
+                            restoreMarkerFile.delete()
+                            result.copy(safetyBackupAvailable = safetyBackupFile.isFile)
+                        } catch (restoreError: Exception) {
+                            val recoveryAttempt = runCatching { applySafetyBackupInternal() }
+                            val recovered = recoveryAttempt.isSuccess
+                            recoveryAttempt.exceptionOrNull()?.let(restoreError::addSuppressed)
+                            if (recovered) restoreMarkerFile.delete()
+                            val message = if (recovered) {
+                                "Restore failed and the previous local data was recovered."
+                            } else {
+                                "Restore was interrupted. The pre-restore safety copy is still available."
+                            }
+                            throw BackupValidationException(message, restoreError)
                         }
-                        throw BackupValidationException(message, restoreError)
                     }
                 } finally {
                     validated.workingDirectory.deleteRecursively()
@@ -138,9 +145,12 @@ class BackupRepository internal constructor(
     suspend fun recoverLastRestore(): BackupRestoreResult = withContext(Dispatchers.IO) {
         operationMutex.withLock {
             if (!safetyBackupFile.isFile) throw BackupValidationException("No pre-restore safety copy is available.")
-            val result = applySafetyBackupInternal()
-            restoreMarkerFile.delete()
-            result.copy(safetyBackupAvailable = true)
+            dataCoordinator.withDataReplacement {
+                beforeDataReplacement()
+                val result = applySafetyBackupInternal()
+                restoreMarkerFile.delete()
+                result.copy(safetyBackupAvailable = true)
+            }
         }
     }
 
@@ -148,7 +158,10 @@ class BackupRepository internal constructor(
 
     fun hasInterruptedRestore(): Boolean = restoreMarkerFile.isFile && safetyBackupFile.isFile
 
-    private suspend fun createSnapshot(mode: BackupSnapshotMode): BackupSnapshot {
+    private suspend fun createSnapshot(mode: BackupSnapshotMode): BackupSnapshot =
+        dataCoordinator.withSnapshotMaintenance { createSnapshotLocked(mode) }
+
+    private suspend fun createSnapshotLocked(mode: BackupSnapshotMode): BackupSnapshot {
         val appearance = appearanceRepository.appearanceSettings.first()
         val portable = mode == BackupSnapshotMode.PORTABLE
         val payload = database.withTransaction {
@@ -184,6 +197,7 @@ class BackupRepository internal constructor(
                 appearance = appearance.toBackup()
             )
         }
+        snapshotHook()
         val stagingDirectory = File(context.cacheDir, "elsewhere-snapshot-${UUID.randomUUID()}")
         try {
             val binaries = collectBinarySources(payload, stagingDirectory)

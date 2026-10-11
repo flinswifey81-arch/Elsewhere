@@ -61,7 +61,8 @@ data class CoopAppendHostEventResult(
 class CoopRepository(
     private val database: AppDatabase,
     moshi: Moshi,
-    private val attachmentRepository: MessageAttachmentRepository? = null
+    private val attachmentRepository: MessageAttachmentRepository? = null,
+    private val dataCoordinator: AppDataMaintenanceCoordinator = AppDataMaintenanceCoordinator.Global
 ) {
     private val coopDao = database.coopDao()
     private val chatDao = database.chatDao()
@@ -104,8 +105,10 @@ class CoopRepository(
         getGenerationLifecycleLocked(room)
     }
 
-    suspend fun reconcileDisconnectedParticipants(roomId: String) = withContext(Dispatchers.IO) {
-        coopDao.markRoomParticipantsDisconnected(roomId, System.currentTimeMillis())
+    suspend fun reconcileDisconnectedParticipants(roomId: String) = dataCoordinator.withMutation {
+        withContext(Dispatchers.IO) {
+            coopDao.markRoomParticipantsDisconnected(roomId, System.currentTimeMillis())
+        }
     }
 
     suspend fun createHostRoom(
@@ -119,7 +122,8 @@ class CoopRepository(
         hostPublicKey: String = "",
         hostKeyFingerprint: String = "",
         hostAddress: String? = null
-    ): CoopHostInvite = withContext(Dispatchers.IO) {
+    ): CoopHostInvite = dataCoordinator.withMutation {
+        withContext(Dispatchers.IO) {
         require(participantDisplayName.isNotBlank()) { "Participant name is required" }
         require(participantDisplayName.length <= CoopProtocol.MAX_PARTICIPANT_NAME_CHARS) {
             "Participant name is too long"
@@ -258,6 +262,7 @@ class CoopRepository(
             check(coopDao.insertEvent(rosterEvent) != -1L) { "Unable to seed the Character roster" }
         }
         CoopHostInvite(room, host, pairingCode)
+        }
     }
 
     suspend fun createOrUpdateClientRoom(
@@ -274,7 +279,8 @@ class CoopRepository(
         hostPublicKey: String = "",
         hostKeyFingerprint: String = "",
         identityPublicKey: String = ""
-    ): CoopRoomEntity = withContext(Dispatchers.IO) {
+    ): CoopRoomEntity = dataCoordinator.withMutation {
+        withContext(Dispatchers.IO) {
         val chat = chatDao.getChatById(chatId) ?: throw CoopProtocolException("Chat not found")
         require(chat.chatType == ChatType.GROUP) { "Only Group chats can join a co-op room" }
         require(hostAddress.isNotBlank()) { "Host address is required" }
@@ -366,9 +372,11 @@ class CoopRepository(
             )
         }
         room
+        }
     }
 
-    suspend fun rotatePairingCode(roomId: String): String = withContext(Dispatchers.IO) {
+    suspend fun rotatePairingCode(roomId: String): String = dataCoordinator.withMutation {
+        withContext(Dispatchers.IO) {
         val room = requireHostRoom(roomId)
         val code = CoopSessionCrypto.newInviteSecret()
         val salt = Base64.getEncoder().withoutPadding().encodeToString(
@@ -382,6 +390,7 @@ class CoopRepository(
             )
         )
         code
+        }
     }
 
     suspend fun verifyPairingCode(roomId: String, code: String): Boolean = withContext(Dispatchers.IO) {
@@ -393,31 +402,39 @@ class CoopRepository(
         )
     }
 
-    suspend fun upsertParticipant(participant: CoopParticipantEntity) = withContext(Dispatchers.IO) {
-        database.withTransaction {
-            coopDao.getParticipant(participant.participantId)?.let { existing ->
-                require(existing.roomId == participant.roomId &&
-                    existing.deviceId == participant.deviceId &&
-                    (existing.identityPublicKey.isBlank() ||
-                        existing.identityPublicKey == participant.identityPublicKey)) {
-                    "Participant membership identity is immutable"
+    suspend fun upsertParticipant(participant: CoopParticipantEntity) = dataCoordinator.withMutation {
+        withContext(Dispatchers.IO) {
+            database.withTransaction {
+                coopDao.getParticipant(participant.participantId)?.let { existing ->
+                    require(existing.roomId == participant.roomId &&
+                        existing.deviceId == participant.deviceId &&
+                        (existing.identityPublicKey.isBlank() ||
+                            existing.identityPublicKey == participant.identityPublicKey)) {
+                        "Participant membership identity is immutable"
+                    }
                 }
+                coopDao.upsertParticipant(participant)
             }
-            coopDao.upsertParticipant(participant)
         }
     }
 
-    suspend fun upsertOwnership(ownership: CoopPersonaOwnershipEntity) = withContext(Dispatchers.IO) {
-        coopDao.upsertPersonaOwnership(ownership)
+    suspend fun upsertOwnership(ownership: CoopPersonaOwnershipEntity) = dataCoordinator.withMutation {
+        withContext(Dispatchers.IO) { coopDao.upsertPersonaOwnership(ownership) }
     }
 
-    suspend fun updateConnectionState(roomId: String, state: String) = withContext(Dispatchers.IO) {
-        val room = coopDao.getRoom(roomId) ?: return@withContext
-        coopDao.updateRoom(room.copy(connectionState = state, updatedAt = System.currentTimeMillis()))
+    suspend fun updateConnectionState(roomId: String, state: String) = dataCoordinator.withMutation {
+        withContext(Dispatchers.IO) {
+            val room = coopDao.getRoom(roomId)
+            if (room != null) {
+                coopDao.updateRoom(room.copy(connectionState = state, updatedAt = System.currentTimeMillis()))
+            }
+        }
     }
 
-    suspend fun setParticipantConnected(participantId: String, connected: Boolean) = withContext(Dispatchers.IO) {
-        coopDao.setParticipantConnected(participantId, connected, System.currentTimeMillis())
+    suspend fun setParticipantConnected(participantId: String, connected: Boolean) = dataCoordinator.withMutation {
+        withContext(Dispatchers.IO) {
+            coopDao.setParticipantConnected(participantId, connected, System.currentTimeMillis())
+        }
     }
 
     suspend fun appendHostEvent(
@@ -446,22 +463,24 @@ class CoopRepository(
         payloadJson: String,
         originPayloadJson: String = "",
         originSignature: String = ""
-    ): CoopAppendHostEventResult = withContext(Dispatchers.IO) {
-        val pendingAttachmentDeletes = mutableListOf<MessageAttachmentEntity>()
-        val result = database.withTransaction {
-            appendHostEventLocked(
-                roomId,
-                clientEventId,
-                originParticipantId,
-                eventType,
-                payloadJson,
-                originPayloadJson,
-                originSignature,
-                pendingAttachmentDeletes
-            )
+    ): CoopAppendHostEventResult = dataCoordinator.withMutation {
+        withContext(Dispatchers.IO) {
+            val pendingAttachmentDeletes = mutableListOf<MessageAttachmentEntity>()
+            val result = database.withTransaction {
+                appendHostEventLocked(
+                    roomId,
+                    clientEventId,
+                    originParticipantId,
+                    eventType,
+                    payloadJson,
+                    originPayloadJson,
+                    originSignature,
+                    pendingAttachmentDeletes
+                )
+            }
+            cleanDeletedAttachmentFiles(pendingAttachmentDeletes)
+            result
         }
-        cleanDeletedAttachmentFiles(pendingAttachmentDeletes)
-        result
     }
 
     suspend fun commitAcceptedMembership(
@@ -469,7 +488,8 @@ class CoopRepository(
         joinClientMessageId: String,
         participant: CoopParticipantEntity,
         ownership: CoopPersonaOwnershipEntity
-    ): List<CoopEventEntity> = withContext(Dispatchers.IO) {
+    ): List<CoopEventEntity> = dataCoordinator.withMutation {
+        withContext(Dispatchers.IO) {
         database.withTransaction {
             val room = requireHostRoom(roomId)
             require(participant.roomId == roomId && ownership.roomId == roomId) {
@@ -531,6 +551,7 @@ class CoopRepository(
                 ).event
             )
         }
+        }
     }
 
     private suspend fun appendHostEventLocked(
@@ -586,7 +607,8 @@ class CoopRepository(
         return CoopAppendHostEventResult(event, inserted = true)
     }
 
-    suspend fun applyOrderedEvent(event: CoopEventEntity): Boolean = withContext(Dispatchers.IO) {
+    suspend fun applyOrderedEvent(event: CoopEventEntity): Boolean = dataCoordinator.withMutation {
+        withContext(Dispatchers.IO) {
         val pendingAttachmentDeletes = mutableListOf<MessageAttachmentEntity>()
         val applied = database.withTransaction {
             coopDao.getEventByClientId(event.roomId, event.clientEventId)?.let { existing ->
@@ -617,6 +639,7 @@ class CoopRepository(
         }
         if (applied) cleanDeletedAttachmentFiles(pendingAttachmentDeletes)
         applied
+        }
     }
 
     suspend fun buildSnapshot(
@@ -679,7 +702,8 @@ class CoopRepository(
         )
     }
 
-    suspend fun applySnapshot(snapshot: CoopSnapshotPayload) = withContext(Dispatchers.IO) {
+    suspend fun applySnapshot(snapshot: CoopSnapshotPayload) = dataCoordinator.withMutation {
+        withContext(Dispatchers.IO) {
         val room = coopDao.getRoom(snapshot.roomId) ?: throw CoopProtocolException("Unknown co-op room")
         require(snapshot.hostParticipantId == room.hostParticipantId) { "Snapshot host identity changed" }
         require(snapshot.participants.size in 1..CoopProtocol.MAX_PARTICIPANTS) { "Invalid participant count" }
@@ -786,6 +810,7 @@ class CoopRepository(
             coopDao.updateRoom(workingRoom)
         }
         cleanDeletedAttachmentFiles(pendingAttachmentDeletes)
+        }
     }
 
     suspend fun resolvePayer(roomId: String, initiatorParticipantId: String): String = withContext(Dispatchers.IO) {
@@ -1324,8 +1349,8 @@ class CoopRepository(
     private suspend fun messageWasDeleted(roomId: String, messageId: String): Boolean =
         coopDao.isMessageTombstoned(roomId, messageId)
 
-    suspend fun deleteRoomKeepingChat(roomId: String) = withContext(Dispatchers.IO) {
-        coopDao.deleteRoom(roomId)
+    suspend fun deleteRoomKeepingChat(roomId: String) = dataCoordinator.withMutation {
+        withContext(Dispatchers.IO) { coopDao.deleteRoom(roomId) }
     }
 
     private suspend fun requireExecutingGenerationResult(

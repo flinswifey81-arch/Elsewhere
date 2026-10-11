@@ -24,6 +24,7 @@ import com.example.domain.provider.StreamEvent
 import com.example.domain.coop.CoopDeviceIdentity
 import com.example.domain.coop.CoopSessionManager
 import com.example.domain.repository.CharacterRepository
+import com.example.domain.repository.AppDataMaintenanceCoordinator
 import com.example.domain.repository.ChatRepository
 import com.example.domain.repository.CoopRepository
 import com.example.domain.repository.MemoryRepository
@@ -60,11 +61,13 @@ class LocalGroupGenerationTest {
     private lateinit var database: AppDatabase
     private lateinit var context: Context
     private lateinit var viewModels: TestViewModelOwner
+    private lateinit var dataCoordinator: AppDataMaintenanceCoordinator
     private val mainDispatcher = UnconfinedTestDispatcher()
 
     @Before
     fun setUp() {
         Dispatchers.setMain(mainDispatcher)
+        dataCoordinator = AppDataMaintenanceCoordinator()
         context = ApplicationProvider.getApplicationContext()
         database = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
             .allowMainThreadQueries()
@@ -204,8 +207,8 @@ class LocalGroupGenerationTest {
 
     @Test
     fun participantControlsPersistOrderMuteRemoveAndReaddWithoutDeletingHistory() = runBlocking {
-        val chatRepository = ChatRepository(database.chatDao(), database.messageDao())
-        val messageRepository = MessageRepository(database.messageDao())
+        val chatRepository = ChatRepository(database.chatDao(), database.messageDao(), dataCoordinator)
+        val messageRepository = MessageRepository(database.messageDao(), dataCoordinator)
         database.characterDao().insertCharacter(character("character-a", "Character A", "A_ONLY_KNOWLEDGE"))
         database.characterDao().insertCharacter(character("character-b", "Character B", "B_ONLY_KNOWLEDGE"))
         database.personaDao().insertPersona(persona())
@@ -255,7 +258,7 @@ class LocalGroupGenerationTest {
         val provider = SequentialGroupProvider(listOf("must not run"))
         val context = ApplicationProvider.getApplicationContext<Context>()
         val moshi = Moshi.Builder().addLast(KotlinJsonAdapterFactory()).build()
-        val coopRepository = CoopRepository(database, moshi)
+        val coopRepository = CoopRepository(database, moshi, dataCoordinator = dataCoordinator)
         val manager = CoopSessionManager(
             repository = coopRepository,
             deviceIdentity = CoopDeviceIdentity(context),
@@ -295,7 +298,7 @@ class LocalGroupGenerationTest {
     fun privateWackAndMemoryToolsCannotMutateStateWhileCoopIsConfigured() = runBlocking {
         val provider = SequentialGroupProvider(emptyList())
         val moshi = Moshi.Builder().addLast(KotlinJsonAdapterFactory()).build()
-        val coopRepository = CoopRepository(database, moshi)
+        val coopRepository = CoopRepository(database, moshi, dataCoordinator = dataCoordinator)
         val manager = CoopSessionManager(
             repository = coopRepository,
             deviceIdentity = CoopDeviceIdentity(context),
@@ -590,13 +593,13 @@ class LocalGroupGenerationTest {
         narratorInstructions: String = ""
     ): Harness {
         val moshi = Moshi.Builder().addLast(KotlinJsonAdapterFactory()).build()
-        val characterRepository = CharacterRepository(database.characterDao(), moshi)
-        val personaRepository = PersonaRepository(database.personaDao(), moshi)
-        val chatRepository = ChatRepository(database.chatDao(), database.messageDao())
-        val messageRepository = MessageRepository(database.messageDao())
-        val memoryRepository = MemoryRepository(database.memoryDao())
-        val lorebookRepository = LorebookRepository(database.lorebookDao(), moshi)
-        val attachmentRepository = MessageAttachmentRepository(context, database)
+        val characterRepository = CharacterRepository(database.characterDao(), moshi, dataCoordinator = dataCoordinator)
+        val personaRepository = PersonaRepository(database.personaDao(), moshi, dataCoordinator = dataCoordinator)
+        val chatRepository = ChatRepository(database.chatDao(), database.messageDao(), dataCoordinator)
+        val messageRepository = MessageRepository(database.messageDao(), dataCoordinator)
+        val memoryRepository = MemoryRepository(database.memoryDao(), dataCoordinator)
+        val lorebookRepository = LorebookRepository(database.lorebookDao(), moshi, dataCoordinator)
+        val attachmentRepository = MessageAttachmentRepository(context, database, dataCoordinator)
 
         database.characterDao().insertCharacter(character("character-a", "Character A", "A_ONLY_KNOWLEDGE"))
         database.characterDao().insertCharacter(character("character-b", "Character B", "B_ONLY_KNOWLEDGE"))
@@ -655,7 +658,8 @@ class LocalGroupGenerationTest {
                 memoryRepository = memoryRepository,
                 lorebookRepository = lorebookRepository,
                 coopSessionManager = coopSessionManager,
-                messageAttachmentRepository = attachmentRepository
+                messageAttachmentRepository = attachmentRepository,
+                dataCoordinator = dataCoordinator
             )
         }
         withTimeout(30_000) {

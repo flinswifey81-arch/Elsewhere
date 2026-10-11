@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.Room
 import com.example.data.AppDatabase
 import com.example.domain.repository.AppearanceRepository
+import com.example.domain.repository.AppDataMaintenanceCoordinator
 import com.example.domain.repository.CharacterRepository
 import com.example.domain.repository.ChatRepository
 import com.example.domain.repository.CoopRepository
@@ -44,6 +45,8 @@ interface AppContainer {
 }
 
 class DefaultAppContainer(private val context: Context) : AppContainer {
+    private val dataCoordinator = AppDataMaintenanceCoordinator.Global
+
     private val okHttpClient: okhttp3.OkHttpClient by lazy {
         okhttp3.OkHttpClient.Builder()
             .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
@@ -71,11 +74,11 @@ class DefaultAppContainer(private val context: Context) : AppContainer {
     }
 
     override val characterRepository: CharacterRepository by lazy {
-        CharacterRepository(database.characterDao(), moshi, profileImageRepository)
+        CharacterRepository(database.characterDao(), moshi, profileImageRepository, dataCoordinator)
     }
 
     override val personaRepository: PersonaRepository by lazy {
-        PersonaRepository(database.personaDao(), moshi, profileImageRepository)
+        PersonaRepository(database.personaDao(), moshi, profileImageRepository, dataCoordinator)
     }
 
     override val settingsRepository: SettingsRepository by lazy {
@@ -83,11 +86,11 @@ class DefaultAppContainer(private val context: Context) : AppContainer {
     }
 
     override val appearanceRepository: AppearanceRepository by lazy {
-        AppearanceRepository(context)
+        AppearanceRepository(context, dataCoordinator)
     }
 
     override val chatRepository: ChatRepository by lazy {
-        ChatRepository(database.chatDao(), database.messageDao())
+        ChatRepository(database.chatDao(), database.messageDao(), dataCoordinator)
     }
 
     override val modelProvider: com.example.domain.provider.ModelProvider by lazy {
@@ -95,27 +98,27 @@ class DefaultAppContainer(private val context: Context) : AppContainer {
     }
 
     override val messageRepository: MessageRepository by lazy {
-        MessageRepository(database.messageDao())
+        MessageRepository(database.messageDao(), dataCoordinator)
     }
 
     override val memoryRepository: MemoryRepository by lazy {
-        MemoryRepository(database.memoryDao())
+        MemoryRepository(database.memoryDao(), dataCoordinator)
     }
 
     override val lorebookRepository: LorebookRepository by lazy {
-        LorebookRepository(database.lorebookDao(), moshi)
+        LorebookRepository(database.lorebookDao(), moshi, dataCoordinator)
     }
 
     override val messageAttachmentRepository: MessageAttachmentRepository by lazy {
-        MessageAttachmentRepository(context, database)
+        MessageAttachmentRepository(context, database, dataCoordinator)
     }
 
     override val profileImageRepository: ProfileImageRepository by lazy {
-        ProfileImageRepository(context)
+        ProfileImageRepository(context, dataCoordinator)
     }
 
     override val npcRepository: NpcRepository by lazy {
-        NpcRepository(database, moshi)
+        NpcRepository(database, moshi, dataCoordinator)
     }
 
     override val npcOutputParser: NpcStructuredOutputParser by lazy {
@@ -129,12 +132,14 @@ class DefaultAppContainer(private val context: Context) : AppContainer {
             appearanceRepository = appearanceRepository,
             messageAttachmentRepository = messageAttachmentRepository,
             profileImageRepository = profileImageRepository,
-            moshi = moshi
+            moshi = moshi,
+            dataCoordinator = dataCoordinator,
+            beforeDataReplacement = { coopSessionManager.stopForDataReplacement() }
         )
     }
 
     override val coopRepository: CoopRepository by lazy {
-        CoopRepository(database, moshi, messageAttachmentRepository)
+        CoopRepository(database, moshi, messageAttachmentRepository, dataCoordinator)
     }
 
     override val coopSessionManager: CoopSessionManager by lazy {

@@ -53,7 +53,8 @@ data class NpcContextSelection(
 
 class NpcRepository(
     private val database: AppDatabase,
-    private val moshi: Moshi
+    private val moshi: Moshi,
+    private val dataCoordinator: AppDataMaintenanceCoordinator = AppDataMaintenanceCoordinator.Global
 ) {
     private val dao get() = database.npcDao()
     private val messageDao get() = database.messageDao()
@@ -72,19 +73,25 @@ class NpcRepository(
 
     fun observeSettings(chatId: String): Flow<NpcBankSettingsEntity?> = dao.observeSettings(chatId)
 
-    suspend fun getSettings(chatId: String): NpcBankSettingsEntity = withContext(Dispatchers.IO) {
-        dao.getSettings(chatId) ?: NpcBankSettingsEntity(chatId, isEnabled = false).also { dao.upsertSettings(it) }
-    }
+    suspend fun getSettings(chatId: String): NpcBankSettingsEntity =
+        dataCoordinator.withMutation {
+            withContext(Dispatchers.IO) {
+            dao.getSettings(chatId) ?: NpcBankSettingsEntity(chatId, isEnabled = false).also { dao.upsertSettings(it) }
+            }
+        }
 
-    suspend fun setEnabled(chatId: String, enabled: Boolean) = withContext(Dispatchers.IO) {
-        dao.upsertSettings(NpcBankSettingsEntity(chatId, enabled))
+    suspend fun setEnabled(chatId: String, enabled: Boolean) = dataCoordinator.withMutation {
+        withContext(Dispatchers.IO) {
+            dao.upsertSettings(NpcBankSettingsEntity(chatId, enabled))
+        }
     }
 
     suspend fun getProjectedDossiers(chatId: String): List<NpcDossier> = withContext(Dispatchers.IO) {
         project(dao.getDossiers(chatId), dao.getUpdates(chatId))
     }
 
-    suspend fun saveManual(dossier: NpcDossier) = withContext(Dispatchers.IO) {
+    suspend fun saveManual(dossier: NpcDossier) = dataCoordinator.withMutation {
+        withContext(Dispatchers.IO) {
         validateCard(dossier)
         database.withTransaction {
             val existing = dao.getDossier(dossier.npcId)
@@ -112,17 +119,22 @@ class NpcRepository(
             dao.deleteUpdatesForDossier(dossier.npcId)
             if (existing == null) dao.insertDossier(entity) else dao.updateDossier(entity)
         }
+        }
     }
 
-    suspend fun setKeepInScene(npcId: String, keep: Boolean) = withContext(Dispatchers.IO) {
-        val existing = requireNotNull(dao.getDossier(npcId)) { "NPC not found." }
-        dao.updateDossier(existing.copy(keepInScene = keep, updatedAt = System.currentTimeMillis()))
+    suspend fun setKeepInScene(npcId: String, keep: Boolean) = dataCoordinator.withMutation {
+        withContext(Dispatchers.IO) {
+            val existing = requireNotNull(dao.getDossier(npcId)) { "NPC not found." }
+            dao.updateDossier(existing.copy(keepInScene = keep, updatedAt = System.currentTimeMillis()))
+        }
     }
 
-    suspend fun deleteDossier(npcId: String) = withContext(Dispatchers.IO) {
-        database.withTransaction {
-            dao.deleteUpdatesForDossier(npcId)
-            dao.deleteDossier(npcId)
+    suspend fun deleteDossier(npcId: String) = dataCoordinator.withMutation {
+        withContext(Dispatchers.IO) {
+            database.withTransaction {
+                dao.deleteUpdatesForDossier(npcId)
+                dao.deleteDossier(npcId)
+            }
         }
     }
 
@@ -138,19 +150,21 @@ class NpcRepository(
         isApplied: Boolean,
         updates: List<NpcStructuredUpdate>,
         activePersonaId: String? = null
-    ) = withContext(Dispatchers.IO) {
-        if (updates.isEmpty()) return@withContext
-        require(updates.size <= 24) { "Too many NPC updates." }
-        database.withTransaction {
-            applyStructuredUpdatesInTransaction(
-                chatId,
-                sourceMessageId,
-                variantGroupId,
-                sourceRevision,
-                isApplied,
-                updates,
-                activePersonaId
-            )
+    ) = dataCoordinator.withMutation {
+        withContext(Dispatchers.IO) {
+            if (updates.isEmpty()) return@withContext
+            require(updates.size <= 24) { "Too many NPC updates." }
+            database.withTransaction {
+                applyStructuredUpdatesInTransaction(
+                    chatId,
+                    sourceMessageId,
+                    variantGroupId,
+                    sourceRevision,
+                    isApplied,
+                    updates,
+                    activePersonaId
+                )
+            }
         }
     }
 
@@ -160,24 +174,26 @@ class NpcRepository(
         isNewVariant: Boolean,
         updates: List<NpcStructuredUpdate>,
         activePersonaId: String?
-    ) = withContext(Dispatchers.IO) {
-        database.withTransaction {
-            if (isNewVariant) {
-                messageDao.insertVariantAndSelect(message)
-                dao.setVariantUpdatesApplied(message.variantGroupId, false)
-            } else {
-                messageDao.insertMessage(message)
+    ) = dataCoordinator.withMutation {
+        withContext(Dispatchers.IO) {
+            database.withTransaction {
+                if (isNewVariant) {
+                    messageDao.insertVariantAndSelect(message)
+                    dao.setVariantUpdatesApplied(message.variantGroupId, false)
+                } else {
+                    messageDao.insertMessage(message)
+                }
+                if (metadata != null) messageDao.insertGenerationMetadata(metadata)
+                applyStructuredUpdatesInTransaction(
+                    chatId = message.chatId,
+                    sourceMessageId = message.messageId,
+                    variantGroupId = message.variantGroupId,
+                    sourceRevision = 0,
+                    isApplied = true,
+                    updates = updates,
+                    activePersonaId = activePersonaId
+                )
             }
-            if (metadata != null) messageDao.insertGenerationMetadata(metadata)
-            applyStructuredUpdatesInTransaction(
-                chatId = message.chatId,
-                sourceMessageId = message.messageId,
-                variantGroupId = message.variantGroupId,
-                sourceRevision = 0,
-                isApplied = true,
-                updates = updates,
-                activePersonaId = activePersonaId
-            )
         }
     }
 
@@ -186,19 +202,21 @@ class NpcRepository(
         metadata: GenerationMetadataEntity?,
         updates: List<NpcStructuredUpdate>,
         activePersonaId: String?
-    ) = withContext(Dispatchers.IO) {
-        database.withTransaction {
-            messageDao.updateMessage(message)
-            if (metadata != null) messageDao.insertGenerationMetadata(metadata)
-            applyStructuredUpdatesInTransaction(
-                chatId = message.chatId,
-                sourceMessageId = message.messageId,
-                variantGroupId = message.variantGroupId,
-                sourceRevision = dao.nextSourceRevision(message.messageId),
-                isApplied = message.isPrimaryVariant,
-                updates = updates,
-                activePersonaId = activePersonaId
-            )
+    ) = dataCoordinator.withMutation {
+        withContext(Dispatchers.IO) {
+            database.withTransaction {
+                messageDao.updateMessage(message)
+                if (metadata != null) messageDao.insertGenerationMetadata(metadata)
+                applyStructuredUpdatesInTransaction(
+                    chatId = message.chatId,
+                    sourceMessageId = message.messageId,
+                    variantGroupId = message.variantGroupId,
+                    sourceRevision = dao.nextSourceRevision(message.messageId),
+                    isApplied = message.isPrimaryVariant,
+                    updates = updates,
+                    activePersonaId = activePersonaId
+                )
+            }
         }
     }
 
@@ -295,22 +313,26 @@ class NpcRepository(
         dao.insertUpdates(events)
     }
 
-    suspend fun selectVariant(variantGroupId: String, messageId: String) = withContext(Dispatchers.IO) {
-        database.withTransaction {
-            messageDao.clearPrimaryVariants(variantGroupId)
-            messageDao.setPrimaryVariant(messageId)
-            dao.setVariantUpdatesApplied(variantGroupId, false)
-            dao.setMessageUpdatesApplied(messageId, true)
+    suspend fun selectVariant(variantGroupId: String, messageId: String) = dataCoordinator.withMutation {
+        withContext(Dispatchers.IO) {
+            database.withTransaction {
+                messageDao.clearPrimaryVariants(variantGroupId)
+                messageDao.setPrimaryVariant(messageId)
+                dao.setVariantUpdatesApplied(variantGroupId, false)
+                dao.setMessageUpdatesApplied(messageId, true)
+            }
         }
     }
 
-    suspend fun deleteMessageAndRepair(message: MessageEntity) = withContext(Dispatchers.IO) {
-        database.withTransaction {
-            dao.deleteUpdatesForMessage(message.messageId)
-            messageDao.deleteMessageAndRepair(message)
-            if (message.isPrimaryVariant) {
-                val survivor = messageDao.getVariantsOnce(message.variantGroupId).firstOrNull { it.isPrimaryVariant }
-                survivor?.let { dao.setMessageUpdatesApplied(it.messageId, true) }
+    suspend fun deleteMessageAndRepair(message: MessageEntity) = dataCoordinator.withMutation {
+        withContext(Dispatchers.IO) {
+            database.withTransaction {
+                dao.deleteUpdatesForMessage(message.messageId)
+                messageDao.deleteMessageAndRepair(message)
+                if (message.isPrimaryVariant) {
+                    val survivor = messageDao.getVariantsOnce(message.variantGroupId).firstOrNull { it.isPrimaryVariant }
+                    survivor?.let { dao.setMessageUpdatesApplied(it.messageId, true) }
+                }
             }
         }
     }
@@ -402,7 +424,8 @@ class NpcRepository(
         chatId: String,
         json: String,
         collisionMode: NpcImportCollisionMode = NpcImportCollisionMode.IMPORT_AS_NEW
-    ): Int = withContext(Dispatchers.IO) {
+    ): Int = dataCoordinator.withMutation {
+        withContext(Dispatchers.IO) {
         require(json.length <= MAX_IMPORT_CHARS) { "NPC JSON is too large." }
         val document = parseImportDocument(json)
         require(document.schemaVersion == 1) { "Unsupported NPC schema version ${document.schemaVersion}." }
@@ -448,6 +471,7 @@ class NpcRepository(
             }
         }
         count
+        }
     }
 
     private fun parseImportDocument(json: String): NpcBankJson {

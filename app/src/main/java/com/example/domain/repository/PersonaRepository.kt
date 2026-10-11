@@ -12,7 +12,8 @@ import java.util.UUID
 class PersonaRepository(
     private val personaDao: PersonaDao,
     private val moshi: Moshi,
-    private val profileImageRepository: ProfileImageRepository? = null
+    private val profileImageRepository: ProfileImageRepository? = null,
+    private val dataCoordinator: AppDataMaintenanceCoordinator = AppDataMaintenanceCoordinator.Global
 ) {
     private val mapAdapter = moshi.adapter<Map<String, Any?>>(
         Types.newParameterizedType(Map::class.java, String::class.java, Any::class.java)
@@ -23,21 +24,23 @@ class PersonaRepository(
     suspend fun getPersonaById(id: String): PersonaEntity? = personaDao.getPersonaById(id)
 
     suspend fun archivePersona(id: String) {
-        personaDao.archivePersona(id)
+        dataCoordinator.withMutation { personaDao.archivePersona(id) }
     }
 
-    suspend fun deletePersonaPermanently(id: String): ProfileDeletionResult {
+    suspend fun deletePersonaPermanently(id: String): ProfileDeletionResult =
+        dataCoordinator.withMutation {
         val result = personaDao.deletePersonaPermanently(id).toProfileDeletionResult()
         if (result is ProfileDeletionResult.Deleted) {
             runCatching { profileImageRepository?.removeImage(ProfileImageKind.PERSONA, id) }
         }
-        return result
+        result
     }
 
     fun getManualFields(persona: PersonaEntity): ManualPersonaFields =
         ManualPersonaFieldsCodec.toEditableFields(persona)
 
-    suspend fun createManualPersona(fields: ManualPersonaFields): String {
+    suspend fun createManualPersona(fields: ManualPersonaFields): String =
+        dataCoordinator.withMutation {
         val persona = PersonaEntity(
             displayName = fields.name,
             personaName = fields.name,
@@ -53,10 +56,11 @@ class PersonaRepository(
             extensionFieldsJson = ManualPersonaFieldsCodec.write(null, fields)
         )
         personaDao.insertPersona(persona)
-        return persona.personaId
+        persona.personaId
     }
 
-    suspend fun updateManualPersona(personaId: String, fields: ManualPersonaFields) {
+    suspend fun updateManualPersona(personaId: String, fields: ManualPersonaFields) =
+        dataCoordinator.withMutation {
         val existing = getPersonaById(personaId)
             ?: throw IllegalArgumentException("Persona not found")
         personaDao.updatePersona(
@@ -69,7 +73,8 @@ class PersonaRepository(
         )
     }
 
-    suspend fun duplicatePersona(originalId: String, newDisplayName: String? = null): String {
+    suspend fun duplicatePersona(originalId: String, newDisplayName: String? = null): String =
+        dataCoordinator.withMutation {
         val original = getPersonaById(originalId) ?: throw IllegalArgumentException("Persona not found")
         val newId = UUID.randomUUID().toString()
         val duplicated = original.copy(
@@ -81,10 +86,11 @@ class PersonaRepository(
         )
         personaDao.insertPersona(duplicated)
         runCatching { profileImageRepository?.copyImage(ProfileImageKind.PERSONA, originalId, newId) }
-        return newId
+        newId
     }
 
-    suspend fun importPersonaJson(jsonString: String, replaceExisting: Boolean = false, importAsNew: Boolean = false): String {
+    suspend fun importPersonaJson(jsonString: String, replaceExisting: Boolean = false, importAsNew: Boolean = false): String =
+        dataCoordinator.withMutation {
         val rootMap = mapAdapter.fromJson(jsonString) ?: throw IllegalArgumentException("Invalid JSON format")
         
         val schemaVersion = (rootMap["schema_version"] as? Number)?.toInt() 
@@ -132,7 +138,7 @@ class PersonaRepository(
         )
         
         personaDao.insertPersona(entity)
-        return personaId
+        personaId
     }
 
     suspend fun exportPersonaJson(personaId: String): String {

@@ -39,6 +39,8 @@ import com.example.domain.repository.LorebookRepository
 import com.example.domain.repository.MessageAttachmentRepository
 import com.example.domain.repository.NpcRepository
 import com.example.domain.repository.PersonaRepository
+import com.example.domain.repository.AppDataMaintenanceCoordinator
+import com.example.domain.repository.AppDataRevision
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -90,6 +92,7 @@ private data class PendingPartialGeneration(
     val continuationTarget: MessageEntity?,
     val npcBankEnabled: Boolean,
     val activePersonaId: String?,
+    val dataRevision: AppDataRevision,
     val metadata: GenerationMetadataEntity? = null,
     val attemptedMessage: MessageEntity? = null,
     val publishedMessageId: String? = null,
@@ -143,7 +146,8 @@ class ChatDetailViewModel(
     private val coopSessionManager: CoopSessionManager? = null,
     private val messageAttachmentRepository: MessageAttachmentRepository? = null,
     private val npcRepository: NpcRepository? = null,
-    private val npcOutputParser: NpcStructuredOutputParser? = null
+    private val npcOutputParser: NpcStructuredOutputParser? = null,
+    private val dataCoordinator: AppDataMaintenanceCoordinator = AppDataMaintenanceCoordinator.Global
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow<ChatUiState>(ChatUiState.Loading)
@@ -156,6 +160,8 @@ class ChatDetailViewModel(
     private var currentChatSettings: ChatSettingsEntity? = null
     private var selectedGroupCharacterId: String? = null
     private var generationJob: Job? = null
+    private var sendJob: Job? = null
+    private var loadJob: Job? = null
     private var pendingPartialGeneration: PendingPartialGeneration? = null
     private var generationStartInProgress = false
     private var sendInProgress = false
@@ -171,6 +177,15 @@ class ChatDetailViewModel(
 
     init {
         loadData()
+        viewModelScope.launch {
+            var observedRevision = dataCoordinator.captureRevision()
+            dataCoordinator.state.collect { maintenance ->
+                if (maintenance.revision == observedRevision) return@collect
+                observedRevision = maintenance.revision
+                invalidateForDataReplacement()
+                if (!maintenance.isReplacingData) loadData()
+            }
+        }
         coopSessionManager?.let { manager ->
             coopContextAuthorizerToken = manager.registerGenerationContextAuthorizer(
                 chatId,
@@ -199,7 +214,8 @@ class ChatDetailViewModel(
     }
 
     private fun loadData() {
-        viewModelScope.launch {
+        loadJob?.cancel()
+        loadJob = viewModelScope.launch {
             val summary = chatRepository.getChatSummaryById(chatId)
             if (summary == null) {
                 _uiState.value = ChatUiState.Error
@@ -306,6 +322,27 @@ class ChatDetailViewModel(
                 }
             }
         }
+    }
+
+    private fun invalidateForDataReplacement() {
+        generationJob?.cancel()
+        generationJob = null
+        sendJob?.cancel()
+        sendJob = null
+        loadJob?.cancel()
+        loadJob = null
+        pendingPartialGeneration = null
+        generationStartInProgress = false
+        sendInProgress = false
+        inChatToolInProgress = false
+        partialResolutionInProgress = false
+        activeCoopGenerationRequestId = null
+        activeCoopGenerationExecutionId = null
+        chatSummary = null
+        currentChatSettings = null
+        selectedGroupCharacterId = null
+        currentDraft.value = ""
+        _uiState.value = ChatUiState.Loading
     }
 
     private fun hidePersistedNpcControlRegions(
@@ -509,8 +546,9 @@ class ChatDetailViewModel(
             summary.personas.firstOrNull() ?: return
         }
 
+        val dataRevision = dataCoordinator.captureRevision()
         sendInProgress = true
-        viewModelScope.launch {
+        sendJob = viewModelScope.launch {
             val localParticipant = coopRoom?.let { room ->
                 coopSessionManager?.state?.value?.participants
                     ?.firstOrNull { it.participantId == room.localParticipantId }
@@ -528,16 +566,29 @@ class ChatDetailViewModel(
             try {
                 if (coopRoom != null) {
                     requireNotNull(coopSessionManager).publishMessage(userMsg)
-                } else if (state.draftAttachments.isNotEmpty()) {
-                    requireNotNull(messageAttachmentRepository) { "Image attachment storage is unavailable." }
-                        .persistMessageWithDrafts(userMsg)
                 } else {
-                    messageRepository.insertMessage(userMsg)
+                    dataCoordinator.withMutation(dataRevision) {
+                        if (state.draftAttachments.isNotEmpty()) {
+                            requireNotNull(messageAttachmentRepository) { "Image attachment storage is unavailable." }
+                                .persistMessageWithDrafts(userMsg)
+                        } else {
+                            messageRepository.insertMessage(userMsg)
+                        }
+                        currentChatSettings?.let { settings ->
+                            val clearedSettings = settings.copy(draftMessage = "")
+                            chatRepository.insertChatSettings(clearedSettings)
+                            currentChatSettings = clearedSettings
+                        }
+                    }
                 }
-                currentChatSettings?.let { settings ->
-                    val clearedSettings = settings.copy(draftMessage = "")
-                    chatRepository.insertChatSettings(clearedSettings)
-                    currentChatSettings = clearedSettings
+                if (coopRoom != null) {
+                    dataCoordinator.withMutation(dataRevision) {
+                        currentChatSettings?.let { settings ->
+                            val clearedSettings = settings.copy(draftMessage = "")
+                            chatRepository.insertChatSettings(clearedSettings)
+                            currentChatSettings = clearedSettings
+                        }
+                    }
                 }
                 currentDraft.value = ""
             } catch (cancellation: kotlinx.coroutines.CancellationException) {
@@ -559,11 +610,13 @@ class ChatDetailViewModel(
             sendInProgress = false
             updateSuccessState { it.copy(generationError = null) }
             if (summary.chat.chatType == ChatType.GROUP) {
-                chatRepository.updateChat(summary.chat.copy(updatedAt = System.currentTimeMillis()))
+                dataCoordinator.withMutation(dataRevision) {
+                    chatRepository.updateChat(summary.chat.copy(updatedAt = System.currentTimeMillis()))
+                }
                 return@launch
             }
             try {
-                startGeneration(userMsg)
+                startGeneration(userMsg, dataRevision)
             } catch (cancellation: kotlinx.coroutines.CancellationException) {
                 throw cancellation
             } catch (_: Exception) {
@@ -610,14 +663,17 @@ class ChatDetailViewModel(
         super.onCleared()
     }
 
-    private suspend fun startGeneration(userMsg: MessageEntity) {
+    private suspend fun startGeneration(
+        userMsg: MessageEntity,
+        dataRevision: AppDataRevision = dataCoordinator.captureRevision()
+    ) {
         val currentState = _uiState.value as? ChatUiState.Success ?: return
         if (inChatToolInProgress || generationStartInProgress || currentState.isGenerating) return
         generationStartInProgress = true
         try {
             val state = _uiState.value as? ChatUiState.Success ?: return
             val history = state.messages.filter { it.isPrimaryVariant && it.messageId != userMsg.messageId }
-            startGenerationInternal(userMsg, history)
+            startGenerationInternal(userMsg, history, dataRevision = dataRevision)
         } finally {
             generationStartInProgress = false
         }
@@ -832,7 +888,8 @@ class ChatDetailViewModel(
         variantGroupId: String? = null,
         isContinuation: Boolean = false,
         continuationTarget: MessageEntity? = null,
-        characterId: String? = null
+        characterId: String? = null,
+        dataRevision: AppDataRevision = dataCoordinator.captureRevision()
     ) {
         if (inChatToolInProgress) return
         val boundary = chatSummary?.chat?.contextResetOrderIndex
@@ -844,6 +901,7 @@ class ChatDetailViewModel(
             }
             return
         }
+        dataCoordinator.withMutation(dataRevision) { Unit }
         val scopedHistory = history.filter { ContextResetPolicy.includes(it, boundary) }
         val prepared = prepareGeneration(
             currentMessage = currentMessage,
@@ -877,7 +935,8 @@ class ChatDetailViewModel(
             contextMessages = scopedHistory + currentMessage,
             continuationTarget = continuationTarget,
             npcBankEnabled = prepared.npcBankEnabled,
-            activePersonaId = prepared.activePersonaId
+            activePersonaId = prepared.activePersonaId,
+            dataRevision = dataRevision
         )
         
         generationJob = viewModelScope.launch {
@@ -980,7 +1039,8 @@ class ChatDetailViewModel(
                     continuationTarget = continuationTarget,
                     npcUpdates = parsed.updates,
                     npcWarning = parsed.warning,
-                    activePersonaId = prepared.activePersonaId
+                    activePersonaId = prepared.activePersonaId,
+                    dataRevision = dataRevision
                 )
             }
         }
@@ -1241,6 +1301,7 @@ class ChatDetailViewModel(
         npcUpdates: List<com.example.domain.npc.NpcStructuredUpdate> = emptyList(),
         npcWarning: String? = null,
         activePersonaId: String? = null,
+        dataRevision: AppDataRevision,
         retainPartialOnCoopFailure: Boolean = false
     ): Boolean {
         val isCoopGeneration = activeCoopGenerationRequestId != null
@@ -1269,27 +1330,29 @@ class ChatDetailViewModel(
                 }.exceptionOrNull()
             } else {
                 try {
-                    if (npcRepository != null) {
-                        try {
-                            npcRepository.persistContinuationAtomically(
-                                continuedMessage,
-                                persistedMetadata,
-                                npcUpdates,
-                                activePersonaId
-                            )
-                        } catch (npcError: Exception) {
-                            if (npcUpdates.isEmpty()) throw npcError
-                            npcRepository.persistContinuationAtomically(
-                                continuedMessage,
-                                persistedMetadata,
-                                emptyList(),
-                                activePersonaId
-                            )
-                            npcUpdateWarning = "Continuation saved, but invalid NPC changes were ignored."
+                    dataCoordinator.withMutation(dataRevision) {
+                        if (npcRepository != null) {
+                            try {
+                                npcRepository.persistContinuationAtomically(
+                                    continuedMessage,
+                                    persistedMetadata,
+                                    npcUpdates,
+                                    activePersonaId
+                                )
+                            } catch (npcError: Exception) {
+                                if (npcUpdates.isEmpty()) throw npcError
+                                npcRepository.persistContinuationAtomically(
+                                    continuedMessage,
+                                    persistedMetadata,
+                                    emptyList(),
+                                    activePersonaId
+                                )
+                                npcUpdateWarning = "Continuation saved, but invalid NPC changes were ignored."
+                            }
+                        } else {
+                            messageRepository.updateMessage(continuedMessage)
+                            persistedMetadata?.let { messageRepository.insertGenerationMetadata(it) }
                         }
-                    } else {
-                        messageRepository.updateMessage(continuedMessage)
-                        persistedMetadata?.let { messageRepository.insertGenerationMetadata(it) }
                     }
                     null
                 } catch (error: Exception) {
@@ -1345,7 +1408,9 @@ class ChatDetailViewModel(
                 )
             }
             chatRepository.getChatSummaryById(chatId)?.let { summary ->
-                chatRepository.updateChat(summary.chat.copy(updatedAt = System.currentTimeMillis()))
+                dataCoordinator.withMutation(dataRevision) {
+                    chatRepository.updateChat(summary.chat.copy(updatedAt = System.currentTimeMillis()))
+                }
             }
             return syncError == null && completionError == null
         }
@@ -1391,31 +1456,33 @@ class ChatDetailViewModel(
             }.exceptionOrNull()
         } else {
             try {
-                if (npcRepository != null) {
-                    try {
-                        npcRepository.persistGeneratedMessageAtomically(
-                            message = botMsg,
-                            metadata = persistedMetadata,
-                            isNewVariant = variantGroupId != null,
-                            updates = npcUpdates,
-                            activePersonaId = activePersonaId
-                        )
-                    } catch (npcError: Exception) {
-                        if (npcUpdates.isEmpty()) throw npcError
-                        npcRepository.persistGeneratedMessageAtomically(
-                            message = botMsg,
-                            metadata = persistedMetadata,
-                            isNewVariant = variantGroupId != null,
-                            updates = emptyList(),
-                            activePersonaId = activePersonaId
-                        )
-                        memoryWarning = "Response saved, but invalid NPC changes were ignored."
+                dataCoordinator.withMutation(dataRevision) {
+                    if (npcRepository != null) {
+                        try {
+                            npcRepository.persistGeneratedMessageAtomically(
+                                message = botMsg,
+                                metadata = persistedMetadata,
+                                isNewVariant = variantGroupId != null,
+                                updates = npcUpdates,
+                                activePersonaId = activePersonaId
+                            )
+                        } catch (npcError: Exception) {
+                            if (npcUpdates.isEmpty()) throw npcError
+                            npcRepository.persistGeneratedMessageAtomically(
+                                message = botMsg,
+                                metadata = persistedMetadata,
+                                isNewVariant = variantGroupId != null,
+                                updates = emptyList(),
+                                activePersonaId = activePersonaId
+                            )
+                            memoryWarning = "Response saved, but invalid NPC changes were ignored."
+                        }
+                    } else {
+                        if (variantGroupId != null) messageRepository.insertVariantAndSelect(botMsg)
+                        else messageRepository.insertMessage(botMsg)
+                        persistedMetadata?.let { messageRepository.insertGenerationMetadata(it) }
+                        if (npcUpdates.isNotEmpty()) memoryWarning = "Response saved, but NPC changes could not be stored."
                     }
-                } else {
-                    if (variantGroupId != null) messageRepository.insertVariantAndSelect(botMsg)
-                    else messageRepository.insertMessage(botMsg)
-                    persistedMetadata?.let { messageRepository.insertGenerationMetadata(it) }
-                    if (npcUpdates.isNotEmpty()) memoryWarning = "Response saved, but NPC changes could not be stored."
                 }
                 null
             } catch (error: Exception) {
@@ -1434,12 +1501,14 @@ class ChatDetailViewModel(
 
         if (!isCoopGeneration && sourceMessage?.speakerType == SpeakerType.PERSONA && variantGroupId == null) {
             try {
-                memoryManager.updateAfterCompletedTurn(
-                    chatId = chatId,
-                    characterId = character.characterId,
-                    personaMessage = sourceMessage,
-                    allPrimaryMessages = (contextMessages + botMsg).filter { it.isPrimaryVariant }
-                )
+                dataCoordinator.withMutation(dataRevision) {
+                    memoryManager.updateAfterCompletedTurn(
+                        chatId = chatId,
+                        characterId = character.characterId,
+                        personaMessage = sourceMessage,
+                        allPrimaryMessages = (contextMessages + botMsg).filter { it.isPrimaryVariant }
+                    )
+                }
             } catch (cancellation: kotlinx.coroutines.CancellationException) {
                 throw cancellation
             } catch (_: Exception) {
@@ -1486,7 +1555,9 @@ class ChatDetailViewModel(
         
         val summary = chatRepository.getChatSummaryById(chatId)
         summary?.let {
-            chatRepository.updateChat(it.chat.copy(updatedAt = System.currentTimeMillis()))
+            dataCoordinator.withMutation(dataRevision) {
+                chatRepository.updateChat(it.chat.copy(updatedAt = System.currentTimeMillis()))
+            }
         }
         return syncError == null && completionError == null
     }
@@ -1612,6 +1683,7 @@ class ChatDetailViewModel(
                     continuationTarget = pending.continuationTarget,
                     npcUpdates = emptyList(),
                     activePersonaId = pending.activePersonaId,
+                    dataRevision = pending.dataRevision,
                     retainPartialOnCoopFailure = true
                 )
             }

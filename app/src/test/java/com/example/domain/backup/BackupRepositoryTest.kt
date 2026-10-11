@@ -13,10 +13,13 @@ import com.example.data.AppDatabase
 import com.example.data.model.*
 import com.example.domain.repository.AppearanceRepository
 import com.example.domain.repository.AppearanceSettings
+import com.example.domain.repository.AppDataMaintenanceCoordinator
 import com.example.domain.repository.ColorPalette
 import com.example.domain.repository.MessageAttachmentRepository
+import com.example.domain.repository.MessageRepository
 import com.example.domain.repository.ProfileImageKind
 import com.example.domain.repository.ProfileImageRepository
+import com.example.domain.repository.StaleAppDataMutationException
 import com.example.domain.repository.ThemeMode
 import com.example.domain.coop.CoopCodec
 import com.example.domain.coop.CoopMessagePayload
@@ -27,12 +30,16 @@ import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.security.MessageDigest
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -307,9 +314,9 @@ class BackupRepositoryTest {
         val encrypted = ByteArrayOutputStream()
         source.repository.exportEncrypted(encrypted, PASSPHRASE.toCharArray())
 
-        val target = environment { stage ->
+        val target = environment(faultInjector = { stage ->
             if (stage == failureStage) error("simulated interruption")
-        }
+        })
         val previousAttachmentBytes = pngBytes(Color.MAGENTA)
         val previousPayload = completePayload(deviceMarker = "private-before-restore").let { payload ->
             payload.copy(
@@ -405,7 +412,136 @@ class BackupRepositoryTest {
         }
     }
 
-    private fun environment(faultInjector: (RestoreStage) -> Unit = {}): Environment {
+    @Test
+    fun snapshotBlocksConcurrentRepositoryWriteUntilImmutableFilesAreStaged() = runBlocking {
+        val snapshotReached = CountDownLatch(1)
+        val allowSnapshot = CountDownLatch(1)
+        val source = environment(
+            snapshotHook = {
+                snapshotReached.countDown()
+                check(allowSnapshot.await(5, TimeUnit.SECONDS)) { "Snapshot test gate timed out" }
+            }
+        )
+        source.insert(completePayload().copy(messageAttachments = emptyList()))
+        val output = ByteArrayOutputStream()
+        val export = async(Dispatchers.IO) {
+            source.repository.exportEncrypted(output, PASSPHRASE.toCharArray())
+        }
+        assertTrue(snapshotReached.await(5, TimeUnit.SECONDS))
+
+        val lateMessage = MessageEntity(
+            messageId = "late-during-snapshot",
+            chatId = CHAT_ID,
+            speakerType = SpeakerType.SYSTEM,
+            speakerId = "system",
+            speakerDisplayNameSnapshot = "System",
+            content = "Written after the immutable snapshot boundary.",
+            orderIndex = 99_999L
+        )
+        val lateWrite = async(Dispatchers.IO) {
+            MessageRepository(source.database.messageDao()).insertMessage(lateMessage)
+        }
+        delay(150)
+        assertFalse(lateWrite.isCompleted)
+
+        allowSnapshot.countDown()
+        export.await()
+        lateWrite.await()
+        assertNotNull(source.database.messageDao().getMessageById(lateMessage.messageId))
+
+        val restored = environment()
+        restored.repository.restoreEncrypted(
+            ByteArrayInputStream(output.toByteArray()),
+            PASSPHRASE.toCharArray()
+        )
+        assertEquals(null, restored.database.messageDao().getMessageById(lateMessage.messageId))
+    }
+
+    @Test
+    fun restoreRejectsMutationsQueuedAgainstTheReplacedDataSet() = runBlocking {
+        val source = environment()
+        source.insert(completePayload().copy(messageAttachments = emptyList()))
+        val encrypted = ByteArrayOutputStream()
+        source.repository.exportEncrypted(encrypted, PASSPHRASE.toCharArray())
+
+        val restoreReached = CountDownLatch(1)
+        val allowRestore = CountDownLatch(1)
+        val target = environment(
+            faultInjector = { stage ->
+                if (stage == RestoreStage.AFTER_SAFETY_BACKUP) {
+                    restoreReached.countDown()
+                    check(allowRestore.await(5, TimeUnit.SECONDS)) { "Restore test gate timed out" }
+                }
+            }
+        )
+        val preRestoreRevision = AppDataMaintenanceCoordinator.Global.captureRevision()
+        val restore = async(Dispatchers.IO) {
+            target.repository.restoreEncrypted(
+                ByteArrayInputStream(encrypted.toByteArray()),
+                PASSPHRASE.toCharArray()
+            )
+        }
+        assertTrue(restoreReached.await(5, TimeUnit.SECONDS))
+
+        val postRestoreMessage = MessageEntity(
+            messageId = "queued-during-restore",
+            chatId = CHAT_ID,
+            speakerType = SpeakerType.SYSTEM,
+            speakerId = "system",
+            speakerDisplayNameSnapshot = "System",
+            content = "This write must land after restore, not be silently erased.",
+            orderIndex = 100_000L
+        )
+        val queuedWrite = async(Dispatchers.IO) {
+            runCatching {
+                MessageRepository(target.database.messageDao()).insertMessage(postRestoreMessage)
+            }.exceptionOrNull()
+        }
+        val queuedAppearanceWrite = async(Dispatchers.IO) {
+            runCatching { target.appearance.updateFontSize(20f) }.exceptionOrNull()
+        }
+        val queuedAttachmentMaintenance = async(Dispatchers.IO) {
+            runCatching { target.attachments.reconcileOrphanFiles() }.exceptionOrNull()
+        }
+        val queuedAvatarMutation = async(Dispatchers.IO) {
+            runCatching {
+                target.profileImages.removeImage(ProfileImageKind.CHARACTER, CHARACTER_ID)
+            }.exceptionOrNull()
+        }
+        delay(150)
+        assertFalse(queuedWrite.isCompleted)
+        assertFalse(queuedAppearanceWrite.isCompleted)
+        assertFalse(queuedAttachmentMaintenance.isCompleted)
+        assertFalse(queuedAvatarMutation.isCompleted)
+
+        allowRestore.countDown()
+        restore.await()
+        listOf(
+            queuedWrite.await(),
+            queuedAppearanceWrite.await(),
+            queuedAttachmentMaintenance.await(),
+            queuedAvatarMutation.await()
+        ).forEach { failure ->
+            assertTrue(failure is StaleAppDataMutationException)
+        }
+        assertEquals(null, target.database.messageDao().getMessageById(postRestoreMessage.messageId))
+        assertEquals(16f, target.appearance.appearanceSettings.first().fontSize)
+
+        val staleGenerationFailure = runCatching {
+            AppDataMaintenanceCoordinator.Global.withMutation(preRestoreRevision) {
+                target.database.messageDao().insertMessage(postRestoreMessage)
+            }
+        }.exceptionOrNull()
+        assertTrue(staleGenerationFailure is StaleAppDataMutationException)
+
+        MessageRepository(target.database.messageDao()).insertMessage(postRestoreMessage)
+        assertEquals(postRestoreMessage, target.database.messageDao().getMessageById(postRestoreMessage.messageId))
+    }
+
+    private fun environment(
+        faultInjector: (RestoreStage) -> Unit = {},
+        snapshotHook: suspend () -> Unit = {}
+    ): Environment {
         val database = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
             .allowMainThreadQueries()
             .build()
@@ -429,7 +565,9 @@ class BackupRepositoryTest {
                 attachments,
                 profileImages,
                 moshi,
-                faultInjector
+                faultInjector = faultInjector,
+                dataCoordinator = AppDataMaintenanceCoordinator.Global,
+                snapshotHook = snapshotHook
             )
         )
     }

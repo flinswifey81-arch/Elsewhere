@@ -35,7 +35,8 @@ class LorebookDuplicateIdException(val duplicateId: String) :
 
 class LorebookRepository(
     private val lorebookDao: LorebookDao,
-    private val moshi: Moshi
+    private val moshi: Moshi,
+    private val dataCoordinator: AppDataMaintenanceCoordinator = AppDataMaintenanceCoordinator.Global
 ) {
     private val mapAdapter = moshi.adapter<Map<String, Any?>>(
         Types.newParameterizedType(Map::class.java, String::class.java, Any::class.java)
@@ -49,13 +50,15 @@ class LorebookRepository(
     }
 
     suspend fun saveDefinition(lorebook: LorebookEntity, entries: List<LorebookEntryEntity>) =
-        withContext(Dispatchers.IO) {
-            validateDefinition(lorebook, entries)
-            lorebookDao.saveDefinition(lorebook, entries)
+        dataCoordinator.withMutation {
+            withContext(Dispatchers.IO) {
+                validateDefinition(lorebook, entries)
+                lorebookDao.saveDefinition(lorebook, entries)
+            }
         }
 
-    suspend fun deleteLorebook(lorebookId: String) = withContext(Dispatchers.IO) {
-        lorebookDao.deleteLorebook(lorebookId)
+    suspend fun deleteLorebook(lorebookId: String) = dataCoordinator.withMutation {
+        withContext(Dispatchers.IO) { lorebookDao.deleteLorebook(lorebookId) }
     }
 
     fun newLorebook(name: String = "New Lorebook"): LorebookWithEntries {
@@ -86,7 +89,9 @@ class LorebookRepository(
         )
     }
 
-    suspend fun importJson(json: String, mode: LorebookImportMode): String = withContext(Dispatchers.IO) {
+    suspend fun importJson(json: String, mode: LorebookImportMode): String =
+        dataCoordinator.withMutation {
+            withContext(Dispatchers.IO) {
         val parsed = parseLorebookJson(json)
         val existing = lorebookDao.getLorebook(parsed.lorebook.lorebookId)
         val conflictingEntryIds = if (mode == LorebookImportMode.IMPORT_AS_NEW_COPY) {
@@ -129,7 +134,8 @@ class LorebookRepository(
                 parsed.lorebook.lorebookId
             }
         }
-    }
+            }
+        }
 
     private suspend fun findForeignEntryIdConflicts(parsed: LorebookWithEntries): List<String> =
         parsed.entries.mapNotNull { entry ->
@@ -288,57 +294,77 @@ class LorebookRepository(
         }
     }
 
-    suspend fun attachLorebook(chatId: String, lorebookId: String) = withContext(Dispatchers.IO) {
-        requireNotNull(lorebookDao.getLorebook(lorebookId)) { "Lorebook not found" }
-        val existing = lorebookDao.getAttachments(chatId)
-        val current = existing.firstOrNull { it.lorebookId == lorebookId }
-        lorebookDao.upsertAttachment(
-            current ?: ChatLorebookAttachmentEntity(
-                chatId = chatId,
-                lorebookId = lorebookId,
-                sortPosition = (existing.maxOfOrNull { it.sortPosition } ?: -1) + 1
+    suspend fun attachLorebook(chatId: String, lorebookId: String) =
+        dataCoordinator.withMutation {
+            withContext(Dispatchers.IO) {
+            requireNotNull(lorebookDao.getLorebook(lorebookId)) { "Lorebook not found" }
+            val existing = lorebookDao.getAttachments(chatId)
+            val current = existing.firstOrNull { it.lorebookId == lorebookId }
+            lorebookDao.upsertAttachment(
+                current ?: ChatLorebookAttachmentEntity(
+                    chatId = chatId,
+                    lorebookId = lorebookId,
+                    sortPosition = (existing.maxOfOrNull { it.sortPosition } ?: -1) + 1
+                )
             )
-        )
-    }
-
-    suspend fun detachLorebook(chatId: String, lorebookId: String) = withContext(Dispatchers.IO) {
-        lorebookDao.detachLorebook(chatId, lorebookId)
-    }
-
-    suspend fun setAttachmentEnabled(chatId: String, lorebookId: String, enabled: Boolean) = withContext(Dispatchers.IO) {
-        val existing = lorebookDao.getAttachments(chatId).firstOrNull { it.lorebookId == lorebookId }
-            ?: throw IllegalArgumentException("Lorebook is not attached to this chat")
-        lorebookDao.upsertAttachment(existing.copy(isEnabled = enabled))
-    }
-
-    suspend fun setManualActive(chatId: String, entryId: String, active: Boolean) = withContext(Dispatchers.IO) {
-        val existing = lorebookDao.getOverlays(chatId).firstOrNull { it.entryId == entryId }
-        lorebookDao.upsertOverlay(
-            (existing ?: ChatLorebookEntryOverlayEntity(chatId = chatId, entryId = entryId))
-                .copy(manualActive = active, updatedAt = System.currentTimeMillis())
-        )
-    }
-
-    suspend fun setChatCurrentOverride(chatId: String, entryId: String, currentContent: String) = withContext(Dispatchers.IO) {
-        if (currentContent.length > MAX_CONTENT_LENGTH) throw LorebookValidationException("Current content is too long")
-        val existing = lorebookDao.getOverlays(chatId).firstOrNull { it.entryId == entryId }
-        lorebookDao.upsertOverlay(
-            (existing ?: ChatLorebookEntryOverlayEntity(chatId = chatId, entryId = entryId)).copy(
-                hasCurrentOverride = true,
-                currentContent = currentContent,
-                updatedAt = System.currentTimeMillis()
-            )
-        )
-    }
-
-    suspend fun clearChatCurrentOverride(chatId: String, entryId: String) = withContext(Dispatchers.IO) {
-        val existing = lorebookDao.getOverlays(chatId).firstOrNull { it.entryId == entryId } ?: return@withContext
-        if (existing.manualActive) {
-            lorebookDao.upsertOverlay(existing.copy(hasCurrentOverride = false, currentContent = "", updatedAt = System.currentTimeMillis()))
-        } else {
-            lorebookDao.deleteOverlay(chatId, entryId)
+            }
         }
-    }
+
+    suspend fun detachLorebook(chatId: String, lorebookId: String) =
+        dataCoordinator.withMutation {
+            withContext(Dispatchers.IO) {
+                lorebookDao.detachLorebook(chatId, lorebookId)
+            }
+        }
+
+    suspend fun setAttachmentEnabled(chatId: String, lorebookId: String, enabled: Boolean) =
+        dataCoordinator.withMutation {
+            withContext(Dispatchers.IO) {
+            val existing = lorebookDao.getAttachments(chatId).firstOrNull { it.lorebookId == lorebookId }
+                ?: throw IllegalArgumentException("Lorebook is not attached to this chat")
+            lorebookDao.upsertAttachment(existing.copy(isEnabled = enabled))
+            }
+        }
+
+    suspend fun setManualActive(chatId: String, entryId: String, active: Boolean) =
+        dataCoordinator.withMutation {
+            withContext(Dispatchers.IO) {
+            val existing = lorebookDao.getOverlays(chatId).firstOrNull { it.entryId == entryId }
+            lorebookDao.upsertOverlay(
+                (existing ?: ChatLorebookEntryOverlayEntity(chatId = chatId, entryId = entryId))
+                    .copy(manualActive = active, updatedAt = System.currentTimeMillis())
+            )
+            }
+        }
+
+    suspend fun setChatCurrentOverride(chatId: String, entryId: String, currentContent: String) =
+        dataCoordinator.withMutation {
+            withContext(Dispatchers.IO) {
+            if (currentContent.length > MAX_CONTENT_LENGTH) throw LorebookValidationException("Current content is too long")
+            val existing = lorebookDao.getOverlays(chatId).firstOrNull { it.entryId == entryId }
+            lorebookDao.upsertOverlay(
+                (existing ?: ChatLorebookEntryOverlayEntity(chatId = chatId, entryId = entryId)).copy(
+                    hasCurrentOverride = true,
+                    currentContent = currentContent,
+                    updatedAt = System.currentTimeMillis()
+                )
+            )
+            }
+        }
+
+    suspend fun clearChatCurrentOverride(chatId: String, entryId: String) =
+        dataCoordinator.withMutation {
+            withContext(Dispatchers.IO) {
+            val existing = lorebookDao.getOverlays(chatId).firstOrNull { it.entryId == entryId }
+            if (existing != null) {
+                if (existing.manualActive) {
+                    lorebookDao.upsertOverlay(existing.copy(hasCurrentOverride = false, currentContent = "", updatedAt = System.currentTimeMillis()))
+                } else {
+                    lorebookDao.deleteOverlay(chatId, entryId)
+                }
+            }
+            }
+        }
 
     suspend fun resolveActiveLore(
         chatId: String,

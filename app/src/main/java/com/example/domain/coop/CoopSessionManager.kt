@@ -540,6 +540,23 @@ class CoopSessionManager(
         if (transport != null) disconnectLocked()
     }
 
+    /**
+     * Stops process-local work before Room and its related files are replaced.
+     * This deliberately does not persist a disconnect transition into the data set
+     * that is about to be replaced.
+     */
+    suspend fun stopForDataReplacement() = sessionStartMutex.withLock {
+        stopTransportOnly()
+        proposalWindows.clear()
+        controlWindows.clear()
+        resyncContinuations.clear()
+        synchronized(outstandingResyncAfter) { outstandingResyncAfter.clear() }
+        claimedGenerationExecutions.clear()
+        mutableState.value = CoopSessionState(
+            statusMessage = "Local co-op stopped because app data was replaced."
+        )
+    }
+
     /** Ends local co-op configuration while retaining every chat message and local private record. */
     suspend fun leaveRoom(chatId: String) = sessionStartMutex.withLock {
         val room = repository.getRoomForChat(chatId)
