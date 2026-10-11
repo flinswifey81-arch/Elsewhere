@@ -904,7 +904,8 @@ class CoopSessionIntegrationTest {
             val requestId = requireNotNull(client.state.value.pendingPayerRequest).request.requestId
             client.approvePendingGeneration(requestId)
             eventually("partial provider started") {
-                (clientViewModel.uiState.value as? ChatUiState.Success)?.isGenerating == true
+                val state = clientViewModel.uiState.value as? ChatUiState.Success
+                state?.isGenerating == true && !state.streamingContent.isNullOrBlank()
             }
             clientViewModel.stopGeneration()
             eventually("partial awaits resolution") {

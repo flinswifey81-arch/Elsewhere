@@ -180,7 +180,8 @@ fun ElsewhereApp(container: AppContainer) {
             composable(Screen.Settings.route) { 
                 SettingsScreen(
                     settingsRepository = container.settingsRepository,
-                    appearanceRepository = container.appearanceRepository
+                    appearanceRepository = container.appearanceRepository,
+                    backupRepository = container.backupRepository
                 ) 
             }
             

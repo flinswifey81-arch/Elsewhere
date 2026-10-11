@@ -1,5 +1,8 @@
 package com.example.ui.screens
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -9,6 +12,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -18,6 +22,8 @@ import com.example.domain.repository.ApiKeyRepository
 import com.example.domain.repository.ColorPalette
 import kotlinx.coroutines.launch
 import com.example.domain.repository.ThemeMode
+import com.example.domain.backup.BackupInspection
+import com.example.domain.backup.BackupRepository
 import com.example.ui.components.elsewhereCardBorder
 import com.example.ui.components.elsewhereDestructiveButtonColors
 import com.example.ui.components.elsewhereTextFieldColors
@@ -29,6 +35,7 @@ import com.example.ui.theme.getLightColorScheme
 fun SettingsScreen(
     settingsRepository: ApiKeyRepository,
     appearanceRepository: AppearanceRepository,
+    backupRepository: BackupRepository? = null,
     modifier: Modifier = Modifier
 ) {
     val coroutineScope = rememberCoroutineScope()
@@ -100,7 +107,7 @@ fun SettingsScreen(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         Text(
-                            "Saved on this device only.",
+                            "Stored locally and included in encrypted backups.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(top = 2.dp, bottom = 8.dp)
@@ -210,6 +217,13 @@ fun SettingsScreen(
             }
 
             // About Section
+            if (backupRepository != null) {
+                item {
+                    BackupRestoreSettingsCard(backupRepository)
+                }
+            }
+
+            // About Section
             item {
                 Text(
                     text = "About",
@@ -233,6 +247,296 @@ fun SettingsScreen(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun BackupRestoreSettingsCard(repository: BackupRepository) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var isWorking by remember { mutableStateOf(false) }
+    var statusMessage by remember { mutableStateOf<String?>(null) }
+    var showExportPassphrase by remember { mutableStateOf(false) }
+    var exportPassphrase by remember { mutableStateOf("") }
+    var exportConfirmation by remember { mutableStateOf("") }
+    var pendingExportPassphrase by remember { mutableStateOf<String?>(null) }
+    var pendingRestoreUri by remember { mutableStateOf<Uri?>(null) }
+    var restorePassphrase by remember { mutableStateOf("") }
+    var showRestorePassphrase by remember { mutableStateOf(false) }
+    var restoreInspection by remember { mutableStateOf<BackupInspection?>(null) }
+    var restoreConfirmation by remember { mutableStateOf("") }
+    var showRecoveryConfirmation by remember { mutableStateOf(false) }
+    var safetyAvailable by remember { mutableStateOf(repository.hasSafetyBackup()) }
+    var interruptedRestore by remember { mutableStateOf(repository.hasInterruptedRestore()) }
+
+    val exportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/octet-stream")
+    ) { uri: Uri? ->
+        val passphrase = pendingExportPassphrase
+        pendingExportPassphrase = null
+        exportPassphrase = ""
+        exportConfirmation = ""
+        if (uri == null || passphrase == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            isWorking = true
+            statusMessage = null
+            runCatching {
+                context.contentResolver.openOutputStream(uri, "w")?.use { output ->
+                    repository.exportEncrypted(output, passphrase.toCharArray())
+                } ?: error("The selected backup destination could not be opened.")
+            }.onSuccess { preview ->
+                statusMessage = "Encrypted backup saved: ${preview.chats} chats and ${preview.messages} messages."
+            }.onFailure { error ->
+                statusMessage = error.message ?: "Backup could not be created."
+            }
+            isWorking = false
+        }
+    }
+
+    val restoreLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+        if (uri != null) {
+            pendingRestoreUri = uri
+            restorePassphrase = ""
+            showRestorePassphrase = true
+        }
+    }
+
+    Text(
+        text = "Local backup & restore",
+        style = MaterialTheme.typography.titleMedium,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(bottom = 8.dp, start = 8.dp)
+    )
+    Card(
+        modifier = Modifier.fillMaxWidth().testTag("backup_restore_card"),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+        border = elsewhereCardBorder()
+    ) {
+        Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("Encrypted device backup", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "Includes profiles, chats, variants, settings, drafts, memories, Lorebooks, NPC Bank data, images, avatars, and offline co-op history. API keys and device/transport credentials are never included. Android system backup is disabled for app data; this encrypted file is the supported transfer path.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Button(
+                onClick = { showExportPassphrase = true },
+                enabled = !isWorking,
+                modifier = Modifier.fillMaxWidth().testTag("create_local_backup")
+            ) { Text("Create encrypted backup") }
+            OutlinedButton(
+                onClick = { restoreLauncher.launch(arrayOf("application/octet-stream", "application/zip", "*/*")) },
+                enabled = !isWorking,
+                modifier = Modifier.fillMaxWidth().testTag("restore_local_backup")
+            ) { Text("Restore from backup") }
+            if (safetyAvailable || interruptedRestore) {
+                OutlinedButton(
+                    onClick = { showRecoveryConfirmation = true },
+                    enabled = !isWorking,
+                    modifier = Modifier.fillMaxWidth().testTag("recover_pre_restore_backup")
+                ) {
+                    Text(if (interruptedRestore) "Recover interrupted restore" else "Undo last restore")
+                }
+            }
+            if (isWorking) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            statusMessage?.let {
+                Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
+
+    if (showExportPassphrase) {
+        AlertDialog(
+            onDismissRequest = {
+                showExportPassphrase = false
+                exportPassphrase = ""
+                exportConfirmation = ""
+            },
+            title = { Text("Protect this backup") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("Use at least 10 characters. This passphrase cannot be recovered by Elsewhere.")
+                    OutlinedTextField(
+                        value = exportPassphrase,
+                        onValueChange = { exportPassphrase = it },
+                        label = { Text("Passphrase") },
+                        visualTransformation = PasswordVisualTransformation(),
+                        singleLine = true
+                    )
+                    OutlinedTextField(
+                        value = exportConfirmation,
+                        onValueChange = { exportConfirmation = it },
+                        label = { Text("Confirm passphrase") },
+                        visualTransformation = PasswordVisualTransformation(),
+                        singleLine = true
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = exportPassphrase.length >= 10 && exportPassphrase == exportConfirmation,
+                    onClick = {
+                        pendingExportPassphrase = exportPassphrase
+                        showExportPassphrase = false
+                        exportLauncher.launch("elsewhere-${System.currentTimeMillis()}.elsewhere-backup")
+                    }
+                ) { Text("Choose location") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showExportPassphrase = false
+                    exportPassphrase = ""
+                    exportConfirmation = ""
+                }) { Text("Cancel") }
+            }
+        )
+    }
+
+    if (showRestorePassphrase) {
+        AlertDialog(
+            onDismissRequest = {
+                showRestorePassphrase = false
+                restorePassphrase = ""
+                pendingRestoreUri = null
+            },
+            title = { Text("Open encrypted backup") },
+            text = {
+                OutlinedTextField(
+                    value = restorePassphrase,
+                    onValueChange = { restorePassphrase = it },
+                    label = { Text("Backup passphrase") },
+                    visualTransformation = PasswordVisualTransformation(),
+                    singleLine = true
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = restorePassphrase.length >= 10 && !isWorking,
+                    onClick = {
+                        val uri = pendingRestoreUri ?: return@TextButton
+                        showRestorePassphrase = false
+                        scope.launch {
+                            isWorking = true
+                            statusMessage = null
+                            runCatching {
+                                context.contentResolver.openInputStream(uri)?.use { input ->
+                                    repository.inspectEncryptedForRestore(input, restorePassphrase.toCharArray())
+                                } ?: error("The selected backup could not be opened.")
+                            }.onSuccess { restoreInspection = it }
+                                .onFailure {
+                                    statusMessage = it.message ?: "Backup could not be validated."
+                                    pendingRestoreUri = null
+                                    restorePassphrase = ""
+                                }
+                            isWorking = false
+                        }
+                    }
+                ) { Text("Validate") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showRestorePassphrase = false
+                    restorePassphrase = ""
+                    pendingRestoreUri = null
+                }) { Text("Cancel") }
+            }
+        )
+    }
+
+    restoreInspection?.let { inspection ->
+        val preview = inspection.preview
+        AlertDialog(
+            onDismissRequest = {
+                restoreInspection = null
+                restoreConfirmation = ""
+                restorePassphrase = ""
+                pendingRestoreUri = null
+            },
+            title = { Text("Replace local Elsewhere data?") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "${preview.characters} Characters, ${preview.personas} Personas, ${preview.chats} chats, " +
+                            "${preview.messages} messages, ${preview.memories} memories, ${preview.lorebooks} Lorebooks, " +
+                            "${preview.npcDossiers} NPC dossiers, ${preview.messageAttachments} message images, and " +
+                            "${preview.profileImages} avatars passed validation."
+                    )
+                    if (preview.includesCoopHistory) {
+                        Text("Co-op history will be retained offline, but rooms cannot resume without new pairing.")
+                    }
+                    Text("Elsewhere will first create a recoverable private safety copy. Type RESTORE to continue.")
+                    OutlinedTextField(
+                        value = restoreConfirmation,
+                        onValueChange = { restoreConfirmation = it },
+                        label = { Text("Type RESTORE") },
+                        singleLine = true,
+                        modifier = Modifier.testTag("restore_confirmation")
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = restoreConfirmation == "RESTORE" && !isWorking,
+                    onClick = {
+                        val uri = pendingRestoreUri ?: return@TextButton
+                        restoreInspection = null
+                        scope.launch {
+                            isWorking = true
+                            statusMessage = null
+                            runCatching {
+                                context.contentResolver.openInputStream(uri)?.use { input ->
+                                    repository.restoreEncrypted(
+                                        input,
+                                        restorePassphrase.toCharArray(),
+                                        expectedEncryptedSha256 = inspection.encryptedSha256
+                                    )
+                                } ?: error("The selected backup could not be reopened.")
+                            }.onSuccess { result ->
+                                statusMessage = "Restore complete: ${result.restoredChats} chats and ${result.restoredMessages} messages."
+                            }.onFailure { statusMessage = it.message ?: "Restore failed." }
+                            restorePassphrase = ""
+                            restoreConfirmation = ""
+                            pendingRestoreUri = null
+                            safetyAvailable = repository.hasSafetyBackup()
+                            interruptedRestore = repository.hasInterruptedRestore()
+                            isWorking = false
+                        }
+                    }
+                ) { Text("Replace local data", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    restoreInspection = null
+                    restoreConfirmation = ""
+                    restorePassphrase = ""
+                    pendingRestoreUri = null
+                }) { Text("Cancel") }
+            }
+        )
+    }
+
+    if (showRecoveryConfirmation) {
+        AlertDialog(
+            onDismissRequest = { showRecoveryConfirmation = false },
+            title = { Text("Recover the pre-restore copy?") },
+            text = { Text("This replaces current local data with the private safety copy made immediately before the last restore.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showRecoveryConfirmation = false
+                    scope.launch {
+                        isWorking = true
+                        runCatching { repository.recoverLastRestore() }
+                            .onSuccess { statusMessage = "Previous local data recovered." }
+                            .onFailure { statusMessage = it.message ?: "Recovery failed." }
+                        safetyAvailable = repository.hasSafetyBackup()
+                        interruptedRestore = repository.hasInterruptedRestore()
+                        isWorking = false
+                    }
+                }) { Text("Recover", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton(onClick = { showRecoveryConfirmation = false }) { Text("Cancel") } }
+        )
     }
 }
 

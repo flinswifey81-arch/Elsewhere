@@ -108,6 +108,19 @@ class AppearanceRepository private constructor(
         }
     }
 
+    suspend fun replaceSettings(settings: AppearanceSettings) {
+        dataStore.edit { prefs ->
+            prefs[THEME_MODE_KEY] = settings.themeMode.name
+            prefs[FONT_SIZE_KEY] = settings.fontSize.coerceIn(12f, 24f)
+            prefs[COLOR_PALETTE_KEY] = settings.colorPalette.storageId
+            if (settings.legacyAccentOverride == null) {
+                prefs.remove(ACCENT_PRESET_KEY)
+            } else {
+                prefs[ACCENT_PRESET_KEY] = settings.legacyAccentOverride
+            }
+        }
+    }
+
     /** Compatibility entry point for older call sites; it never deletes the legacy preference. */
     suspend fun updateAccentPreset(preset: String) {
         val palette = ColorPalette.fromStorage(preset) ?: ColorPalette.fromLegacyAccent(preset)

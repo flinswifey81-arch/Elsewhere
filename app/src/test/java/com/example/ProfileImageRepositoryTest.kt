@@ -199,11 +199,11 @@ class ProfileImageRepositoryTest {
             database.close()
         }
 
-        assertTrue(profileImageExclusionCount(R.xml.backup_rules) == 1)
-        assertTrue(profileImageExclusionCount(R.xml.data_extraction_rules) == 2)
+        assertTrue(privateFileRootExclusionCount(R.xml.backup_rules) == 1)
+        assertTrue(privateFileRootExclusionCount(R.xml.data_extraction_rules) == 2)
     }
 
-    private fun profileImageExclusionCount(resourceId: Int): Int {
+    private fun privateFileRootExclusionCount(resourceId: Int): Int {
         val parser = context.resources.getXml(resourceId)
         var count = 0
         while (parser.eventType != org.xmlpull.v1.XmlPullParser.END_DOCUMENT) {
@@ -211,7 +211,7 @@ class ProfileImageRepositoryTest {
                 parser.eventType == org.xmlpull.v1.XmlPullParser.START_TAG &&
                 parser.name == "exclude" &&
                 parser.getAttributeValue(null, "domain") == "file" &&
-                parser.getAttributeValue(null, "path") == "profile_images/"
+                parser.getAttributeValue(null, "path") == "."
             ) {
                 count += 1
             }

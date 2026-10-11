@@ -7,6 +7,8 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.example.data.model.*
 
+const val APP_DATABASE_VERSION = 8
+
 @Database(
     entities = [
         CharacterEntity::class,
@@ -34,7 +36,7 @@ import com.example.data.model.*
         NpcBankSettingsEntity::class,
         NpcDossierUpdateEntity::class
     ],
-    version = 8,
+    version = APP_DATABASE_VERSION,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -48,6 +50,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun coopDao(): CoopDao
     abstract fun messageAttachmentDao(): MessageAttachmentDao
     abstract fun npcDao(): NpcDao
+    abstract fun backupDao(): BackupDao
 
     companion object {
         val MIGRATION_1_2 = object : Migration(1, 2) {

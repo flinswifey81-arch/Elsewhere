@@ -20,6 +20,7 @@ import com.example.domain.coop.CoopSessionManager
 import com.example.domain.coop.AndroidCoopRoomIdentityStore
 import com.example.domain.coop.AndroidCoopParticipantIdentityStore
 import com.example.domain.npc.NpcStructuredOutputParser
+import com.example.domain.backup.BackupRepository
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 
@@ -39,6 +40,7 @@ interface AppContainer {
     val profileImageRepository: ProfileImageRepository? get() = null
     val npcRepository: NpcRepository? get() = null
     val npcOutputParser: NpcStructuredOutputParser? get() = null
+    val backupRepository: BackupRepository? get() = null
 }
 
 class DefaultAppContainer(private val context: Context) : AppContainer {
@@ -118,6 +120,17 @@ class DefaultAppContainer(private val context: Context) : AppContainer {
 
     override val npcOutputParser: NpcStructuredOutputParser by lazy {
         NpcStructuredOutputParser(moshi)
+    }
+
+    override val backupRepository: BackupRepository by lazy {
+        BackupRepository(
+            context = context,
+            database = database,
+            appearanceRepository = appearanceRepository,
+            messageAttachmentRepository = messageAttachmentRepository,
+            profileImageRepository = profileImageRepository,
+            moshi = moshi
+        )
     }
 
     override val coopRepository: CoopRepository by lazy {
