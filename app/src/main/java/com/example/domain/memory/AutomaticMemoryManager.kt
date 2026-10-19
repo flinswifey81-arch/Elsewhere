@@ -5,6 +5,8 @@ import com.example.data.model.MemoryCategory
 import com.example.data.model.MessageEntity
 import com.example.data.model.RoleplayMemoryEntity
 import com.example.domain.repository.MemoryRepository
+import com.example.domain.npc.NpcStructuredOutputParser
+import com.example.domain.story.StoryResponseCodec
 
 data class AutomaticMemoryUpdateResult(
     val savedMemoryCount: Int,
@@ -74,7 +76,9 @@ class AutomaticMemoryManager(
         }
 
         val combined = olderMessages.joinToString("\n") { message ->
-            val compact = message.content.replace(Regex("\\s+"), " ").trim().take(280)
+            val compact = StoryResponseCodec.promptTranscript(
+                NpcStructuredOutputParser.finalVisibleStoryText(message.content)
+            ).replace(Regex("\\s+"), " ").trim().take(280)
             "${message.speakerDisplayNameSnapshot}: $compact"
         }
             .takeLast(MAX_SUMMARY_CHARS)

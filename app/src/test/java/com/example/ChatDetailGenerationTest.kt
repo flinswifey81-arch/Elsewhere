@@ -41,6 +41,9 @@ import com.example.domain.repository.MessageRepository
 import com.example.domain.repository.MessageAttachmentRepository
 import com.example.domain.repository.NpcRepository
 import com.example.domain.npc.NpcStructuredOutputParser
+import com.example.domain.story.StoryOutputParser
+import com.example.domain.story.StoryResponseCodec
+import com.example.domain.story.StorySegmentType
 import com.example.domain.repository.PersonaRepository
 import com.example.ui.screens.ChatDetailViewModel
 import com.example.ui.screens.ChatUiState
@@ -53,6 +56,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.yield
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.setMain
@@ -411,7 +415,18 @@ class ChatDetailGenerationTest {
 
     @Test
     fun narratorSoloGenerationUsesOneRequestAndKeepsCharacterSpeakerIdentity() = runBlocking {
-        val provider = RecordingStreamingProvider()
+        val provider = SequentialResponseProvider(
+            listOf(
+                """
+                    <|elsewhere_story_v1|>
+                    <|segment|>{"type":"narration"}
+                    Rain whispers against the glass.
+                    <|segment|>{"type":"character"}
+                    *Rowan listens.* "Only the weather."
+                    <|end_story|>
+                """.trimIndent()
+            )
+        )
         val harness = createHarness(
             provider = provider,
             responseLengthProfile = ResponseLengthProfile.NORMAL,
@@ -428,7 +443,257 @@ class ChatDetailGenerationTest {
 
         assertEquals(1, provider.requests.size)
         assertTrue(provider.requests.single().first().content.contains("Keep the rain present as quiet scene texture."))
+        assertTrue(provider.requests.single().first().content.contains(StoryOutputParser.START_MARKER))
         assertEquals("character-1", completed.last().speakerId)
+        val story = requireNotNull(StoryResponseCodec.decode(completed.last().content))
+        assertEquals(listOf(StorySegmentType.NARRATION, StorySegmentType.CHARACTER), story.segments.map { it.type })
+        assertFalse(StoryResponseCodec.visibleText(completed.last().content).contains("<|"))
+    }
+
+    @Test
+    fun narratorSoloUsesNpcBankIdentityInSameSingleRequest() = runBlocking {
+        val provider = SequentialResponseProvider(
+            listOf(
+                """
+                    <|elsewhere_story_v1|>
+                    <|segment|>{"type":"character"}
+                    "The west door stays closed."
+                    <|segment|>{"type":"npc","speaker_id":"npc-ashford","speaker_name":"Incorrect name"}
+                    *Lady Ashford raises one eyebrow.* "For now."
+                    <|segment|>{"type":"narration"}
+                    The key turns once in her gloved hand.
+                    <|end_story|>
+                """.trimIndent()
+            )
+        )
+        val harness = createHarness(
+            provider = provider,
+            responseLengthProfile = ResponseLengthProfile.NORMAL,
+            narratorEnabled = true,
+            npcBankEnabledInitially = true
+        )
+        harness.npcRepository.saveManual(
+            NpcDossier(
+                npcId = "npc-ashford",
+                chatId = harness.chatId,
+                displayName = "Lady Ashford",
+                aliases = emptyList(),
+                role = "Hostess",
+                appearance = "White gloves",
+                personality = "Unflappable",
+                relationshipToPersona = "",
+                personaRelationships = emptyMap(),
+                characterKnowledge = emptyMap(),
+                goals = "Protect the west wing",
+                secrets = "",
+                authorNotes = "",
+                keepInScene = true,
+                isManualBase = true,
+                createdAt = 1,
+                updatedAt = 1
+            )
+        )
+
+        harness.viewModel.onDraftChanged("What is behind the west door?")
+        harness.viewModel.sendMessage()
+        val completed = withTimeout(15_000) {
+            harness.messageRepository.getMessagesForChat(harness.chatId).first { it.size == 2 }
+        }
+
+        assertEquals(1, provider.requests.size)
+        val story = requireNotNull(StoryResponseCodec.decode(completed.last().content))
+        val npc = story.segments.single { it.type == StorySegmentType.NPC }
+        assertEquals("npc-ashford", npc.speakerId)
+        assertEquals("Lady Ashford", npc.speakerName)
+    }
+
+    @Test
+    fun narratorDisabledPreservesOrdinaryCharacterResponse() = runBlocking {
+        val provider = RecordingStreamingProvider()
+        val harness = createHarness(provider, ResponseLengthProfile.NORMAL, narratorEnabled = false)
+
+        harness.viewModel.onDraftChanged("Answer plainly.")
+        harness.viewModel.sendMessage()
+        val completed = withTimeout(15_000) {
+            harness.messageRepository.getMessagesForChat(harness.chatId).first { it.size == 2 }
+        }
+
+        assertEquals(1, provider.requests.size)
+        assertEquals("A quiet answer.", completed.last().content)
+        assertEquals(null, StoryResponseCodec.decode(completed.last().content))
+        assertFalse(provider.requests.single().first().content.contains(StoryOutputParser.START_MARKER))
+    }
+
+    @Test
+    fun malformedNarratedOutputIsSavedWithoutExposingControlMarkers() = runBlocking {
+        val provider = SequentialResponseProvider(
+            listOf(
+                """
+                    <|elsewhere_story_v1|>
+                    <|segment|>{broken}
+                    The floorboard creaks behind Rowan.
+                    <|segment|>{"type":"character"}
+                    *He turns.* "Who's there?"
+                """.trimIndent()
+            )
+        )
+        val harness = createHarness(provider, ResponseLengthProfile.NORMAL, narratorEnabled = true)
+
+        harness.viewModel.onDraftChanged("Listen.")
+        harness.viewModel.sendMessage()
+        val completed = withTimeout(15_000) {
+            harness.messageRepository.getMessagesForChat(harness.chatId).first { it.size == 2 }
+        }
+
+        val visible = StoryResponseCodec.visibleText(completed.last().content)
+        assertTrue(visible.contains("The floorboard creaks behind Rowan."))
+        assertTrue(visible.contains("Who's there?"))
+        assertFalse(visible.contains("<|"))
+        assertFalse(visible.contains("broken"))
+        assertEquals(1, provider.requests.size)
+    }
+
+    @Test
+    fun structuredRegenerationCreatesOneCompleteVariantPerRequest() = runBlocking {
+        fun response(line: String) = """
+            <|elsewhere_story_v1|>
+            <|segment|>{"type":"narration"}
+            The room stills.
+            <|segment|>{"type":"character"}
+            $line
+            <|end_story|>
+        """.trimIndent()
+        val provider = SequentialResponseProvider(listOf(response("First reply."), response("Second reply.")))
+        val harness = createHarness(provider, ResponseLengthProfile.NORMAL, narratorEnabled = true)
+
+        harness.viewModel.onDraftChanged("Respond.")
+        harness.viewModel.sendMessage()
+        val first = withTimeout(15_000) {
+            harness.messageRepository.getMessagesForChat(harness.chatId).first { it.size == 2 }
+        }.last()
+        withTimeout(15_000) {
+            harness.viewModel.uiState.first { state ->
+                state is ChatUiState.Success && !state.isGenerating &&
+                    state.messages.any { it.messageId == first.messageId }
+            }
+        }
+        yield()
+        harness.viewModel.regenerateMessage(first.messageId)
+        val variants = withTimeout(15_000) {
+            harness.messageRepository.getVariants(first.variantGroupId).first { it.size == 2 }
+        }
+
+        assertEquals(2, provider.requests.size)
+        assertEquals(1, variants.count { it.isPrimaryVariant })
+        assertTrue(variants.all { StoryResponseCodec.decode(it.content)?.segments?.size == 2 })
+        assertTrue(
+            StoryResponseCodec.visibleText(variants.single { it.isPrimaryVariant }.content)
+                .contains("Second reply.")
+        )
+    }
+
+    @Test
+    fun structuredContinueAppendsToTheSameLogicalResponseWithoutRepeatingSegments() = runBlocking {
+        val provider = SequentialResponseProvider(
+            listOf(
+                """
+                    <|elsewhere_story_v1|>
+                    <|segment|>{"type":"narration"}
+                    The room stills.
+                    <|segment|>{"type":"character"}
+                    "Wait here."
+                    <|end_story|>
+                """.trimIndent(),
+                """
+                    <|elsewhere_story_v1|>
+                    <|segment|>{"type":"npc","speaker_name":"The Porter"}
+                    "The carriage is ready."
+                    <|segment|>{"type":"narration"}
+                    Rain beads on the open door.
+                    <|end_story|>
+                """.trimIndent()
+            )
+        )
+        val harness = createHarness(provider, ResponseLengthProfile.NORMAL, narratorEnabled = true)
+
+        harness.viewModel.onDraftChanged("Tell me what happens.")
+        harness.viewModel.sendMessage()
+        val original = withTimeout(15_000) {
+            harness.messageRepository.getMessagesForChat(harness.chatId).first { it.size == 2 }
+        }.last()
+        withTimeout(15_000) {
+            harness.viewModel.uiState.first { state ->
+                state is ChatUiState.Success && !state.isGenerating &&
+                    state.messages.any { it.messageId == original.messageId }
+            }
+        }
+        yield()
+
+        harness.viewModel.continueMessage(original.messageId)
+        val continued = withTimeout(15_000) {
+            harness.messageRepository.getMessagesForChat(harness.chatId).first { messages ->
+                messages.singleOrNull { it.messageId == original.messageId }
+                    ?.content
+                    ?.let(StoryResponseCodec::decode)
+                    ?.segments
+                    ?.size == 4
+            }
+        }.single { it.messageId == original.messageId }
+
+        assertEquals(2, provider.requests.size)
+        assertEquals(2, harness.messageRepository.getMessagesForChatOnce(harness.chatId).size)
+        val story = requireNotNull(StoryResponseCodec.decode(continued.content))
+        assertEquals(
+            listOf(
+                StorySegmentType.NARRATION,
+                StorySegmentType.CHARACTER,
+                StorySegmentType.NPC,
+                StorySegmentType.NARRATION
+            ),
+            story.segments.map { it.type }
+        )
+        assertEquals(1, story.segments.count { it.content == "The room stills." })
+        val continuationPrompt = provider.requests.last().joinToString("\n") { it.content }
+        assertTrue(continuationPrompt.contains("Narrator: The room stills."))
+        assertTrue(continuationPrompt.contains("Character (Rowan): \"Wait here.\""))
+        assertFalse(continuationPrompt.contains("elsewhere-story-v1"))
+    }
+
+    @Test
+    fun incompleteStructuredStreamCanBeKeptAsOrderedPartialStory() = runBlocking {
+        val provider = CancellablePartialProvider(
+            """
+                <|elsewhere_story_v1|>
+                <|segment|>{"type":"narration"}
+                A shadow crosses the doorway.
+                <|segment|>{"type":"character"}
+                *Rowan reaches for the lamp.*
+            """.trimIndent()
+        )
+        val harness = createHarness(provider, ResponseLengthProfile.NORMAL, narratorEnabled = true)
+
+        harness.viewModel.onDraftChanged("What moved?")
+        harness.viewModel.sendMessage()
+        withTimeout(15_000) {
+            harness.viewModel.uiState.first { state ->
+                state is ChatUiState.Success && state.isGenerating &&
+                    StoryResponseCodec.decode(state.streamingContent.orEmpty())?.segments?.size == 2
+            }
+        }
+        harness.viewModel.stopGeneration()
+        withTimeout(15_000) {
+            harness.viewModel.uiState.first { it is ChatUiState.Success && it.partialStopped }
+        }
+        harness.viewModel.keepPartial()
+        val saved = withTimeout(15_000) {
+            harness.messageRepository.getMessagesForChat(harness.chatId).first { it.size == 2 }
+        }.last()
+
+        assertEquals(1, provider.requestCount)
+        assertEquals(
+            listOf(StorySegmentType.NARRATION, StorySegmentType.CHARACTER),
+            requireNotNull(StoryResponseCodec.decode(saved.content)).segments.map { it.type }
+        )
     }
 
     @Test
@@ -1522,6 +1787,7 @@ class ChatDetailGenerationTest {
     private class CancellablePartialProvider(
         private val content: String = "Partial response"
     ) : ModelProvider {
+        var requestCount = 0
         override suspend fun getModels(): List<OpenRouterModel> = emptyList()
         override suspend fun getEndpoints(modelId: String): List<ProviderEndpoint> = emptyList()
 
@@ -1529,6 +1795,7 @@ class ChatDetailGenerationTest {
             messages: List<RoleplayMessage>,
             options: GenerationOptions
         ): Flow<StreamEvent> = flow {
+            requestCount += 1
             emit(StreamEvent.Content(content))
             awaitCancellation()
         }

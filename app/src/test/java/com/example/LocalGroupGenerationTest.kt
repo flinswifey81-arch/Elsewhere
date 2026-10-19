@@ -189,6 +189,12 @@ class LocalGroupGenerationTest {
                 messages.any { it.content == "B regenerated" && it.isPrimaryVariant }
             }
         }.single { it.content == "B regenerated" }
+        withTimeout(15_000) {
+            harness.viewModel.uiState.first { state ->
+                state is ChatUiState.Success && !state.isGenerating &&
+                    state.messages.any { it.messageId == regenerated.messageId }
+            }
+        }
         harness.viewModel.continueMessage(regenerated.messageId)
         withTimeout(15_000) {
             harness.messageRepository.getMessagesForChat(harness.chatId).first { messages ->

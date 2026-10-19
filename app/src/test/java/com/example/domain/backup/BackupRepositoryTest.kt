@@ -21,6 +21,10 @@ import com.example.domain.repository.ProfileImageKind
 import com.example.domain.repository.ProfileImageRepository
 import com.example.domain.repository.StaleAppDataMutationException
 import com.example.domain.repository.ThemeMode
+import com.example.domain.story.StoryResponse
+import com.example.domain.story.StoryResponseCodec
+import com.example.domain.story.StorySegment
+import com.example.domain.story.StorySegmentType
 import com.example.domain.coop.CoopCodec
 import com.example.domain.coop.CoopMessagePayload
 import com.example.domain.coop.CoopParticipantDto
@@ -112,6 +116,47 @@ class BackupRepositoryTest {
         assertTrue(decoded.scenarioSessions.isEmpty())
         assertEquals(completePayload().chats, decoded.chats)
         assertEquals(completePayload().personas, decoded.personas)
+    }
+
+    @Test
+    fun encryptedBackupPreservesNarratedEnsembleEnvelope() = runBlocking {
+        val source = environment()
+        val storyContent = StoryResponseCodec.encode(
+            StoryResponse(
+                segments = listOf(
+                    StorySegment(StorySegmentType.NARRATION, "The lamps dim."),
+                    StorySegment(
+                        StorySegmentType.CHARACTER,
+                        "*He glances at the door.* \"Stay close.\"",
+                        CHARACTER_ID,
+                        "Archive Character"
+                    ),
+                    StorySegment(StorySegmentType.NPC, "\"Too late.\"", "npc-1", "The Steward")
+                )
+            )
+        )
+        val payload = completePayload().let { original ->
+            original.copy(
+                messages = original.messages.map { message ->
+                    if (message.messageId == CHARACTER_MESSAGE_ID) message.copy(content = storyContent) else message
+                },
+                messageAttachments = emptyList()
+            )
+        }
+        source.insert(payload)
+        source.appearance.replaceSettings(payload.appearance.toDomain())
+        val encrypted = ByteArrayOutputStream()
+        source.repository.exportEncrypted(encrypted, PASSPHRASE.toCharArray())
+
+        val target = environment()
+        target.repository.restoreEncrypted(
+            ByteArrayInputStream(encrypted.toByteArray()),
+            PASSPHRASE.toCharArray()
+        )
+
+        val restored = target.database.messageDao().getMessageById(CHARACTER_MESSAGE_ID)
+        assertEquals(storyContent, restored?.content)
+        assertEquals(3, StoryResponseCodec.decode(requireNotNull(restored).content)?.segments?.size)
     }
 
     @Test

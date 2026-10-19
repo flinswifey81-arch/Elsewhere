@@ -2,6 +2,8 @@ package com.example.domain.lore
 
 import com.example.data.model.LorebookEntryEntity
 import com.example.data.model.MessageEntity
+import com.example.domain.npc.NpcStructuredOutputParser
+import com.example.domain.story.StoryResponseCodec
 
 data class ActiveLoreEntry(
     val title: String,
@@ -15,9 +17,13 @@ object LorebookActivationEngine {
         currentMessage: MessageEntity,
         recentMessageLimit: Int = 24
     ): String = buildList {
-        addAll(chatHistory.filter { it.isPrimaryVariant }.takeLast(recentMessageLimit).map { it.content })
-        add(currentMessage.content)
+        addAll(chatHistory.filter { it.isPrimaryVariant }.takeLast(recentMessageLimit).map { it.visibleStoryText() })
+        add(currentMessage.visibleStoryText())
     }.joinToString("\n")
+
+    private fun MessageEntity.visibleStoryText(): String = StoryResponseCodec.promptTranscript(
+        NpcStructuredOutputParser.finalVisibleStoryText(content)
+    )
 
     fun keywordMatches(entry: LorebookEntryEntity, conversationalText: String): Boolean {
         val keys = (entry.keys + entry.secondaryKeys).filter(String::isNotBlank)

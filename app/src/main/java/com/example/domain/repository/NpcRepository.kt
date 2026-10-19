@@ -9,6 +9,8 @@ import com.example.data.model.NpcDossier
 import com.example.data.model.NpcDossierEntity
 import com.example.data.model.NpcDossierUpdateEntity
 import com.example.domain.npc.NpcStructuredUpdate
+import com.example.domain.npc.NpcStructuredOutputParser
+import com.example.domain.story.StoryResponseCodec
 import com.squareup.moshi.Json
 import com.squareup.moshi.JsonClass
 import com.squareup.moshi.Moshi
@@ -354,7 +356,11 @@ class NpcRepository(
             val dossiers = project(bases, updates)
             if (dossiers.isEmpty()) return@withContext null
             val recentText = recentMessages.filter { it.isPrimaryVariant }.takeLast(4)
-                .joinToString("\n") { it.content }.lowercase(Locale.ROOT)
+                .joinToString("\n") {
+                    StoryResponseCodec.promptTranscript(
+                        NpcStructuredOutputParser.finalVisibleStoryText(it.content)
+                    )
+                }.lowercase(Locale.ROOT)
             val selected = dossiers.map { dossier ->
                 val names = listOf(dossier.displayName) + dossier.aliases
                 val mentionScore = names.sumOf { alias ->

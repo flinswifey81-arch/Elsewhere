@@ -41,6 +41,7 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.data.model.MessageEntity
@@ -56,6 +57,9 @@ import com.example.ui.components.elsewhereTopAppBarColors
 import com.example.ui.theme.LocalElsewhereSemanticColors
 import com.example.domain.repository.ProfileImageKind
 import com.example.domain.repository.ProfileImageRepository
+import com.example.domain.story.StoryResponse
+import com.example.domain.story.StoryResponseCodec
+import com.example.domain.story.StorySegmentType
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -824,6 +828,24 @@ fun MessageBubble(
 ) {
     val message = group.primaryMessage
     val isUser = message.speakerType == SpeakerType.PERSONA
+    val ensembleStory = remember(message.content) { StoryResponseCodec.decode(message.content) }
+    if (ensembleStory != null && message.speakerType == SpeakerType.CHARACTER) {
+        EnsembleMessageBubble(
+            group = group,
+            story = ensembleStory,
+            profileImageRepository = profileImageRepository,
+            responsibleParticipantName = responsibleParticipantName,
+            mutationsEnabled = mutationsEnabled,
+            onSwitchVariant = onSwitchVariant,
+            onRegenerate = onRegenerate,
+            onContinue = onContinue,
+            onCopy = onCopy,
+            onEdit = onEdit,
+            onDelete = onDelete,
+            onShowMetadata = onShowMetadata
+        )
+        return
+    }
     val profileImageKind = when (message.speakerType) {
         SpeakerType.PERSONA -> ProfileImageKind.PERSONA
         SpeakerType.CHARACTER -> ProfileImageKind.CHARACTER
@@ -1050,6 +1072,226 @@ fun MessageBubble(
 }
 
 @Composable
+private fun EnsembleMessageBubble(
+    group: MessageGroup,
+    story: StoryResponse,
+    profileImageRepository: ProfileImageRepository?,
+    responsibleParticipantName: String?,
+    mutationsEnabled: Boolean,
+    onSwitchVariant: (String) -> Unit,
+    onRegenerate: (String) -> Unit,
+    onContinue: (String) -> Unit,
+    onCopy: (String) -> Unit,
+    onEdit: (String, String) -> Unit,
+    onDelete: (String) -> Unit,
+    onShowMetadata: (String) -> Unit
+) {
+    val message = group.primaryMessage
+    var showMenu by remember { mutableStateOf(false) }
+    var isEditing by remember { mutableStateOf(false) }
+    var editContent by remember(message.messageId, message.content) {
+        mutableStateOf(StoryResponseCodec.readableTranscript(story))
+    }
+    var showDeleteConfirm by remember { mutableStateOf(false) }
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        responsibleParticipantName?.let { participant ->
+            Text(
+                text = "Sent by $participant",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 8.dp)
+            )
+        }
+        if (message.editedAt != null) {
+            Text(
+                text = "(edited)",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+            )
+        }
+
+        if (isEditing) {
+            Surface(
+                shape = MaterialTheme.shapes.medium,
+                color = MaterialTheme.colorScheme.surfaceVariant,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp)
+            ) {
+                Column(Modifier.padding(8.dp)) {
+                    OutlinedTextField(
+                        value = editContent,
+                        onValueChange = { editContent = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = MaterialTheme.shapes.medium,
+                        colors = elsewhereTextFieldColors()
+                    )
+                    Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
+                        TextButton(onClick = {
+                            isEditing = false
+                            editContent = StoryResponseCodec.readableTranscript(story)
+                        }) { Text("Cancel") }
+                        TextButton(onClick = {
+                            onEdit(message.messageId, editContent)
+                            isEditing = false
+                        }) { Text("Save") }
+                    }
+                }
+            }
+        } else {
+            StorySegments(
+                story = story,
+                primaryCharacterId = message.speakerId,
+                primaryCharacterName = message.speakerDisplayNameSnapshot,
+                profileImageRepository = profileImageRepository
+            )
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(start = 42.dp, end = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            if (group.variants.size > 1) {
+                EnsembleVariantSelector(
+                    group = group,
+                    mutationsEnabled = mutationsEnabled,
+                    onSwitchVariant = onSwitchVariant
+                )
+            }
+            Spacer(Modifier.weight(1f))
+            Box {
+                IconButton(onClick = { showMenu = true }) {
+                    Icon(Icons.Filled.MoreVert, contentDescription = "Menu")
+                }
+                MessageMenu(
+                    expanded = showMenu,
+                    onDismiss = { showMenu = false },
+                    onCopy = { onCopy(StoryResponseCodec.readableTranscript(story)) },
+                    onEdit = { isEditing = true },
+                    onDelete = { showDeleteConfirm = true },
+                    onRegenerate = { onRegenerate(message.messageId) },
+                    onContinue = { onContinue(message.messageId) },
+                    onShowMetadata = { onShowMetadata(message.messageId) },
+                    mutationsEnabled = mutationsEnabled
+                )
+            }
+        }
+    }
+
+    if (showDeleteConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirm = false },
+            title = { Text("Delete Message") },
+            text = { Text("Delete this complete narrated response?") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onDelete(message.messageId)
+                        showDeleteConfirm = false
+                    },
+                    colors = elsewhereDestructiveButtonColors()
+                ) { Text("Delete") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirm = false }) { Text("Cancel") }
+            }
+        )
+    }
+}
+
+@Composable
+private fun StorySegments(
+    story: StoryResponse,
+    primaryCharacterId: String?,
+    primaryCharacterName: String,
+    profileImageRepository: ProfileImageRepository?
+) {
+    val semanticColors = LocalElsewhereSemanticColors.current
+    story.segments.forEachIndexed { index, segment ->
+        if (index > 0) Spacer(Modifier.height(8.dp))
+        when (segment.type) {
+            StorySegmentType.NARRATION -> Text(
+                text = segment.content,
+                style = MaterialTheme.typography.bodyMedium.copy(fontStyle = FontStyle.Italic),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 28.dp, vertical = 6.dp)
+                    .testTag("story_narration_$index")
+            )
+            StorySegmentType.CHARACTER, StorySegmentType.NPC -> {
+                val isPrimary = segment.type == StorySegmentType.CHARACTER
+                val speakerId = if (isPrimary) primaryCharacterId else segment.speakerId
+                val speakerName = if (isPrimary) primaryCharacterName else segment.speakerName ?: "Supporting character"
+                Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.Start) {
+                    Text(
+                        text = speakerName,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(start = 50.dp, bottom = 2.dp)
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        ProfileImageAvatar(
+                            repository = profileImageRepository,
+                            kind = if (isPrimary) ProfileImageKind.CHARACTER else null,
+                            profileId = speakerId,
+                            displayName = speakerName,
+                            size = 36.dp,
+                            contentDescription = "Profile picture for $speakerName",
+                            modifier = Modifier.testTag("story_speaker_${segment.type.name}_$index")
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Surface(
+                            shape = RoundedCornerShape(16.dp, 16.dp, 16.dp, 0.dp),
+                            color = semanticColors.characterBubble,
+                            tonalElevation = 1.dp,
+                            modifier = Modifier.fillMaxWidth(0.76f)
+                        ) {
+                            MarkdownText(
+                                markdown = segment.content,
+                                color = semanticColors.onCharacterBubble,
+                                modifier = Modifier.padding(12.dp)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun EnsembleVariantSelector(
+    group: MessageGroup,
+    mutationsEnabled: Boolean,
+    onSwitchVariant: (String) -> Unit
+) {
+    val currentIndex = group.variants.indexOfFirst { it.messageId == group.primaryMessage.messageId }
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Text(
+            text = "<",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.clickable(enabled = mutationsEnabled && currentIndex > 0) {
+                onSwitchVariant(group.variants[currentIndex - 1].messageId)
+            }.padding(4.dp)
+        )
+        Text(text = "${currentIndex + 1} / ${group.variants.size}", style = MaterialTheme.typography.labelSmall)
+        Text(
+            text = ">",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.clickable(
+                enabled = mutationsEnabled && currentIndex in 0 until group.variants.lastIndex
+            ) {
+                onSwitchVariant(group.variants[currentIndex + 1].messageId)
+            }.padding(4.dp)
+        )
+    }
+}
+
+@Composable
 private fun DraftImagePreview(
     attachment: MessageAttachmentEntity,
     file: File?,
@@ -1165,6 +1407,24 @@ fun StreamingBubble(
     characterId: String? = null,
     profileImageRepository: ProfileImageRepository? = null
 ) {
+    val story = remember(content) { StoryResponseCodec.decode(content) }
+    if (story != null) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            StorySegments(
+                story = story,
+                primaryCharacterId = characterId,
+                primaryCharacterName = characterName,
+                profileImageRepository = profileImageRepository
+            )
+            Text(
+                text = "Generating…",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(start = 50.dp, top = 4.dp)
+            )
+        }
+        return
+    }
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.Start

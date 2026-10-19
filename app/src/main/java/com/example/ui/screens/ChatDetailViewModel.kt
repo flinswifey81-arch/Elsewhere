@@ -31,6 +31,9 @@ import com.example.domain.provider.ModelRouting
 import com.example.domain.provider.RoleplayMessage
 import com.example.domain.provider.StreamEvent
 import com.example.domain.npc.NpcStructuredOutputParser
+import com.example.domain.story.StoryOutputParser
+import com.example.domain.story.StoryResponseCodec
+import com.example.domain.story.StorySpeakerIdentity
 import com.example.domain.repository.CharacterRepository
 import com.example.domain.repository.ChatRepository
 import com.example.domain.repository.MessageRepository
@@ -83,7 +86,9 @@ private data class PreparedGeneration(
     val messages: List<RoleplayMessage>,
     val options: GenerationOptions,
     val npcBankEnabled: Boolean = false,
-    val activePersonaId: String? = null
+    val activePersonaId: String? = null,
+    val ensembleNarrationEnabled: Boolean = false,
+    val knownNpcSpeakers: List<StorySpeakerIdentity> = emptyList()
 )
 
 private data class PendingPartialGeneration(
@@ -177,6 +182,7 @@ class ChatDetailViewModel(
     private val compiler = ContextCompilerV1()
     private val memoryManager = AutomaticMemoryManager(memoryRepository)
     private val parsedNpcOutput = npcOutputParser
+    private val storyOutputParser = StoryOutputParser()
 
     init {
         loadData()
@@ -955,7 +961,7 @@ class ChatDetailViewModel(
                                 generatedContent += event.text
                                 val visibleContent = visibleGeneratedContent(
                                     generatedContent,
-                                    prepared.npcBankEnabled
+                                    prepared
                                 )
                                 updateSuccessState { it.copy(streamingContent = visibleContent) }
                             }
@@ -985,8 +991,8 @@ class ChatDetailViewModel(
             generationJob = null
 
             if (stopped) {
-                val visiblePartial = visibleGeneratedContent(generatedContent, prepared.npcBankEnabled)
-                if (visiblePartial.isBlank()) {
+                val visiblePartial = visibleGeneratedContent(generatedContent, prepared)
+                if (!hasVisibleContent(visiblePartial)) {
                     pendingPartialGeneration = null
                 } else {
                     val partialMetadata = (currentMetadata ?: GenerationMetadataEntity(
@@ -1003,13 +1009,13 @@ class ChatDetailViewModel(
                 updateSuccessState {
                     it.copy(
                         isGenerating = false,
-                        partialStopped = visiblePartial.isNotBlank(),
+                        partialStopped = hasVisibleContent(visiblePartial),
                         partialResolutionInProgress = false,
-                        streamingContent = visiblePartial.takeIf(String::isNotBlank),
+                        streamingContent = visiblePartial.takeIf(::hasVisibleContent),
                         generationError = generationError
                     )
                 }
-                if (visiblePartial.isBlank()) {
+                if (!hasVisibleContent(visiblePartial)) {
                     finishCoopGenerationWithError(generationError ?: "Generation stopped")
                 }
             } else if (generatedContent.isBlank()) {
@@ -1033,8 +1039,21 @@ class ChatDetailViewModel(
                 } else {
                     com.example.domain.npc.ParsedNpcOutput(generatedContent)
                 }
+                val storyParsed = if (prepared.ensembleNarrationEnabled) {
+                    storyOutputParser.parse(
+                        output = parsed.storyText,
+                        primaryCharacter = StorySpeakerIdentity(fullCharacter.characterId, fullCharacter.displayName),
+                        knownNpcs = prepared.knownNpcSpeakers,
+                        final = true
+                    )
+                } else null
+                val persistedContent = storyParsed?.response?.let(StoryResponseCodec::encode)
+                    ?: parsed.storyText
+                val formatWarning = listOfNotNull(parsed.warning, storyParsed?.warning)
+                    .joinToString(" ")
+                    .takeIf(String::isNotBlank)
                 saveGeneratedMessage(
-                    content = parsed.storyText,
+                    content = persistedContent,
                     metadata = currentMetadata,
                     character = fullCharacter,
                     variantGroupId = variantGroupId,
@@ -1042,7 +1061,7 @@ class ChatDetailViewModel(
                     contextMessages = scopedHistory + currentMessage,
                     continuationTarget = continuationTarget,
                     npcUpdates = parsed.updates,
-                    npcWarning = parsed.warning,
+                    npcWarning = formatWarning,
                     activePersonaId = prepared.activePersonaId,
                     dataRevision = dataRevision
                 )
@@ -1142,6 +1161,13 @@ class ChatDetailViewModel(
         ).orEmpty()
         val activeCoopRoom = coopSessionManager?.state?.value?.room?.takeIf { it.chatId == chatId }
         val npcBankEnabled = activeCoopRoom == null && npcRepository?.getSettings(chatId)?.isEnabled == true
+        val ensembleNarrationEnabled = summary.chat.chatType == ChatType.SOLO &&
+            settings.narratorEnabled && activeCoopRoom == null
+        val knownNpcSpeakers = if (npcBankEnabled) {
+            npcRepository?.getProjectedDossiers(chatId).orEmpty().map { dossier ->
+                StorySpeakerIdentity(dossier.npcId, dossier.displayName)
+            }
+        } else emptyList()
         val supportingCast = if (npcBankEnabled) {
             npcRepository?.relevantContext(
                 chatId = chatId,
@@ -1196,7 +1222,8 @@ class ChatDetailViewModel(
                 supportingCastContext = supportingCast,
                 npcBankEnabled = npcBankEnabled,
                 narratorEnabled = settings.narratorEnabled,
-                narratorInstructions = settings.narratorInstructions
+                narratorInstructions = settings.narratorInstructions,
+                ensembleNarrationEnabled = ensembleNarrationEnabled
             )
         }
 
@@ -1239,7 +1266,15 @@ class ChatDetailViewModel(
             // small completion-token cap can exhaust the budget on reasoning before visible text.
             maxTokens = null
         )
-        return PreparedGeneration(ResponseSpeaker(fullCharacter.characterId, fullCharacter.displayName), providerMessages, options, npcBankEnabled, fullPersona.personaId)
+        return PreparedGeneration(
+            character = ResponseSpeaker(fullCharacter.characterId, fullCharacter.displayName),
+            messages = providerMessages,
+            options = options,
+            npcBankEnabled = npcBankEnabled,
+            activePersonaId = fullPersona.personaId,
+            ensembleNarrationEnabled = ensembleNarrationEnabled,
+            knownNpcSpeakers = knownNpcSpeakers
+        )
     }
 
     private suspend fun resolveCoopGenerationInput(
@@ -1347,7 +1382,7 @@ class ChatDetailViewModel(
         retainPartialOnCoopFailure: Boolean = false
     ): Boolean {
         val isCoopGeneration = activeCoopGenerationRequestId != null
-        if (content.isBlank()) {
+        if (!hasVisibleContent(content)) {
             updateSuccessState {
                 it.copy(
                     isGenerating = false,
@@ -1360,7 +1395,13 @@ class ChatDetailViewModel(
         }
 
         if (continuationTarget != null) {
-            val continuedMessage = continuationTarget.copy(content = continuationTarget.content + content)
+            val continuedMessage = continuationTarget.copy(
+                content = StoryResponseCodec.append(
+                    existing = continuationTarget.content,
+                    addition = content,
+                    primaryCharacter = StorySpeakerIdentity(character.characterId, character.displayName)
+                )
+            )
             val persistedMetadata = metadata?.copy(messageId = continuationTarget.messageId)
             var npcUpdateWarning = npcWarning
             val syncError = if (isCoopGeneration) {
@@ -1746,8 +1787,25 @@ class ChatDetailViewModel(
         }
     }
 
-    private fun visibleGeneratedContent(content: String, npcBankEnabled: Boolean): String =
-        if (npcBankEnabled) NpcStructuredOutputParser.visibleStoryText(content) else content
+    private fun visibleGeneratedContent(content: String, prepared: PreparedGeneration): String {
+        val storyText = if (prepared.npcBankEnabled) {
+            NpcStructuredOutputParser.visibleStoryText(content)
+        } else content
+        if (!prepared.ensembleNarrationEnabled) return storyText
+        val parsed = storyOutputParser.parse(
+            output = storyText,
+            primaryCharacter = StorySpeakerIdentity(
+                prepared.character.characterId,
+                prepared.character.displayName
+            ),
+            knownNpcs = prepared.knownNpcSpeakers,
+            final = false
+        )
+        return StoryResponseCodec.encode(parsed.response)
+    }
+
+    private fun hasVisibleContent(content: String): Boolean =
+        StoryResponseCodec.visibleText(content).isNotBlank()
 
     fun retryGeneration() {
         val state = _uiState.value as? ChatUiState.Success ?: return

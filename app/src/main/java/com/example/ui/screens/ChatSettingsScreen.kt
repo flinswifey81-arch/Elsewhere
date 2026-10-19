@@ -101,7 +101,7 @@ fun ChatSettingsScreen(
                         )
                     }
                     Text(
-                        "Adds scene and world narration to the same normal Character reply. It is not an independent AI, speaker turn, second request, or hard knowledge-isolation boundary. Turning it off keeps these instructions and the NPC Bank intact.",
+                        "Formats one normal model response as an integrated scene with standalone narration and optional supporting NPC segments. This uses no extra model request. Turning it off keeps these instructions and the NPC Bank intact.",
                         style = MaterialTheme.typography.bodySmall
                     )
                     var narratorInstructions by remember(uiState.settings?.chatId) {

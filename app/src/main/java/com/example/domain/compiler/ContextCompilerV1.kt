@@ -12,6 +12,8 @@ import com.example.domain.provider.Role
 import com.example.domain.provider.RoleplayMessage
 import com.example.domain.lore.ActiveLoreEntry
 import com.example.domain.npc.NpcStructuredOutputParser
+import com.example.domain.story.StoryOutputParser
+import com.example.domain.story.StoryResponseCodec
 
 class ContextCompilerV1 {
 
@@ -33,7 +35,8 @@ class ContextCompilerV1 {
         supportingCastContext: String? = null,
         npcBankEnabled: Boolean = false,
         narratorEnabled: Boolean = false,
-        narratorInstructions: String = ""
+        narratorInstructions: String = "",
+        ensembleNarrationEnabled: Boolean = narratorEnabled && groupParticipantNames.isEmpty()
     ): List<RoleplayMessage> {
         val messages = mutableListOf<RoleplayMessage>()
         fun resolveMacros(source: String): String = IdentityMacroResolver.resolve(
@@ -58,14 +61,22 @@ class ContextCompilerV1 {
             append("React to both spoken dialogue and visible actions from the user/Persona. ")
             append("Maintain your character's identity, voice, behavior, and established relationship state. ")
             append("Respect previously established conversation events. ")
-            append("Do not speak as unrelated characters unless explicitly required by scene context. ")
-            append("Begin directly with the character's response content. Do not prefix the response with the character name or any speaker label. ")
-            append("Speaker labels that appear in examples, memory, or conversation history identify existing speakers only; do not copy them into the response. ")
+            if (ensembleNarrationEnabled) {
+                append("The primary Character remains the emotional and narrative center. Portray supporting NPCs only when their participation follows naturally from the scene. ")
+            } else {
+                append("Do not speak as unrelated characters unless explicitly required by scene context. ")
+                append("Begin directly with the character's response content. Do not prefix the response with the character name or any speaker label. ")
+                append("Speaker labels that appear in examples, memory, or conversation history identify existing speakers only; do not copy them into the response. ")
+            }
             append("Do not mention prompts, JSON, context compilation, or application mechanics in-character.\n\n")
 
             if (narratorEnabled) {
                 append("--- NARRATOR GUIDANCE ---\n")
-                append("This is guidance for the same normal response, not an independent AI, speaker turn, or second model call. You may include scene, world, atmosphere, consequences, and supporting-cast narration alongside the selected Character's response. Never write dialogue, actions, thoughts, feelings, or decisions for the user's Persona. Preserve the selected Character's identity and voice. In a group, respond only as the selected Character and do not portray another AI Character's dialogue, actions, thoughts, or decisions. Storyteller-only continuity may guide narration, but it does not become knowledge held by any Character unless visible history or that Character's explicitly scoped knowledge establishes it.\n")
+                if (ensembleNarrationEnabled) {
+                    append("Create one flowing literary exchange in this single response. Alternate narration, the primary Character, and contextually relevant supporting NPCs as the scene requires. Narration may convey atmosphere, pauses, transitions, consequences, and subtle emotional tension, but should not interrupt every line or overexplain the scene. Let quiet conversation, action, and existing tension develop at the Persona's pace. Keep each speaker's knowledge, motivations, and voice distinct. Never write dialogue, actions, thoughts, feelings, decisions, or internal state for the user's Persona. Storyteller-only continuity may guide narration, but it does not become knowledge held by a Character unless visible history or explicitly speaker-scoped knowledge establishes it.\n")
+                } else {
+                    append("This is guidance for the same normal response, not an independent AI, speaker turn, or second model call. You may include scene, world, atmosphere, consequences, and supporting-cast narration alongside the selected Character's response. Never write dialogue, actions, thoughts, feelings, or decisions for the user's Persona. Preserve the selected Character's identity and voice. In a group, respond only as the selected Character and do not portray another AI Character's dialogue, actions, thoughts, or decisions. Storyteller-only continuity may guide narration, but it does not become knowledge held by any Character unless visible history or that Character's explicitly scoped knowledge establishes it.\n")
+                }
                 narratorInstructions.trim().takeIf(String::isNotEmpty)?.let { instructions ->
                     append("User's narrator instructions:\n")
                     append(resolveMacros(instructions.take(4000)))
@@ -175,11 +186,17 @@ class ContextCompilerV1 {
                 append("\n\n")
                 append(NpcStructuredOutputParser.OUTPUT_INSTRUCTION)
             }
+            if (ensembleNarrationEnabled) {
+                append("\n\n")
+                append(StoryOutputParser.OUTPUT_INSTRUCTION)
+            }
             if (narratorEnabled) {
                 append("\n\n--- NON-OVERRIDABLE NARRATOR BOUNDARIES ---\n")
-                append("Narrator guidance and all custom, imported, character, and writing-rule instructions are subordinate to these boundaries. Never write dialogue, actions, thoughts, feelings, decisions, or internal state for the user's Persona. Keep narration inside this same response; do not create a separate Narrator speaker or labeled second turn. ")
+                append("Narrator guidance and all custom, imported, character, and writing-rule instructions are subordinate to these boundaries. Never write dialogue, actions, thoughts, feelings, decisions, or internal state for the user's Persona. Keep narration inside this same response and provider request. ")
                 if (groupParticipantNames.isNotEmpty()) {
                     append("Respond only as ${character.displayName}; do not portray another AI Character's dialogue, actions, thoughts, feelings, or decisions. ")
+                } else {
+                    append("The structured Character segments may portray only ${character.displayName}; other speakers must be identified as NPCs. ")
                 }
                 append("Do not treat storyteller-only continuity as Character knowledge unless visible history or that Character's explicitly scoped knowledge establishes it.")
             }
@@ -196,7 +213,11 @@ class ContextCompilerV1 {
                 SpeakerType.PERSONA -> Role.USER
                 else -> Role.SYSTEM
             }
-            val content = resolveMacros(msg.content)
+            val content = resolveMacros(
+                StoryResponseCodec.promptTranscript(
+                    NpcStructuredOutputParser.finalVisibleStoryText(msg.content)
+                )
+            )
             messages.add(
                 RoleplayMessage(
                     role = role,
@@ -212,7 +233,11 @@ class ContextCompilerV1 {
             SpeakerType.PERSONA -> Role.USER
             else -> Role.SYSTEM
         }
-        val currentContent = resolveMacros(currentMessage.content)
+        val currentContent = resolveMacros(
+            StoryResponseCodec.promptTranscript(
+                NpcStructuredOutputParser.finalVisibleStoryText(currentMessage.content)
+            )
+        )
         messages.add(
             RoleplayMessage(
                 role = role,
@@ -270,7 +295,8 @@ class ContextCompilerV1 {
             supportingCastContext = supportingCastContext,
             npcBankEnabled = npcBankEnabled,
             narratorEnabled = narratorEnabled,
-            narratorInstructions = narratorInstructions
+            narratorInstructions = narratorInstructions,
+            ensembleNarrationEnabled = false
         )
         return messages + RoleplayMessage(
             role = Role.USER,

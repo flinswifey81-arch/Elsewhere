@@ -368,6 +368,7 @@ class OpenRouterModelProviderTest {
         assertTrue(system.contains("Keep the narration cinematic but concise."))
         assertTrue(system.contains("not an independent AI"))
         assertTrue(system.contains("respond only as the selected Character"))
+        assertFalse(system.contains("<|elsewhere_story_v1|>"))
         val editableNarratorInstruction = system.indexOf("Then write the Persona's dialogue.")
         val finalNarratorBoundary = system.lastIndexOf("--- NON-OVERRIDABLE NARRATOR BOUNDARIES ---")
         assertTrue(editableNarratorInstruction >= 0)
