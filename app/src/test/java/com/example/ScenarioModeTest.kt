@@ -98,8 +98,11 @@ class ScenarioModeTest {
         assertFalse(output.any { it.content == "Narrator: turn 39" })
     }
 
-    private suspend fun model(provider: RecordingProvider): Pair<String, ChatDetailViewModel> {
-        persona(); scenarios.save("s", definition())
+    private suspend fun model(
+        provider: RecordingProvider,
+        scenarioDefinition: ScenarioDefinition = definition()
+    ): Pair<String, ChatDetailViewModel> {
+        persona(); scenarios.save("s", scenarioDefinition)
         val id = scenarios.start("s", "player")
         val chats = ChatRepository(db.chatDao(), db.messageDao(), coordinator)
         chats.insertChatSettings(ChatSettingsEntity(id, selectedModelId = "chosen/model", temperature = 0.7f, topP = 0.8f))
@@ -111,6 +114,19 @@ class ScenarioModeTest {
     }
     private suspend fun awaitMessages(vm: ChatDetailViewModel, count: Int) = withTimeout(15000) {
         vm.uiState.first { it is ChatUiState.Success && it.messages.size == count && !it.isGenerating }
+    }
+    @Test fun scenarioWithoutOpeningMessageWaitsForPlayerAndUsesOneRequest() = runBlocking {
+        val provider = RecordingProvider()
+        val (id, vm) = model(provider, definition().copy(openingMessage = ""))
+        assertTrue(MessageRepository(db.messageDao(), coordinator).getMessagesForChatOnce(id).isEmpty())
+        assertTrue(provider.requests.isEmpty())
+
+        vm.onDraftChanged("I step into the ballroom."); vm.sendMessage()
+        awaitMessages(vm, 2)
+
+        val messages = MessageRepository(db.messageDao(), coordinator).getMessagesForChatOnce(id)
+        assertEquals(listOf(SpeakerType.PERSONA, SpeakerType.NARRATOR), messages.map { it.speakerType })
+        assertEquals(1, provider.requests.size)
     }
     @Test fun oneRequestPortraysMultipleNpcsAndPreservesModelSettingsAndNarratorIdentity() = runBlocking {
         val provider = RecordingProvider()

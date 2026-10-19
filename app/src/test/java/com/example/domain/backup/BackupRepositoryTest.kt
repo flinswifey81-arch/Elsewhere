@@ -97,6 +97,24 @@ class BackupRepositoryTest {
     }
 
     @Test
+    fun payloadFromBeforeScenarioModeDefaultsScenarioCollectionsToEmpty() {
+        val currentJson = BackupArchiveIO(moshi, BuildConfig.APPLICATION_ID)
+            .payloadToJson(completePayload())
+        val legacyJson = currentJson.replace(
+            Regex(",\\s*\"scenarios\"\\s*:\\s*\\[\\]\\s*,\\s*\"scenarioSessions\"\\s*:\\s*\\[\\]"),
+            ""
+        )
+        assertNotEquals(currentJson, legacyJson)
+
+        val decoded = requireNotNull(moshi.adapter(BackupPayload::class.java).fromJson(legacyJson))
+
+        assertTrue(decoded.scenarios.isEmpty())
+        assertTrue(decoded.scenarioSessions.isEmpty())
+        assertEquals(completePayload().chats, decoded.chats)
+        assertEquals(completePayload().personas, decoded.personas)
+    }
+
+    @Test
     fun encryptedRoundTripPreservesEveryDurableCategoryAndSanitizesDeviceSecrets() = runBlocking {
         val source = environment()
         val originalPayload = completePayload()

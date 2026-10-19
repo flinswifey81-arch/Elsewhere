@@ -132,7 +132,7 @@ class AppDatabaseMigrationTest {
     }
 
     @Test
-    fun migrationFrom3To8ValidatesAgainstRoomAndPreservesExistingChatData() = runBlocking {
+    fun migrationFrom3To9ValidatesAgainstRoomAndPreservesExistingChatData() = runBlocking {
         val helper = FrameworkSQLiteOpenHelperFactory().create(
             SupportSQLiteOpenHelper.Configuration.builder(context)
                 .name(databaseName)
@@ -190,6 +190,54 @@ class AppDatabaseMigrationTest {
             assertTrue(migrated.chatDao().getChatById("chat-keep")?.contextResetOrderIndex == null)
         } finally {
             migrated.close()
+        }
+    }
+
+    @Test
+    fun migrationFrom8To9PreservesExistingChatAndCreatesScenarioTables() {
+        val helper = FrameworkSQLiteOpenHelperFactory().create(
+            SupportSQLiteOpenHelper.Configuration.builder(context)
+                .name(databaseName)
+                .callback(object : SupportSQLiteOpenHelper.Callback(8) {
+                    override fun onCreate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                        db.execSQL(
+                            "CREATE TABLE chats (" +
+                                "chatId TEXT NOT NULL PRIMARY KEY, displayName TEXT NOT NULL, " +
+                                "chatType TEXT NOT NULL, createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL, " +
+                                "contextResetOrderIndex INTEGER)"
+                        )
+                    }
+
+                    override fun onUpgrade(
+                        db: androidx.sqlite.db.SupportSQLiteDatabase,
+                        oldVersion: Int,
+                        newVersion: Int
+                    ) = Unit
+                })
+                .build()
+        )
+
+        try {
+            val database = helper.writableDatabase
+            database.execSQL(
+                "INSERT INTO chats (chatId, displayName, chatType, createdAt, updatedAt) " +
+                    "VALUES ('chat-keep', 'Keep Me', 'SOLO', 1, 2)"
+            )
+
+            AppDatabase.MIGRATION_8_9.migrate(database)
+
+            database.query("SELECT displayName FROM chats WHERE chatId = 'chat-keep'").use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals("Keep Me", cursor.getString(0))
+            }
+            database.query(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND " +
+                    "name IN ('scenarios', 'scenario_sessions')"
+            ).use { cursor ->
+                assertEquals(2, cursor.count)
+            }
+        } finally {
+            helper.close()
         }
     }
 
