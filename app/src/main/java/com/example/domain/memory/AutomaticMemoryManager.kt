@@ -6,6 +6,11 @@ import com.example.data.model.MessageEntity
 import com.example.data.model.RoleplayMemoryEntity
 import com.example.domain.repository.MemoryRepository
 
+data class AutomaticMemoryUpdateResult(
+    val savedMemoryCount: Int,
+    val rollingSummaryUpdated: Boolean
+)
+
 class AutomaticMemoryManager(
     private val repository: MemoryRepository,
     private val recentMessageLimit: Int = 24
@@ -15,24 +20,58 @@ class AutomaticMemoryManager(
         characterId: String,
         personaMessage: MessageEntity,
         allPrimaryMessages: List<MessageEntity>
-    ) {
-        extractExplicitMemories(personaMessage.content).forEach { (category, content) ->
-            repository.insertIfNew(
-                RoleplayMemoryEntity(
-                    chatId = chatId,
-                    characterId = characterId,
-                    category = category,
-                    content = content,
-                    sourceMessageId = personaMessage.messageId
-                )
-            )
+    ): AutomaticMemoryUpdateResult = updateFromMessages(
+        chatId = chatId,
+        characterId = characterId,
+        personaMessages = listOf(personaMessage),
+        allPrimaryMessages = allPrimaryMessages
+    )
+
+    suspend fun updateFromConversation(
+        chatId: String,
+        characterId: String,
+        allPrimaryMessages: List<MessageEntity>
+    ): AutomaticMemoryUpdateResult = updateFromMessages(
+        chatId = chatId,
+        characterId = characterId,
+        personaMessages = allPrimaryMessages.filter { it.speakerType == com.example.data.model.SpeakerType.PERSONA },
+        allPrimaryMessages = allPrimaryMessages
+    )
+
+    private suspend fun updateFromMessages(
+        chatId: String,
+        characterId: String,
+        personaMessages: List<MessageEntity>,
+        allPrimaryMessages: List<MessageEntity>
+    ): AutomaticMemoryUpdateResult {
+        var savedMemoryCount = 0
+        personaMessages.forEach { personaMessage ->
+            extractExplicitMemories(personaMessage.content).forEach { (category, content) ->
+                if (
+                    repository.insertIfNew(
+                        RoleplayMemoryEntity(
+                            chatId = chatId,
+                            characterId = characterId,
+                            category = category,
+                            content = content,
+                            sourceMessageId = personaMessage.messageId
+                        )
+                    )
+                ) {
+                    savedMemoryCount++
+                }
+            }
         }
 
         val cutoffIndex = allPrimaryMessages.size - recentMessageLimit
-        if (cutoffIndex <= 0) return
+        if (cutoffIndex <= 0) {
+            return AutomaticMemoryUpdateResult(savedMemoryCount, rollingSummaryUpdated = false)
+        }
 
         val olderMessages = allPrimaryMessages.take(cutoffIndex)
-        if (olderMessages.isEmpty()) return
+        if (olderMessages.isEmpty()) {
+            return AutomaticMemoryUpdateResult(savedMemoryCount, rollingSummaryUpdated = false)
+        }
 
         val combined = olderMessages.joinToString("\n") { message ->
             val compact = message.content.replace(Regex("\\s+"), " ").trim().take(280)
@@ -47,6 +86,7 @@ class AutomaticMemoryManager(
                 summarizedThroughOrderIndex = olderMessages.maxOf { it.orderIndex }
             )
         )
+        return AutomaticMemoryUpdateResult(savedMemoryCount, rollingSummaryUpdated = true)
     }
 
     internal fun extractExplicitMemories(text: String): List<Pair<MemoryCategory, String>> {

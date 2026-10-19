@@ -11,6 +11,12 @@ interface MessageDao {
     @Query("SELECT * FROM messages WHERE chatId = :chatId ORDER BY orderIndex ASC")
     fun getMessagesForChat(chatId: String): Flow<List<MessageEntity>>
 
+    @Query("SELECT * FROM messages WHERE chatId = :chatId ORDER BY orderIndex ASC")
+    suspend fun getMessagesForChatOnce(chatId: String): List<MessageEntity>
+
+    @Query("SELECT * FROM messages WHERE messageId = :messageId LIMIT 1")
+    suspend fun getMessageById(messageId: String): MessageEntity?
+
     @Query("SELECT * FROM messages WHERE variantGroupId = :variantGroupId ORDER BY createdAt ASC")
     fun getVariants(variantGroupId: String): Flow<List<MessageEntity>>
 
@@ -19,6 +25,9 @@ interface MessageDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertMessage(message: MessageEntity)
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertMessageIfAbsent(message: MessageEntity): Long
     
     @Update
     suspend fun updateMessage(message: MessageEntity)
@@ -35,6 +44,12 @@ interface MessageDao {
     @Query("DELETE FROM generation_metadata WHERE messageId = :messageId")
     suspend fun deleteGenerationMetadata(messageId: String)
 
+    @Query("DELETE FROM messages WHERE messageId = :messageId")
+    suspend fun deleteMessageById(messageId: String)
+
+    @Query("DELETE FROM message_attachments WHERE messageId = :messageId")
+    suspend fun deleteAttachmentsForMessage(messageId: String)
+
     @Transaction
     suspend fun insertVariantAndSelect(message: MessageEntity) {
         insertMessage(message)
@@ -45,6 +60,7 @@ interface MessageDao {
     @Transaction
     suspend fun deleteMessageAndRepair(message: MessageEntity) {
         deleteGenerationMetadata(message.messageId)
+        deleteAttachmentsForMessage(message.messageId)
         deleteMessage(message)
         if (message.isPrimaryVariant) {
             getVariantsOnce(message.variantGroupId).firstOrNull()?.let { survivor ->

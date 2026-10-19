@@ -1,12 +1,16 @@
 package com.example.data.model
 
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 import java.util.UUID
 
-enum class SpeakerType { PERSONA, CHARACTER, SYSTEM, DIRECTOR }
+enum class SpeakerType { PERSONA, CHARACTER, SYSTEM, DIRECTOR, NARRATOR }
 
-@Entity(tableName = "messages")
+@Entity(
+    tableName = "messages",
+    indices = [Index(value = ["coOpEventId"], unique = true)]
+)
 data class MessageEntity(
     @PrimaryKey val messageId: String = UUID.randomUUID().toString(),
     val chatId: String,
@@ -18,5 +22,8 @@ data class MessageEntity(
     val editedAt: Long? = null,
     val orderIndex: Long,
     val variantGroupId: String = messageId,
-    val isPrimaryVariant: Boolean = true
+    val isPrimaryVariant: Boolean = true,
+    val responsibleParticipantId: String? = null,
+    val responsibleDeviceId: String? = null,
+    val coOpEventId: String? = null
 )

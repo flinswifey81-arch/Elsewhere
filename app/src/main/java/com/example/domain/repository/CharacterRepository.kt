@@ -11,7 +11,9 @@ import java.util.UUID
 
 class CharacterRepository(
     private val characterDao: CharacterDao,
-    private val moshi: Moshi
+    private val moshi: Moshi,
+    private val profileImageRepository: ProfileImageRepository? = null,
+    private val dataCoordinator: AppDataMaintenanceCoordinator = AppDataMaintenanceCoordinator.Global
 ) {
     private val mapAdapter = moshi.adapter<Map<String, Any?>>(
         Types.newParameterizedType(Map::class.java, String::class.java, Any::class.java)
@@ -22,7 +24,16 @@ class CharacterRepository(
     suspend fun getCharacterById(id: String): CharacterEntity? = characterDao.getCharacterById(id)
 
     suspend fun archiveCharacter(id: String) {
-        characterDao.archiveCharacter(id)
+        dataCoordinator.withMutation { characterDao.archiveCharacter(id) }
+    }
+
+    suspend fun deleteCharacterPermanently(id: String): ProfileDeletionResult =
+        dataCoordinator.withMutation {
+        val result = characterDao.deleteCharacterPermanently(id).toProfileDeletionResult()
+        if (result is ProfileDeletionResult.Deleted) {
+            runCatching { profileImageRepository?.removeImage(ProfileImageKind.CHARACTER, id) }
+        }
+        result
     }
 
     fun getManualFields(character: CharacterEntity): ManualCharacterFields =
@@ -32,7 +43,8 @@ class CharacterRepository(
         ManualCharacterFieldsCodec.readStored(character)?.initialMessage
             ?: ManualCharacterFieldsCodec.toEditableFields(character).initialMessage
 
-    suspend fun createManualCharacter(fields: ManualCharacterFields): String {
+    suspend fun createManualCharacter(fields: ManualCharacterFields): String =
+        dataCoordinator.withMutation {
         val character = CharacterEntity(
             displayName = fields.name,
             characterName = fields.name,
@@ -52,10 +64,11 @@ class CharacterRepository(
             extensionFieldsJson = ManualCharacterFieldsCodec.write(null, fields)
         )
         characterDao.insertCharacter(character)
-        return character.characterId
+        character.characterId
     }
 
-    suspend fun updateManualCharacter(characterId: String, fields: ManualCharacterFields) {
+    suspend fun updateManualCharacter(characterId: String, fields: ManualCharacterFields) =
+        dataCoordinator.withMutation {
         val existing = getCharacterById(characterId)
             ?: throw IllegalArgumentException("Character not found")
         characterDao.updateCharacter(
@@ -68,7 +81,8 @@ class CharacterRepository(
         )
     }
 
-    suspend fun duplicateCharacter(originalId: String, newDisplayName: String? = null): String {
+    suspend fun duplicateCharacter(originalId: String, newDisplayName: String? = null): String =
+        dataCoordinator.withMutation {
         val original = getCharacterById(originalId) ?: throw IllegalArgumentException("Character not found")
         val newId = UUID.randomUUID().toString()
         val duplicated = original.copy(
@@ -79,10 +93,12 @@ class CharacterRepository(
             isArchived = false
         )
         characterDao.insertCharacter(duplicated)
-        return newId
+        runCatching { profileImageRepository?.copyImage(ProfileImageKind.CHARACTER, originalId, newId) }
+        newId
     }
 
-    suspend fun importCharacterJson(jsonString: String, replaceExisting: Boolean = false, importAsNew: Boolean = false): String {
+    suspend fun importCharacterJson(jsonString: String, replaceExisting: Boolean = false, importAsNew: Boolean = false): String =
+        dataCoordinator.withMutation {
         val rootMap = mapAdapter.fromJson(jsonString) ?: throw IllegalArgumentException("Invalid JSON format")
         
         val schemaVersion = (rootMap["schema_version"] as? Number)?.toInt() 
@@ -134,7 +150,7 @@ class CharacterRepository(
         )
         
         characterDao.insertCharacter(entity)
-        return characterId
+        characterId
     }
 
     suspend fun exportCharacterJson(characterId: String): String {

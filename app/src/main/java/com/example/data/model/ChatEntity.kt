@@ -4,7 +4,7 @@ import androidx.room.Entity
 import androidx.room.PrimaryKey
 import java.util.UUID
 
-enum class ChatType { SOLO, GROUP }
+enum class ChatType { SOLO, GROUP, SCENARIO }
 
 @Entity(tableName = "chats")
 data class ChatEntity(
@@ -12,5 +12,6 @@ data class ChatEntity(
     val displayName: String,
     val chatType: ChatType,
     val createdAt: Long = System.currentTimeMillis(),
-    val updatedAt: Long = System.currentTimeMillis()
+    val updatedAt: Long = System.currentTimeMillis(),
+    val contextResetOrderIndex: Long? = null
 )

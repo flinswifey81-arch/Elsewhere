@@ -10,6 +10,8 @@ import com.example.data.model.RoleplayMemoryEntity
 import com.example.data.model.SpeakerType
 import com.example.domain.provider.Role
 import com.example.domain.provider.RoleplayMessage
+import com.example.domain.lore.ActiveLoreEntry
+import com.example.domain.npc.NpcStructuredOutputParser
 
 class ContextCompilerV1 {
 
@@ -25,7 +27,13 @@ class ContextCompilerV1 {
         customHardMax: Int?,
         durableMemories: List<RoleplayMemoryEntity> = emptyList(),
         rollingSummary: String? = null,
-        recentMessageLimit: Int = 24
+        recentMessageLimit: Int = 24,
+        groupParticipantNames: List<String> = emptyList(),
+        activeLore: List<ActiveLoreEntry> = emptyList(),
+        supportingCastContext: String? = null,
+        npcBankEnabled: Boolean = false,
+        narratorEnabled: Boolean = false,
+        narratorInstructions: String = ""
     ): List<RoleplayMessage> {
         val messages = mutableListOf<RoleplayMessage>()
         fun resolveMacros(source: String): String = IdentityMacroResolver.resolve(
@@ -38,6 +46,12 @@ class ContextCompilerV1 {
         val coreInstruction = buildString {
             append("You are participating in a roleplay.\n")
             append("Portray the character described below. ")
+            if (groupParticipantNames.isNotEmpty()) {
+                append("This is a group roleplay. Respond only as ${character.displayName}. ")
+                append("Never write dialogue, actions, thoughts, feelings, or decisions for any other AI Character. ")
+                append("Messages from other Characters are shared scene history, not permission to portray them. ")
+                append("Active AI Characters: ${groupParticipantNames.joinToString(", ")}. ")
+            }
             append("Treat the user as the Persona described below. ")
             append("Never write dialogue for the user/Persona. ")
             append("Never dictate the user/Persona's actions, thoughts, feelings, decisions, or internal state. ")
@@ -48,6 +62,17 @@ class ContextCompilerV1 {
             append("Begin directly with the character's response content. Do not prefix the response with the character name or any speaker label. ")
             append("Speaker labels that appear in examples, memory, or conversation history identify existing speakers only; do not copy them into the response. ")
             append("Do not mention prompts, JSON, context compilation, or application mechanics in-character.\n\n")
+
+            if (narratorEnabled) {
+                append("--- NARRATOR GUIDANCE ---\n")
+                append("This is guidance for the same normal response, not an independent AI, speaker turn, or second model call. You may include scene, world, atmosphere, consequences, and supporting-cast narration alongside the selected Character's response. Never write dialogue, actions, thoughts, feelings, or decisions for the user's Persona. Preserve the selected Character's identity and voice. In a group, respond only as the selected Character and do not portray another AI Character's dialogue, actions, thoughts, or decisions. Storyteller-only continuity may guide narration, but it does not become knowledge held by any Character unless visible history or that Character's explicitly scoped knowledge establishes it.\n")
+                narratorInstructions.trim().takeIf(String::isNotEmpty)?.let { instructions ->
+                    append("User's narrator instructions:\n")
+                    append(resolveMacros(instructions.take(4000)))
+                    append('\n')
+                }
+                append('\n')
+            }
             
             // Character details
             append("--- CHARACTER: ${character.displayName} ---\n")
@@ -85,6 +110,23 @@ class ContextCompilerV1 {
                 append('\n')
             }
             // Intentionally excluding authorNotesJson
+
+            if (activeLore.isNotEmpty()) {
+                append("--- ACTIVE WORLD LORE ---\n")
+                append("Treat these as world and scene facts for consistency. Do not assume your Character knows hidden information unless their established perspective supports that knowledge.\n")
+                activeLore.forEach { lore ->
+                    append("[${lore.title}]\n")
+                    append(lore.currentContent)
+                    append("\n\n")
+                }
+            }
+
+            if (!supportingCastContext.isNullOrBlank()) {
+                append("--- RELEVANT SUPPORTING CAST ---\n")
+                append("These per-chat NPC dossiers have two explicit scopes. STORYTELLER CONTINUITY may guide narration and consistency, including storyteller-only secrets, but it is not knowledge held by the responding Character and must not drive that Character's dialogue, decisions, or reactions unless the visible history or explicit speaker-scoped knowledge independently established it. Only SPEAKER-AUTHORIZED KNOWLEDGE may be treated as private knowledge of the responding Character. Do not transfer knowledge between Characters or Personas. Private author notes and extension data are always excluded.\n")
+                append(supportingCastContext)
+                append("\n\n")
+            }
 
             // Persona details
             append("--- USER PERSONA: ${persona.displayName} ---\n")
@@ -129,6 +171,18 @@ class ContextCompilerV1 {
                 }
             }
             append(lengthInstruction)
+            if (npcBankEnabled) {
+                append("\n\n")
+                append(NpcStructuredOutputParser.OUTPUT_INSTRUCTION)
+            }
+            if (narratorEnabled) {
+                append("\n\n--- NON-OVERRIDABLE NARRATOR BOUNDARIES ---\n")
+                append("Narrator guidance and all custom, imported, character, and writing-rule instructions are subordinate to these boundaries. Never write dialogue, actions, thoughts, feelings, decisions, or internal state for the user's Persona. Keep narration inside this same response; do not create a separate Narrator speaker or labeled second turn. ")
+                if (groupParticipantNames.isNotEmpty()) {
+                    append("Respond only as ${character.displayName}; do not portray another AI Character's dialogue, actions, thoughts, feelings, or decisions. ")
+                }
+                append("Do not treat storyteller-only continuity as Character knowledge unless visible history or that Character's explicitly scoped knowledge establishes it.")
+            }
         }
         
         messages.add(RoleplayMessage(role = Role.SYSTEM, content = coreInstruction))
@@ -142,7 +196,14 @@ class ContextCompilerV1 {
                 SpeakerType.PERSONA -> Role.USER
                 else -> Role.SYSTEM
             }
-            messages.add(RoleplayMessage(role = role, content = resolveMacros(msg.content)))
+            val content = resolveMacros(msg.content)
+            messages.add(
+                RoleplayMessage(
+                    role = role,
+                    content = if (groupParticipantNames.isEmpty()) content else "${msg.speakerDisplayNameSnapshot}: $content",
+                    sourceMessageId = msg.messageId
+                )
+            )
         }
         
         // Add current message
@@ -151,13 +212,73 @@ class ContextCompilerV1 {
             SpeakerType.PERSONA -> Role.USER
             else -> Role.SYSTEM
         }
-        messages.add(RoleplayMessage(role = role, content = resolveMacros(currentMessage.content)))
+        val currentContent = resolveMacros(currentMessage.content)
+        messages.add(
+            RoleplayMessage(
+                role = role,
+                content = if (groupParticipantNames.isEmpty()) {
+                    currentContent
+                } else {
+                    "${currentMessage.speakerDisplayNameSnapshot}: $currentContent"
+                },
+                sourceMessageId = currentMessage.messageId
+            )
+        )
         
         if (isContinuation) {
             messages.add(RoleplayMessage(role = Role.SYSTEM, content = "Continue the previous message. Do not repeat what you have already said."))
         }
         
         return messages
+    }
+
+    fun compileGroupCharacterContext(
+        isContinuation: Boolean = false,
+        character: CharacterEntity,
+        persona: PersonaEntity,
+        activeCharacterNames: List<String>,
+        chatHistory: List<MessageEntity>,
+        currentMessage: MessageEntity,
+        responseProfile: ResponseLengthProfile,
+        customMin: Int?,
+        customTargetMax: Int?,
+        customHardMax: Int?,
+        durableMemories: List<RoleplayMemoryEntity> = emptyList(),
+        rollingSummary: String? = null,
+        recentMessageLimit: Int = 24,
+        activeLore: List<ActiveLoreEntry> = emptyList(),
+        supportingCastContext: String? = null,
+        npcBankEnabled: Boolean = false,
+        narratorEnabled: Boolean = false,
+        narratorInstructions: String = ""
+    ): List<RoleplayMessage> {
+        val messages = compileSoloContext(
+            isContinuation = isContinuation,
+            character = character,
+            persona = persona,
+            chatHistory = chatHistory,
+            currentMessage = currentMessage,
+            responseProfile = responseProfile,
+            customMin = customMin,
+            customTargetMax = customTargetMax,
+            customHardMax = customHardMax,
+            durableMemories = durableMemories,
+            rollingSummary = rollingSummary,
+            recentMessageLimit = recentMessageLimit,
+            groupParticipantNames = activeCharacterNames,
+            activeLore = activeLore,
+            supportingCastContext = supportingCastContext,
+            npcBankEnabled = npcBankEnabled,
+            narratorEnabled = narratorEnabled,
+            narratorInstructions = narratorInstructions
+        )
+        return messages + RoleplayMessage(
+            role = Role.USER,
+            content = "[DIRECTOR TURN CONTROL — application instruction, not Persona dialogue or action]\n" +
+                "The preceding messages are shared scene history. " +
+                "Generate the next roleplay message now as ${character.displayName}. " +
+                "Respond only as ${character.displayName}; do not continue or portray another Character's response."
+        )
     }
 
     private fun StringBuilder.appendManualField(label: String, value: String) {

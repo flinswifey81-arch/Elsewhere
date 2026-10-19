@@ -10,6 +10,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.*
@@ -23,16 +24,23 @@ import androidx.compose.ui.unit.dp
 import com.example.data.model.CharacterEntity
 import com.example.data.model.ManualCharacterFields
 import com.example.domain.repository.CharacterRepository
+import com.example.domain.repository.ProfileImageKind
+import com.example.domain.repository.ProfileImageRepository
+import com.example.domain.repository.ProfileDeletionResult
 import com.example.ui.components.ElsewhereEmptyState
 import com.example.ui.components.elsewhereCardBorder
+import com.example.ui.components.elsewhereDestructiveButtonColors
 import com.example.ui.components.elsewhereTextFieldColors
 import com.example.ui.components.elsewhereTopAppBarColors
+import com.example.ui.components.ProfileImageAvatar
+import com.example.ui.components.ProfileImageEditor
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CharactersScreen(
     repository: CharacterRepository,
+    profileImageRepository: ProfileImageRepository? = null,
     modifier: Modifier = Modifier,
     onCharacterSelected: (String) -> Unit
 ) {
@@ -46,6 +54,10 @@ fun CharactersScreen(
     var importError by remember { mutableStateOf<String?>(null) }
     var showEditor by remember { mutableStateOf(false) }
     var editingCharacter by remember { mutableStateOf<CharacterEntity?>(null) }
+    var characterPendingDeletion by remember { mutableStateOf<CharacterEntity?>(null) }
+    var deletionInProgress by remember { mutableStateOf(false) }
+    var deletionNotice by remember { mutableStateOf<String?>(null) }
+    var deletionSucceeded by remember { mutableStateOf(false) }
     
     val launcher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
@@ -152,9 +164,87 @@ fun CharactersScreen(
         )
     }
 
+    characterPendingDeletion?.let { character ->
+        AlertDialog(
+            onDismissRequest = {
+                if (!deletionInProgress) characterPendingDeletion = null
+            },
+            title = { Text("Delete Character Permanently?") },
+            text = {
+                Text(
+                    "Permanently delete \"${character.displayName}\" and its profile-scoped " +
+                        "relationships and memories? This cannot be undone. The Character will be removed " +
+                        "from every chat, but all historical messages and speaker names will remain. " +
+                        "A chat with no remaining Character will become history-only."
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        deletionInProgress = true
+                        coroutineScope.launch {
+                            deletionNotice = try {
+                                when (val result = repository.deleteCharacterPermanently(character.characterId)) {
+                                    is ProfileDeletionResult.Deleted -> {
+                                        deletionSucceeded = true
+                                        if (result.affectedChatCount == 0) {
+                                            null
+                                        } else {
+                                            val chatLabel = if (result.affectedChatCount == 1) "chat" else "chats"
+                                            val historyOnly = if (result.historyOnlyChatCount == 0) "" else {
+                                                " ${result.historyOnlyChatCount} now ${if (result.historyOnlyChatCount == 1) "opens" else "open"} as history-only."
+                                            }
+                                            "Deleted \"${character.displayName}\" and removed the Character from " +
+                                                "${result.affectedChatCount} $chatLabel. All historical messages were kept.$historyOnly"
+                                        }
+                                    }
+                                    ProfileDeletionResult.NotFound -> {
+                                        deletionSucceeded = false
+                                        "This Character no longer exists."
+                                    }
+                                }
+                            } catch (_: Exception) {
+                                deletionSucceeded = false
+                                "The Character could not be deleted. No chat or message was changed."
+                            }
+                            deletionInProgress = false
+                            characterPendingDeletion = null
+                        }
+                    },
+                    enabled = !deletionInProgress,
+                    colors = elsewhereDestructiveButtonColors(),
+                    modifier = Modifier.testTag("confirm_delete_character")
+                ) {
+                    Text(if (deletionInProgress) "Deleting…" else "Delete Permanently")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { characterPendingDeletion = null },
+                    enabled = !deletionInProgress
+                ) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    deletionNotice?.let { notice ->
+        AlertDialog(
+            onDismissRequest = { deletionNotice = null },
+            title = { Text(if (deletionSucceeded) "Character Deleted" else "Character Not Deleted") },
+            text = { Text(notice) },
+            confirmButton = {
+                TextButton(onClick = { deletionNotice = null }) { Text("OK") }
+            }
+        )
+    }
+
     if (showEditor) {
         ManualCharacterEditor(
             initialFields = editingCharacter?.let(repository::getManualFields) ?: ManualCharacterFields(),
+            profileId = editingCharacter?.characterId,
+            profileImageRepository = profileImageRepository,
             isEditing = editingCharacter != null,
             onCancel = {
                 showEditor = false
@@ -265,18 +355,13 @@ fun CharactersScreen(
                         border = elsewhereCardBorder()
                     ) {
                         Row(modifier = Modifier.padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Surface(
-                                shape = RoundedCornerShape(12.dp),
-                                color = MaterialTheme.colorScheme.primaryContainer,
-                                modifier = Modifier.size(48.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Person,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                    modifier = Modifier.padding(12.dp)
-                                )
-                            }
+                            ProfileImageAvatar(
+                                repository = profileImageRepository,
+                                kind = ProfileImageKind.CHARACTER,
+                                profileId = character.characterId,
+                                displayName = character.displayName,
+                                size = 48.dp
+                            )
                             Spacer(modifier = Modifier.width(16.dp))
                             Column(modifier = Modifier.weight(1f)) {
                                 Row(
@@ -327,6 +412,16 @@ fun CharactersScreen(
                             ) {
                                 Icon(Icons.Default.Edit, contentDescription = "Edit ${character.displayName}")
                             }
+                            IconButton(
+                                onClick = { characterPendingDeletion = character },
+                                modifier = Modifier.testTag("delete_character_${character.characterId}")
+                            ) {
+                                Icon(
+                                    Icons.Default.Delete,
+                                    contentDescription = "Delete ${character.displayName}",
+                                    tint = MaterialTheme.colorScheme.error
+                                )
+                            }
                         }
                     }
                 }
@@ -339,6 +434,8 @@ fun CharactersScreen(
 @Composable
 private fun ManualCharacterEditor(
     initialFields: ManualCharacterFields,
+    profileId: String?,
+    profileImageRepository: ProfileImageRepository?,
     isEditing: Boolean,
     onCancel: () -> Unit,
     onSave: (ManualCharacterFields) -> Unit,
@@ -375,6 +472,15 @@ private fun ManualCharacterEditor(
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
+            item {
+                ProfileImageEditor(
+                    repository = profileImageRepository,
+                    kind = ProfileImageKind.CHARACTER,
+                    profileId = profileId,
+                    displayName = fields.name.ifBlank { "Character" },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
             item { EditorSectionTitle("Identity & Opening") }
             item {
                 CharacterTextField("Name", fields.name, { fields = fields.copy(name = it) }, singleLine = true)

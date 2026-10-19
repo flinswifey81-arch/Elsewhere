@@ -34,5 +34,7 @@ interface MemoryDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertSummary(summary: ConversationSummaryEntity)
-}
 
+    @Query("DELETE FROM conversation_summaries WHERE chatId = :chatId")
+    suspend fun deleteSummary(chatId: String)
+}

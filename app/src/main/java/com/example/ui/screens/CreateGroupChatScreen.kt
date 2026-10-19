@@ -33,7 +33,7 @@ fun CreateGroupChatScreen(
     val characters by characterRepository.getAllCharacters().collectAsState(initial = emptyList())
 
     var step by remember { mutableStateOf(1) }
-    val selectedPersonas = remember { mutableStateListOf<String>() }
+    var selectedPersonaId by remember { mutableStateOf<String?>(null) }
     val selectedCharacters = remember { mutableStateListOf<String>() }
     var chatName by remember { mutableStateOf("") }
 
@@ -56,27 +56,24 @@ fun CreateGroupChatScreen(
         Column(modifier = Modifier.padding(padding).fillMaxSize().padding(16.dp)) {
             when (step) {
                 1 -> {
-                    Text("Select Personas (1 or more)", style = MaterialTheme.typography.titleMedium)
+                    Text("Select Persona", style = MaterialTheme.typography.titleMedium)
                     Spacer(modifier = Modifier.height(16.dp))
                     if (personas.isEmpty()) {
                         Text("No personas found.", color = MaterialTheme.colorScheme.error)
                     } else {
                         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.weight(1f)) {
                             items(personas) { persona ->
-                                val isSelected = selectedPersonas.contains(persona.personaId)
+                                val isSelected = selectedPersonaId == persona.personaId
                                 SelectionCard(
                                     text = persona.displayName,
                                     selected = isSelected,
-                                    onClick = { 
-                                        if (isSelected) selectedPersonas.remove(persona.personaId)
-                                        else selectedPersonas.add(persona.personaId)
-                                    }
+                                    onClick = { selectedPersonaId = persona.personaId }
                                 )
                             }
                         }
                         Button(
                             onClick = { step = 2 },
-                            enabled = selectedPersonas.isNotEmpty(),
+                            enabled = selectedPersonaId != null,
                             modifier = Modifier.fillMaxWidth().padding(top = 16.dp)
                         ) { Text("Next") }
                     }
@@ -90,8 +87,13 @@ fun CreateGroupChatScreen(
                         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.weight(1f)) {
                             items(characters) { character ->
                                 val isSelected = selectedCharacters.contains(character.characterId)
+                                val selectedOrder = selectedCharacters.indexOf(character.characterId)
                                 SelectionCard(
-                                    text = character.displayName,
+                                    text = if (selectedOrder >= 0) {
+                                        "${selectedOrder + 1}. ${character.displayName}"
+                                    } else {
+                                        character.displayName
+                                    },
                                     selected = isSelected,
                                     onClick = { 
                                         if (isSelected) selectedCharacters.remove(character.characterId)
@@ -127,7 +129,7 @@ fun CreateGroupChatScreen(
                             coroutineScope.launch {
                                 val chatId = chatRepository.createGroupChat(
                                     displayName = chatName.takeIf { it.isNotBlank() } ?: "Untitled Group",
-                                    personaIds = selectedPersonas.toList(),
+                                    personaIds = listOf(requireNotNull(selectedPersonaId)),
                                     characterIds = selectedCharacters.toList()
                                 )
                                 onChatCreated(chatId)

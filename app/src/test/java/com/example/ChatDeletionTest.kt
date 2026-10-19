@@ -55,6 +55,7 @@ class ChatDeletionTest {
     private lateinit var chatRepository: ChatRepository
     private lateinit var messageRepository: MessageRepository
     private lateinit var memoryRepository: MemoryRepository
+    private lateinit var viewModels: TestViewModelOwner
     private val mainDispatcher = UnconfinedTestDispatcher()
 
     @Before
@@ -67,10 +68,12 @@ class ChatDeletionTest {
         chatRepository = ChatRepository(database.chatDao(), database.messageDao())
         messageRepository = MessageRepository(database.messageDao())
         memoryRepository = MemoryRepository(database.memoryDao())
+        viewModels = TestViewModelOwner()
     }
 
     @After
     fun tearDown() {
+        viewModels.close()
         database.close()
         Dispatchers.resetMain()
     }
@@ -140,15 +143,17 @@ class ChatDeletionTest {
         val chatId = chatRepository.createSoloChat("Active chat", "persona-1", "character-1")
         chatRepository.insertChatSettings(ChatSettingsEntity(chatId = chatId))
 
-        val viewModel = ChatDetailViewModel(
-            chatId = chatId,
-            chatRepository = chatRepository,
-            messageRepository = messageRepository,
-            characterRepository = characterRepository,
-            personaRepository = personaRepository,
-            modelProvider = NoOpModelProvider,
-            memoryRepository = memoryRepository
-        )
+        val viewModel = viewModels.create(ChatDetailViewModel::class.java) {
+            ChatDetailViewModel(
+                chatId = chatId,
+                chatRepository = chatRepository,
+                messageRepository = messageRepository,
+                characterRepository = characterRepository,
+                personaRepository = personaRepository,
+                modelProvider = NoOpModelProvider,
+                memoryRepository = memoryRepository
+            )
+        }
         withTimeout(5_000) { viewModel.uiState.first { it is ChatUiState.Success } }
 
         viewModel.deleteChat()

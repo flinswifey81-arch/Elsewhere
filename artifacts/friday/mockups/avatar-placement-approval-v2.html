@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Elsewhere portrait placement approval - corrected navigation</title>
+  <style>
+    :root{--board:#0b0d12;--ink:#f0ded8;--muted:#b5adb5;--phone:#11171d;--surface:#1c252d;--high:#303c47;--line:#48545f;--accent:#bbc9d5;--accentInk:#11171d;--persona:#435363;--gold:#f8cea3;--danger:#f2b7c3}
+    *{box-sizing:border-box}html,body{margin:0;width:100%;min-height:100%;background:var(--board);color:var(--ink)}body{font-family:Inter,"Segoe UI",sans-serif}
+    .board{width:1760px;min-height:1040px;padding:42px 46px 50px}.head{display:flex;align-items:flex-end;justify-content:space-between;margin:0 16px 26px}
+    h1{margin:0 0 5px;font:600 31px Georgia,serif}.sub{color:var(--muted);font-size:15px}.legend{color:var(--gold);border:1px solid #7a654f;border-radius:999px;padding:9px 15px;font-size:12px;letter-spacing:.8px;text-transform:uppercase}
+    .phones{display:grid;grid-template-columns:repeat(4,390px);gap:34px}.label{color:var(--accent);font:600 17px Georgia,serif;margin:0 0 10px 14px}
+    .phone{position:relative;height:844px;overflow:hidden;border-radius:36px;background:var(--phone);border:2px solid #39434c;box-shadow:0 24px 55px rgba(0,0,0,.42)}
+    .status{height:31px;display:flex;align-items:center;justify-content:space-between;padding:0 22px;font-size:11px;color:#d3ced3}.top{height:62px;display:flex;align-items:center;gap:12px;padding:0 16px;background:#151d24;border-bottom:1px solid #2c3740}.top.center{justify-content:center}.top h2{margin:0;font:600 23px Georgia,serif}.spacer{flex:1}.icon{width:34px;height:34px;display:grid;place-items:center;color:var(--accent);font-size:21px}.save{color:var(--accent);font-weight:700}
+    .content{height:calc(100% - 93px);padding:16px;overflow:hidden}.content.withnav{height:calc(100% - 162px)}
+    .card{display:grid;grid-template-columns:52px minmax(0,1fr) 32px 32px;gap:11px;align-items:center;min-height:94px;padding:14px;margin-bottom:12px;background:var(--surface);border:1px solid #38434d;border-radius:17px}
+    .avatar{display:grid;place-items:center;overflow:hidden;flex:0 0 auto;border:1px solid rgba(255,255,255,.16);box-shadow:inset 0 0 0 1px rgba(0,0,0,.12);color:white;font:600 19px Georgia,serif;background:linear-gradient(145deg,#5b6571,#26313b)}
+    .avatar.list{width:52px;height:52px;border-radius:13px}.avatar.editor{width:102px;height:102px;border-radius:24px;font-size:34px}.avatar.chat{width:36px;height:36px;border-radius:10px;margin-top:19px}
+    .avatar.a{background:radial-gradient(circle at 54% 32%,#e0b79d 0 13%,transparent 14%),radial-gradient(circle at 50% 40%,#c88973 0 23%,transparent 24%),linear-gradient(150deg,#7c5770,#332c46)}
+    .avatar.b{background:radial-gradient(circle at 50% 33%,#e4c3aa 0 13%,transparent 14%),radial-gradient(circle at 50% 42%,#8a533d 0 24%,transparent 25%),linear-gradient(150deg,#476979,#252d45)}
+    .avatar.c{background:radial-gradient(circle at 48% 33%,#bd8d70 0 13%,transparent 14%),radial-gradient(circle at 49% 42%,#2e2933 0 25%,transparent 26%),linear-gradient(150deg,#596a53,#26332b)}
+    .avatar.d{background:radial-gradient(circle at 50% 32%,#efc8ae 0 13%,transparent 14%),radial-gradient(circle at 50% 42%,#c7cbd0 0 25%,transparent 26%),linear-gradient(150deg,#6e567b,#302b40)}
+    .copy{min-width:0}.name{font:600 18px Georgia,serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.desc{margin-top:5px;color:var(--muted);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.action{text-align:center;font-size:18px;color:#c7c0c8}.action.delete{color:var(--danger)}
+    .fab{position:absolute;right:18px;min-width:138px;height:47px;padding:0 18px;display:flex;align-items:center;justify-content:center;gap:8px;border-radius:15px;font-weight:700;font-size:13px;box-shadow:0 8px 18px rgba(0,0,0,.32)}.fab.new{bottom:143px;background:var(--accent);color:var(--accentInk)}.fab.import{bottom:84px;background:var(--high);color:var(--ink);border:1px solid #53616c}
+    .nav{position:absolute;inset:auto 0 0;height:69px;display:grid;grid-template-columns:repeat(5,1fr);align-items:center;background:#151d24;border-top:1px solid #2c3740;color:#8f99a1}.navitem{text-align:center;font-size:9.5px;line-height:1.4}.navitem b{display:block;font-size:20px}.navitem.active{color:var(--accent)}
+    .editorcard{border:1px solid #3a4650;border-radius:20px;background:var(--surface);padding:18px}.editorrow{display:grid;grid-template-columns:102px 1fr;gap:18px;align-items:center;margin-bottom:22px}.eyebrow{color:var(--muted);font-size:11px;letter-spacing:.7px;text-transform:uppercase}.note{margin-top:6px;color:var(--muted);font-size:12px;line-height:1.4}.buttons{display:flex;flex-wrap:wrap;gap:8px;margin-top:11px}.button{border-radius:10px;border:1px solid #66727d;padding:8px 10px;font-weight:650;color:var(--accent);font-size:12px}.button.remove{color:var(--danger);border-color:#80515c}.field{height:58px;margin:12px 0;padding:9px 13px;border:1px solid #52606a;border-radius:14px;color:var(--muted);font-size:11px}.field strong{display:block;color:var(--ink);font-size:14px;margin-top:5px;font-weight:500}.field.tall{height:144px}.callout{position:absolute;left:15px;right:15px;bottom:13px;color:#8e989f;font-size:11px;text-align:center}
+    .chatcontent{height:calc(100% - 191px);padding:14px 12px 4px;overflow:hidden}.message{display:flex;gap:8px;align-items:flex-start;margin-bottom:13px}.message.persona{flex-direction:row-reverse}.stack{max-width:calc(100% - 48px)}.persona .stack{display:flex;flex-direction:column;align-items:flex-end}.speaker{margin:0 8px 4px;color:var(--muted);font-size:11px}.bubble{max-width:292px;padding:11px 13px;border-radius:16px 16px 16px 3px;background:var(--high);color:#ded9de;font-size:13px;line-height:1.43}.persona .bubble{border-radius:16px 16px 3px 16px;background:var(--persona);color:#f0e9e2}.bubble em{color:#c5bdc6}.variant{margin:5px 8px 0;color:#8f9aa3;font-size:10px}
+    .composer{position:absolute;inset:auto 0 0;min-height:98px;padding:10px 12px 15px;background:#151d24;border-top:1px solid #2c3740}.composebox{height:52px;border-radius:17px;background:var(--surface);border:1px solid #424e58;display:grid;grid-template-columns:36px 1fr 42px;align-items:center;padding:0 7px;color:#8f99a1;font-size:12px}.send{width:36px;height:36px;display:grid;place-items:center;border-radius:12px;background:var(--accent);color:var(--accentInk);font-size:18px}
+    .groupstrip{display:flex;align-items:center;gap:8px;margin:0 0 12px;padding:8px 9px;border-radius:14px;background:var(--surface);border:1px solid #36414a}.groupstrip .avatar{width:31px;height:31px;border-radius:9px;font-size:12px}.groupstrip span{font-size:11px;color:var(--muted)}.groupstrip strong{color:var(--accent)}
+  </style>
+</head>
+<body>
+<main class="board">
+  <header class="head"><div><h1>Elsewhere - local profile portraits</h1><div class="sub">Corrected approval mockup - existing list actions and five-tab navigation are preserved.</div></div><div class="legend">Illustrative portraits only - not user-selected art</div></header>
+  <section class="phones">
+    <article><div class="label">1 - Persona / Character lists</div><div class="phone">
+      <div class="status"><span>9:41</span><span>Wi-Fi&nbsp;&nbsp;100%</span></div><div class="top center"><h2>Personas</h2></div>
+      <div class="content withnav">
+        <div class="card"><div class="avatar list a" aria-label="illustrative portrait"></div><div class="copy"><div class="name">Mara - Wayfarer</div><div class="desc">Mara Venn - aliases: Mars</div></div><div class="action">&#9998;</div><div class="action delete">&#128465;</div></div>
+        <div class="card"><div class="avatar list c" aria-label="illustrative portrait"></div><div class="copy"><div class="name">Talia - Archive AU</div><div class="desc">Talia Rowan</div></div><div class="action">&#9998;</div><div class="action delete">&#128465;</div></div>
+        <div class="card"><div class="avatar list">EV</div><div class="copy"><div class="name">Evelyn - Canon</div><div class="desc">No portrait - initials fallback</div></div><div class="action">&#9998;</div><div class="action delete">&#128465;</div></div>
+      </div>
+      <div class="fab new"><span>+</span><span>New Persona</span></div><div class="fab import"><span>+</span><span>Import JSON</span></div>
+      <div class="nav"><div class="navitem"><b>&#8962;</b>Home</div><div class="navitem"><b>&#9787;</b>Characters</div><div class="navitem active"><b>&#9823;</b>Personas</div><div class="navitem"><b>&#9776;</b>Lorebooks</div><div class="navitem"><b>&#8942;</b>More</div></div>
+    </div></article>
+    <article><div class="label">2 - Profile editor control</div><div class="phone">
+      <div class="status"><span>9:41</span><span>Wi-Fi&nbsp;&nbsp;100%</span></div><div class="top"><span class="icon">&lsaquo;</span><h2>Edit Character</h2><span class="spacer"></span><span class="save">Save</span></div>
+      <div class="content"><div class="editorcard"><div class="editorrow"><div class="avatar editor b" aria-label="illustrative portrait"></div><div><div class="eyebrow">Profile picture</div><div class="note">Stored only on this device. Display-only; never added to model context or JSON export.</div><div class="buttons"><div class="button">Replace image</div><div class="button remove">Remove</div></div></div></div><div class="field">Name<strong>Cael - North Harbor</strong></div><div class="field">Short Backstory<strong>Keeper of the midnight archive.</strong></div><div class="field tall">Initial Message<strong>&quot;You found the door after all.&quot;</strong></div><div class="field">System Instructions<strong>Portray Cael only.</strong></div></div><div class="callout">Picker cancellation keeps the current portrait unchanged.</div></div>
+    </div></article>
+    <article><div class="label">3 - Solo chat</div><div class="phone">
+      <div class="status"><span>9:41</span><span>Wi-Fi&nbsp;&nbsp;100%</span></div><div class="top"><span class="icon">&lsaquo;</span><h2>North Harbor</h2><span class="spacer"></span><span class="icon">&#9881;</span></div>
+      <div class="chatcontent"><div class="message"><div class="avatar chat b"></div><div class="stack"><div class="speaker">Cael</div><div class="bubble"><em>The archive door yields with a hush of old hinges.</em> &quot;You found the door after all.&quot;</div></div></div><div class="message persona"><div class="avatar chat a"></div><div class="stack"><div class="speaker">Mara</div><div class="bubble">&quot;I nearly turned back.&quot; She keeps one hand on the doorframe.</div></div></div><div class="message"><div class="avatar chat b"></div><div class="stack"><div class="speaker">Cael</div><div class="bubble">His expression softens. &quot;But you didn't.&quot;</div><div class="variant">&lsaquo; 1 / 2 &rsaquo;</div></div></div></div>
+      <div class="composer"><div class="composebox"><span>+</span><span>Write as Mara.</span><div class="send">&#10148;</div></div></div>
+    </div></article>
+    <article><div class="label">4 - Ordinary Group chat</div><div class="phone">
+      <div class="status"><span>9:41</span><span>Wi-Fi&nbsp;&nbsp;100%</span></div><div class="top"><span class="icon">&lsaquo;</span><h2>Midnight Council</h2><span class="spacer"></span><span class="icon">&#9881;</span></div>
+      <div class="chatcontent"><div class="groupstrip"><div class="avatar b"></div><div class="avatar d"></div><span>Next: <strong>Cael</strong> - choose character</span></div><div class="message"><div class="avatar chat b"></div><div class="stack"><div class="speaker">Cael</div><div class="bubble">&quot;We should hear her account before deciding.&quot;</div></div></div><div class="message"><div class="avatar chat d"></div><div class="stack"><div class="speaker">Ilyra</div><div class="bubble">Ilyra folds the map. &quot;Then let her speak.&quot;</div></div></div><div class="message persona"><div class="avatar chat a"></div><div class="stack"><div class="speaker">Mara</div><div class="bubble">&quot;The east gate was already open when I arrived.&quot;</div></div></div><div class="message"><div class="avatar chat">N</div><div class="stack"><div class="speaker">Narrator</div><div class="bubble"><em>Rain taps steadily against the high windows.</em></div></div></div></div>
+      <div class="composer"><div class="composebox"><span>+</span><span>Write as Mara.</span><div class="send">&#10148;</div></div></div>
+    </div></article>
+  </section>
+</main>
+</body>
+</html>

@@ -7,6 +7,7 @@ import com.example.data.AppDatabase
 import com.example.data.model.MessageEntity
 import com.example.data.model.SpeakerType
 import com.example.domain.memory.AutomaticMemoryManager
+import com.example.domain.memory.ContextResetPolicy
 import com.example.domain.repository.MemoryRepository
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -82,5 +83,85 @@ class AutomaticMemoryManagerTest {
 
         assertTrue(repository.getMemoriesOnce("chat-1", "character-1").isEmpty())
     }
-}
 
+    @Test
+    fun manualConversationUpdateDeduplicatesAndKeepsCharacterKnowledgeAsymmetric() = runBlocking {
+        val manager = AutomaticMemoryManager(repository, recentMessageLimit = 1)
+        val messages = listOf(
+            MessageEntity(
+                messageId = "persona-1",
+                chatId = "chat-1",
+                speakerType = SpeakerType.PERSONA,
+                speakerId = "persona-1",
+                speakerDisplayNameSnapshot = "Mara",
+                content = "I prefer jasmine tea.",
+                orderIndex = 1L
+            ),
+            MessageEntity(
+                messageId = "character-1",
+                chatId = "chat-1",
+                speakerType = SpeakerType.CHARACTER,
+                speakerId = "character-a",
+                speakerDisplayNameSnapshot = "Rowan",
+                content = "I'll remember.",
+                orderIndex = 2L
+            ),
+            MessageEntity(
+                messageId = "persona-2",
+                chatId = "chat-1",
+                speakerType = SpeakerType.PERSONA,
+                speakerId = "persona-1",
+                speakerDisplayNameSnapshot = "Mara",
+                content = "Remember that the brass key opens the observatory.",
+                orderIndex = 3L
+            )
+        )
+
+        val first = manager.updateFromConversation("chat-1", "character-a", messages)
+        val second = manager.updateFromConversation("chat-1", "character-a", messages)
+
+        assertEquals(2, first.savedMemoryCount)
+        assertTrue(first.rollingSummaryUpdated)
+        assertEquals(0, second.savedMemoryCount)
+        assertTrue(second.rollingSummaryUpdated)
+        assertEquals(2, repository.getMemoriesOnce("chat-1", "character-a").size)
+        assertTrue(repository.getMemoriesOnce("chat-1", "character-b").isEmpty())
+    }
+
+    @Test
+    fun rollingSummaryAfterWackCannotRebuildFromPreResetHistory() = runBlocking {
+        val manager = AutomaticMemoryManager(repository, recentMessageLimit = 2)
+        val preReset = MessageEntity(
+            messageId = "pre-reset",
+            chatId = "chat-1",
+            speakerType = SpeakerType.PERSONA,
+            speakerId = "persona-1",
+            speakerDisplayNameSnapshot = "Mara",
+            content = "PRE_RESET_SECRET_MARKER",
+            orderIndex = 5L
+        )
+        val postReset = (11L..15L).map { order ->
+            MessageEntity(
+                messageId = "post-reset-$order",
+                chatId = "chat-1",
+                speakerType = if (order % 2L == 1L) SpeakerType.PERSONA else SpeakerType.CHARACTER,
+                speakerId = if (order % 2L == 1L) "persona-1" else "character-1",
+                speakerDisplayNameSnapshot = if (order % 2L == 1L) "Mara" else "Rowan",
+                content = "POST_RESET_TURN_$order",
+                orderIndex = order
+            )
+        }
+        val eligible = ContextResetPolicy.eligiblePrimaryMessages(
+            listOf(preReset) + postReset,
+            boundary = 10L
+        )
+
+        val result = manager.updateFromConversation("chat-1", "character-1", eligible)
+        val summary = requireNotNull(repository.getSummaryOnce("chat-1"))
+
+        assertTrue(result.rollingSummaryUpdated)
+        assertEquals(13L, summary.summarizedThroughOrderIndex)
+        assertTrue(summary.summary.contains("POST_RESET_TURN_11"))
+        assertFalse(summary.summary.contains("PRE_RESET_SECRET_MARKER"))
+    }
+}

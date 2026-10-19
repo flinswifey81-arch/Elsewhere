@@ -10,6 +10,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Face
 import androidx.compose.material3.*
@@ -23,16 +24,23 @@ import androidx.compose.ui.unit.dp
 import com.example.data.model.ManualPersonaFields
 import com.example.data.model.PersonaEntity
 import com.example.domain.repository.PersonaRepository
+import com.example.domain.repository.ProfileImageKind
+import com.example.domain.repository.ProfileImageRepository
+import com.example.domain.repository.ProfileDeletionResult
 import com.example.ui.components.ElsewhereEmptyState
 import com.example.ui.components.elsewhereCardBorder
+import com.example.ui.components.elsewhereDestructiveButtonColors
 import com.example.ui.components.elsewhereTextFieldColors
 import com.example.ui.components.elsewhereTopAppBarColors
+import com.example.ui.components.ProfileImageAvatar
+import com.example.ui.components.ProfileImageEditor
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PersonasScreen(
     repository: PersonaRepository,
+    profileImageRepository: ProfileImageRepository? = null,
     modifier: Modifier = Modifier,
     onPersonaSelected: (String) -> Unit
 ) {
@@ -46,6 +54,10 @@ fun PersonasScreen(
     var importError by remember { mutableStateOf<String?>(null) }
     var showEditor by remember { mutableStateOf(false) }
     var editingPersona by remember { mutableStateOf<PersonaEntity?>(null) }
+    var personaPendingDeletion by remember { mutableStateOf<PersonaEntity?>(null) }
+    var deletionInProgress by remember { mutableStateOf(false) }
+    var deletionNotice by remember { mutableStateOf<String?>(null) }
+    var deletionSucceeded by remember { mutableStateOf(false) }
     
     val launcher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
@@ -152,9 +164,86 @@ fun PersonasScreen(
         )
     }
 
+    personaPendingDeletion?.let { persona ->
+        AlertDialog(
+            onDismissRequest = {
+                if (!deletionInProgress) personaPendingDeletion = null
+            },
+            title = { Text("Delete Persona Permanently?") },
+            text = {
+                Text(
+                    "Permanently delete \"${persona.displayName}\"? This cannot be undone. " +
+                        "The Persona will be removed from every chat, but all historical messages " +
+                        "and speaker names will remain. A chat with no remaining Persona will become history-only."
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        deletionInProgress = true
+                        coroutineScope.launch {
+                            deletionNotice = try {
+                                when (val result = repository.deletePersonaPermanently(persona.personaId)) {
+                                    is ProfileDeletionResult.Deleted -> {
+                                        deletionSucceeded = true
+                                        if (result.affectedChatCount == 0) {
+                                            null
+                                        } else {
+                                            val chatLabel = if (result.affectedChatCount == 1) "chat" else "chats"
+                                            val historyOnly = if (result.historyOnlyChatCount == 0) "" else {
+                                                " ${result.historyOnlyChatCount} now ${if (result.historyOnlyChatCount == 1) "opens" else "open"} as history-only."
+                                            }
+                                            "Deleted \"${persona.displayName}\" and removed the Persona from " +
+                                                "${result.affectedChatCount} $chatLabel. All historical messages were kept.$historyOnly"
+                                        }
+                                    }
+                                    ProfileDeletionResult.NotFound -> {
+                                        deletionSucceeded = false
+                                        "This Persona no longer exists."
+                                    }
+                                }
+                            } catch (_: Exception) {
+                                deletionSucceeded = false
+                                "The Persona could not be deleted. No chat or message was changed."
+                            }
+                            deletionInProgress = false
+                            personaPendingDeletion = null
+                        }
+                    },
+                    enabled = !deletionInProgress,
+                    colors = elsewhereDestructiveButtonColors(),
+                    modifier = Modifier.testTag("confirm_delete_persona")
+                ) {
+                    Text(if (deletionInProgress) "Deleting…" else "Delete Permanently")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { personaPendingDeletion = null },
+                    enabled = !deletionInProgress
+                ) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    deletionNotice?.let { notice ->
+        AlertDialog(
+            onDismissRequest = { deletionNotice = null },
+            title = { Text(if (deletionSucceeded) "Persona Deleted" else "Persona Not Deleted") },
+            text = { Text(notice) },
+            confirmButton = {
+                TextButton(onClick = { deletionNotice = null }) { Text("OK") }
+            }
+        )
+    }
+
     if (showEditor) {
         ManualPersonaEditor(
             initialFields = editingPersona?.let(repository::getManualFields) ?: ManualPersonaFields(),
+            profileId = editingPersona?.personaId,
+            profileImageRepository = profileImageRepository,
             isEditing = editingPersona != null,
             onCancel = {
                 showEditor = false
@@ -271,18 +360,13 @@ fun PersonasScreen(
                         border = elsewhereCardBorder()
                     ) {
                         Row(modifier = Modifier.padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Surface(
-                                shape = RoundedCornerShape(12.dp),
-                                color = MaterialTheme.colorScheme.secondaryContainer,
-                                modifier = Modifier.size(48.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Face,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
-                                    modifier = Modifier.padding(12.dp)
-                                )
-                            }
+                            ProfileImageAvatar(
+                                repository = profileImageRepository,
+                                kind = ProfileImageKind.PERSONA,
+                                profileId = persona.personaId,
+                                displayName = persona.displayName,
+                                size = 48.dp
+                            )
                             Spacer(modifier = Modifier.width(16.dp))
                             Column(modifier = Modifier.weight(1f)) {
                                 Row(
@@ -333,6 +417,16 @@ fun PersonasScreen(
                             ) {
                                 Icon(Icons.Default.Edit, contentDescription = "Edit ${persona.displayName}")
                             }
+                            IconButton(
+                                onClick = { personaPendingDeletion = persona },
+                                modifier = Modifier.testTag("delete_persona_${persona.personaId}")
+                            ) {
+                                Icon(
+                                    Icons.Default.Delete,
+                                    contentDescription = "Delete ${persona.displayName}",
+                                    tint = MaterialTheme.colorScheme.error
+                                )
+                            }
                         }
                     }
                 }
@@ -345,6 +439,8 @@ fun PersonasScreen(
 @Composable
 private fun ManualPersonaEditor(
     initialFields: ManualPersonaFields,
+    profileId: String?,
+    profileImageRepository: ProfileImageRepository?,
     isEditing: Boolean,
     onCancel: () -> Unit,
     onSave: (ManualPersonaFields) -> Unit,
@@ -385,6 +481,13 @@ private fun ManualPersonaEditor(
                 modifier = Modifier.fillMaxSize().padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
+                ProfileImageEditor(
+                    repository = profileImageRepository,
+                    kind = ProfileImageKind.PERSONA,
+                    profileId = profileId,
+                    displayName = fields.name.ifBlank { "Persona" },
+                    modifier = Modifier.fillMaxWidth()
+                )
                 OutlinedTextField(
                     value = fields.name,
                     onValueChange = { fields = fields.copy(name = it) },
