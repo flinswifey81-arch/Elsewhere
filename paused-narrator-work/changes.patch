@@ -1,0 +1,1258 @@
+diff --git a/app/src/main/java/com/example/data/model/MessageEntity.kt b/app/src/main/java/com/example/data/model/MessageEntity.kt
+index 4b5f135..fc14c7f 100644
+--- a/app/src/main/java/com/example/data/model/MessageEntity.kt
++++ b/app/src/main/java/com/example/data/model/MessageEntity.kt
+@@ -5,7 +5,7 @@ import androidx.room.Index
+ import androidx.room.PrimaryKey
+ import java.util.UUID
+ 
+-enum class SpeakerType { PERSONA, CHARACTER, SYSTEM, DIRECTOR }
++enum class SpeakerType { PERSONA, CHARACTER, SYSTEM, DIRECTOR, NPC, NARRATOR }
+ 
+ @Entity(
+     tableName = "messages",
+diff --git a/app/src/main/java/com/example/domain/compiler/ContextCompilerV1.kt b/app/src/main/java/com/example/domain/compiler/ContextCompilerV1.kt
+index c32ab86..aba990a 100644
+--- a/app/src/main/java/com/example/domain/compiler/ContextCompilerV1.kt
++++ b/app/src/main/java/com/example/domain/compiler/ContextCompilerV1.kt
+@@ -187,12 +187,15 @@ class ContextCompilerV1 {
+         
+         messages.add(RoleplayMessage(role = Role.SYSTEM, content = coreInstruction))
+         
++        val labelSpeakers = groupParticipantNames.isNotEmpty() || (chatHistory + currentMessage).any {
++            it.speakerType == SpeakerType.NPC || it.speakerType == SpeakerType.NARRATOR
++        }
+         // Older messages are represented by the persisted rolling summary. Keep recent turns verbatim.
+         val trimmedHistory = chatHistory.filter { it.isPrimaryVariant }.takeLast(recentMessageLimit)
+         
+         for (msg in trimmedHistory) {
+             val role = when (msg.speakerType) {
+-                SpeakerType.CHARACTER -> Role.ASSISTANT
++                SpeakerType.CHARACTER, SpeakerType.NPC, SpeakerType.NARRATOR -> Role.ASSISTANT
+                 SpeakerType.PERSONA -> Role.USER
+                 else -> Role.SYSTEM
+             }
+@@ -200,7 +203,7 @@ class ContextCompilerV1 {
+             messages.add(
+                 RoleplayMessage(
+                     role = role,
+-                    content = if (groupParticipantNames.isEmpty()) content else "${msg.speakerDisplayNameSnapshot}: $content",
++                    content = if (!labelSpeakers) content else "${msg.speakerDisplayNameSnapshot}: $content",
+                     sourceMessageId = msg.messageId
+                 )
+             )
+@@ -208,7 +211,7 @@ class ContextCompilerV1 {
+         
+         // Add current message
+         val role = when (currentMessage.speakerType) {
+-            SpeakerType.CHARACTER -> Role.ASSISTANT
++            SpeakerType.CHARACTER, SpeakerType.NPC, SpeakerType.NARRATOR -> Role.ASSISTANT
+             SpeakerType.PERSONA -> Role.USER
+             else -> Role.SYSTEM
+         }
+@@ -216,7 +219,7 @@ class ContextCompilerV1 {
+         messages.add(
+             RoleplayMessage(
+                 role = role,
+-                content = if (groupParticipantNames.isEmpty()) {
++                content = if (!labelSpeakers) {
+                     currentContent
+                 } else {
+                     "${currentMessage.speakerDisplayNameSnapshot}: $currentContent"
+diff --git a/app/src/main/java/com/example/domain/repository/NpcRepository.kt b/app/src/main/java/com/example/domain/repository/NpcRepository.kt
+index 1a5ddaa..8011480 100644
+--- a/app/src/main/java/com/example/domain/repository/NpcRepository.kt
++++ b/app/src/main/java/com/example/domain/repository/NpcRepository.kt
+@@ -86,8 +86,10 @@ class NpcRepository(
+         }
+     }
+ 
+-    suspend fun getProjectedDossiers(chatId: String): List<NpcDossier> = withContext(Dispatchers.IO) {
+-        project(dao.getDossiers(chatId), dao.getUpdates(chatId))
++    suspend fun getProjectedDossiers(chatId: String, asOfOrderIndex: Long? = null): List<NpcDossier> = withContext(Dispatchers.IO) {
++        project(dao.getDossiers(chatId), dao.getUpdates(chatId).filter {
++            asOfOrderIndex == null || it.sourceOrderIndex <= asOfOrderIndex
++        })
+     }
+ 
+     suspend fun saveManual(dossier: NpcDossier) = dataCoordinator.withMutation {
+@@ -344,7 +346,8 @@ class NpcRepository(
+         activePersonaId: String? = null,
+         isGroup: Boolean = false,
+         asOfOrderIndex: Long? = null,
+-        limit: Int = 3
++        limit: Int = 3,
++        includeStorytellerContinuity: Boolean = true
+     ): String? =
+         withContext(Dispatchers.IO) {
+             val bases = dao.getDossiers(chatId)
+@@ -362,12 +365,14 @@ class NpcRepository(
+                         .findAll(recentText).count() * 20
+                 }
+                 NpcContextSelection(dossier, mentionScore + if (dossier.keepInScene) 1000 else 0)
+-            }.sortedWith(compareByDescending<NpcContextSelection> { it.score }.thenByDescending { it.dossier.updatedAt })
++            }.filter { it.score > 0 }
++                .sortedWith(compareByDescending<NpcContextSelection> { it.score }.thenByDescending { it.dossier.updatedAt })
+                 .take(limit.coerceIn(1, 8))
+             selected.joinToString("\n\n") { selection ->
+                 with(selection.dossier) {
+                     buildString {
+                         append("[NPC id=").append(npcId).append("]\n")
++                        if (includeStorytellerContinuity) {
+                         append("[STORYTELLER CONTINUITY — NOT AUTOMATIC SPEAKER KNOWLEDGE]\n")
+                         append("Name: ").append(displayName).append('\n')
+                         if (aliases.isNotEmpty()) append("Aliases: ").append(aliases.joinToString(", ")).append('\n')
+@@ -385,6 +390,9 @@ class NpcRepository(
+                         .append(secrets)
+                         .append('\n')
+                 }
++                        } else {
++                            append("Name: ").append(displayName).append('\n')
++                        }
+                         observerCharacterId?.let(characterKnowledge::get)?.takeIf(String::isNotBlank)?.let { known ->
+                             append("[SPEAKER-AUTHORIZED KNOWLEDGE FOR RESPONDING CHARACTER]\n")
+                             append(known).append('\n')
+diff --git a/app/src/main/java/com/example/ui/screens/ChatDetailScreen.kt b/app/src/main/java/com/example/ui/screens/ChatDetailScreen.kt
+index 99304dc..07fdf36 100644
+--- a/app/src/main/java/com/example/ui/screens/ChatDetailScreen.kt
++++ b/app/src/main/java/com/example/ui/screens/ChatDetailScreen.kt
+@@ -44,6 +44,7 @@ import androidx.compose.ui.text.AnnotatedString
+ import androidx.compose.ui.unit.dp
+ import androidx.lifecycle.viewmodel.compose.viewModel
+ import com.example.data.model.MessageEntity
++import com.example.domain.npc.GenerationSpeaker
+ import com.example.data.model.SpeakerType
+ import com.example.data.model.ChatType
+ import com.example.data.model.MessageAttachmentEntity
+@@ -261,7 +262,7 @@ fun ChatDetailScreen(
+                                 }
+                             }
+                         }
+-                        val hasStreamingItem = state.isGenerating || state.partialStopped
++                        val hasStreamingItem = (state.isGenerating || state.automaticTurnRunning) || state.partialStopped
+                         AutoScrollingChatColumn(
+                             conversationKey = chatId,
+                             historyLoaded = state.historyLoaded,
+@@ -278,7 +279,7 @@ fun ChatDetailScreen(
+                                     profileImageRepository = appContainer.profileImageRepository,
+                                     attachments = state.attachments.filter { it.messageId == group.primaryMessage.messageId },
+                                     attachmentFile = { attachment -> appContainer.messageAttachmentRepository?.resolveFile(attachment) },
+-                                    mutationsEnabled = !state.isGenerating &&
++                                    mutationsEnabled = !(state.isGenerating || state.automaticTurnRunning) &&
+                                         !state.partialStopped && !state.partialResolutionInProgress,
+                                     onSwitchVariant = { msgId -> viewModel.switchVariant(group.primaryMessage.variantGroupId ?: group.primaryMessage.messageId, msgId) },
+                                     onRegenerate = { viewModel.regenerateMessage(it) },
+@@ -311,7 +312,7 @@ fun ChatDetailScreen(
+                                         characterId = state.generationCharacterId
+                                             ?: state.chatSummary.characters.firstOrNull()?.characterId,
+                                         profileImageRepository = appContainer.profileImageRepository,
+-                                        characterName = generationCharacterName
++                                        characterName = state.generationSpeakerName ?: generationCharacterName
+                                             ?: state.chatSummary.characters.firstOrNull()?.displayName
+                                             ?: "Character"
+                                     )
+@@ -328,7 +329,7 @@ fun ChatDetailScreen(
+                                 characters = state.groupCharacters,
+                                 availableCharacters = state.availableGroupCharacters,
+                                 selectedCharacterId = state.selectedGroupCharacterId,
+-                                isGenerating = state.isGenerating,
++                                isGenerating = (state.isGenerating || state.automaticTurnRunning),
+                                 canGenerate = state.messages.any { it.isPrimaryVariant },
+                                 onSelectCharacter = viewModel::selectGroupCharacter,
+                                 onGenerate = viewModel::generateGroupResponse,
+@@ -339,6 +340,10 @@ fun ChatDetailScreen(
+                             )
+                         }
+ 
++                        if (!isHistoryOnly && !state.partialStopped && (state.chatSettings.narratorEnabled || state.npcBankEnabled)) {
++                            SupportingSpeakerControls(state, viewModel::generateSpeaker)
++                        }
++
+                         if (isHistoryOnly) {
+                             HistoryOnlyChatNotice()
+                         } else if (state.partialStopped) {
+@@ -417,7 +422,7 @@ fun ChatDetailScreen(
+                                                 )
+                                             )
+                                         },
+-                                        enabled = !state.isGenerating && state.draftAttachments.size < 4
++                                        enabled = !(state.isGenerating || state.automaticTurnRunning) && state.draftAttachments.size < 4
+                                     ) {
+                                         Icon(Icons.Filled.AddPhotoAlternate, contentDescription = "Attach image")
+                                     }
+@@ -432,14 +437,14 @@ fun ChatDetailScreen(
+                                             enabled = true
+                                     )
+                                     Spacer(modifier = Modifier.width(8.dp))
+-                                    if (state.isGenerating) {
++                                    if ((state.isGenerating || state.automaticTurnRunning)) {
+                                         IconButton(onClick = { viewModel.stopGeneration() }) {
+                                             Icon(Icons.Filled.Stop, contentDescription = "Stop Generation", tint = MaterialTheme.colorScheme.error)
+                                         }
+                                     } else {
+                                         val isGroup = state.chatSummary.chat.chatType == ChatType.GROUP
+                                         val canSend = draft.isNotBlank() || state.draftAttachments.isNotEmpty() ||
+-                                            (!isGroup && state.messages.lastOrNull()?.speakerType == SpeakerType.PERSONA)
++                                            (!isGroup && state.messages.lastOrNull()?.speakerType == SpeakerType.PERSONA) || state.generationError != null
+                                         IconButton(
+                                             onClick = {
+                                                 if (draft.isNotBlank() || state.draftAttachments.isNotEmpty()) viewModel.sendMessage()
+@@ -578,6 +583,32 @@ private fun HistoryOnlyChatNotice() {
+     }
+ }
+ 
++@Composable
++internal fun SupportingSpeakerControls(state: ChatUiState.Success, onGenerate: (GenerationSpeaker) -> Unit) {
++    var expanded by remember { mutableStateOf(false) }
++    val speakers = buildList {
++        if (state.chatSettings.narratorEnabled) add(GenerationSpeaker.narrator(state.chatSummary.chat.chatId))
++        if (state.npcBankEnabled) state.npcDossiers.forEach { add(GenerationSpeaker(it.npcId, it.displayName, SpeakerType.NPC)) }
++        if (state.chatSummary.chat.chatType != ChatType.GROUP) state.chatSummary.characters.forEach {
++            add(GenerationSpeaker(it.characterId, it.displayName, SpeakerType.CHARACTER))
++        }
++    }
++    Box(Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
++        TextButton(
++            onClick = { expanded = true },
++            enabled = !state.isGenerating && !state.automaticTurnRunning && state.historyLoaded && state.messages.any { it.isPrimaryVariant }
++        ) { Text("Choose next speaker") }
++        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
++            speakers.forEach { speaker ->
++                DropdownMenuItem(
++                    text = { Text("${speaker.name} · ${speaker.type.name.lowercase().replaceFirstChar { it.uppercase() }}") },
++                    onClick = { expanded = false; onGenerate(speaker) }
++                )
++            }
++        }
++    }
++}
++
+ @Composable
+ internal fun GroupCharacterControls(
+     characters: List<GroupCharacterState>,
+diff --git a/app/src/main/java/com/example/ui/screens/ChatDetailViewModel.kt b/app/src/main/java/com/example/ui/screens/ChatDetailViewModel.kt
+index 948d449..078095f 100644
+--- a/app/src/main/java/com/example/ui/screens/ChatDetailViewModel.kt
++++ b/app/src/main/java/com/example/ui/screens/ChatDetailViewModel.kt
+@@ -25,11 +25,16 @@ import com.example.domain.coop.CoopCharacterRosterItem
+ import com.example.domain.coop.CoopCharacterRosterPayload
+ import com.example.data.model.CoopRole
+ import com.example.data.model.CoopConnectionState
++import com.example.domain.provider.Role
+ import com.example.domain.provider.GenerationOptions
+ import com.example.domain.provider.ModelProvider
+ import com.example.domain.provider.ModelRouting
+ import com.example.domain.provider.RoleplayMessage
+ import com.example.domain.provider.StreamEvent
++import com.example.domain.compiler.SupportingCastContextCompiler
++import com.example.domain.npc.GenerationSpeaker
++import com.example.domain.npc.SupportingCastPlanner
++import com.example.data.model.NpcDossier
+ import com.example.domain.npc.NpcStructuredOutputParser
+ import com.example.domain.repository.CharacterRepository
+ import com.example.domain.repository.ChatRepository
+@@ -77,7 +82,7 @@ data class InChatToolStatus(
+ )
+ 
+ private data class PreparedGeneration(
+-    val character: CharacterEntity,
++    val speaker: GenerationSpeaker,
+     val messages: List<RoleplayMessage>,
+     val options: GenerationOptions,
+     val npcBankEnabled: Boolean = false,
+@@ -85,7 +90,7 @@ private data class PreparedGeneration(
+ )
+ 
+ private data class PendingPartialGeneration(
+-    val character: CharacterEntity,
++    val speaker: GenerationSpeaker,
+     val variantGroupId: String?,
+     val sourceMessage: MessageEntity,
+     val contextMessages: List<MessageEntity>,
+@@ -122,6 +127,10 @@ sealed class ChatUiState {
+         val groupParticipantsLoaded: Boolean = false,
+         val selectedGroupCharacterId: String? = null,
+         val generationCharacterId: String? = null,
++        val generationSpeakerName: String? = null,
++        val automaticTurnRunning: Boolean = false,
++        val npcBankEnabled: Boolean = false,
++        val npcDossiers: List<NpcDossier> = emptyList(),
+         val isGenerating: Boolean = false,
+         val streamingContent: String? = null,
+         val partialStopped: Boolean = false,
+@@ -160,6 +169,10 @@ class ChatDetailViewModel(
+     private var currentChatSettings: ChatSettingsEntity? = null
+     private var selectedGroupCharacterId: String? = null
+     private var generationJob: Job? = null
++    private var automaticJob: Job? = null
++    private val automaticQueue = java.util.ArrayDeque<GenerationSpeaker>()
++    private var retrySpeaker: GenerationSpeaker? = null
++    private var lastGenerationSucceeded = false
+     private var sendJob: Job? = null
+     private var loadJob: Job? = null
+     private var pendingPartialGeneration: PendingPartialGeneration? = null
+@@ -291,6 +304,15 @@ class ChatDetailViewModel(
+                 }
+             }
+ 
++            npcRepository?.let { repository ->
++                launch { repository.observeProjectedDossiers(chatId).collect { dossiers ->
++                    updateSuccessState { it.copy(npcDossiers = dossiers) }
++                } }
++                launch { repository.observeSettings(chatId).collect { settings ->
++                    updateSuccessState { it.copy(npcBankEnabled = settings?.isEnabled == true) }
++                } }
++            }
++
+             messageAttachmentRepository?.let { repository ->
+                 launch { runCatching { repository.reconcileOrphanFiles() } }
+                 launch {
+@@ -325,6 +347,9 @@ class ChatDetailViewModel(
+     }
+ 
+     private fun invalidateForDataReplacement() {
++        automaticQueue.clear()
++        automaticJob?.cancel()
++        retrySpeaker = null
+         generationJob?.cancel()
+         generationJob = null
+         sendJob?.cancel()
+@@ -349,7 +374,7 @@ class ChatDetailViewModel(
+         messages: List<MessageEntity>
+     ): List<MessageEntity> =
+         messages.map { message ->
+-            if (message.speakerType == SpeakerType.CHARACTER) {
++            if (message.speakerType in setOf(SpeakerType.CHARACTER, SpeakerType.NPC, SpeakerType.NARRATOR)) {
+                 message.copy(content = NpcStructuredOutputParser.finalVisibleStoryText(message.content))
+             } else message
+         }
+@@ -467,7 +492,7 @@ class ChatDetailViewModel(
+         val blockedMessage = when {
+             !state.historyLoaded -> "Wait for chat history to finish loading."
+             sendInProgress -> "Wait for the pending message save to finish."
+-            state.isGenerating || generationStartInProgress || generationJob?.isActive == true ->
++            (state.isGenerating || state.automaticTurnRunning) || generationStartInProgress || generationJob?.isActive == true ->
+                 "Wait for generation to finish before using this tool."
+             state.partialStopped || pendingPartialGeneration != null ->
+                 "Keep or discard the unresolved partial reply before using this tool."
+@@ -547,6 +572,8 @@ class ChatDetailViewModel(
+         }
+ 
+         val dataRevision = dataCoordinator.captureRevision()
++        retrySpeaker = null
++        automaticQueue.clear()
+         sendInProgress = true
+         sendJob = viewModelScope.launch {
+             val localParticipant = coopRoom?.let { room ->
+@@ -609,7 +636,7 @@ class ChatDetailViewModel(
+ 
+             sendInProgress = false
+             updateSuccessState { it.copy(generationError = null) }
+-            if (summary.chat.chatType == ChatType.GROUP) {
++            if (summary.chat.chatType == ChatType.GROUP && (currentChatSettings?.narratorEnabled != true || coopRoom != null)) {
+                 dataCoordinator.withMutation(dataRevision) {
+                     chatRepository.updateChat(summary.chat.copy(updatedAt = System.currentTimeMillis()))
+                 }
+@@ -629,7 +656,7 @@ class ChatDetailViewModel(
+ 
+     fun addDraftImage(uri: android.net.Uri) {
+         val state = _uiState.value as? ChatUiState.Success ?: return
+-        if (state.isGenerating) return
++        if ((state.isGenerating || state.automaticTurnRunning)) return
+         if (coopSessionManager?.state?.value?.room?.chatId == chatId) {
+             updateSuccessState {
+                 it.copy(generationError = "Image attachments are unavailable in local co-op until media sync is implemented.")
+@@ -668,12 +695,18 @@ class ChatDetailViewModel(
+         dataRevision: AppDataRevision = dataCoordinator.captureRevision()
+     ) {
+         val currentState = _uiState.value as? ChatUiState.Success ?: return
+-        if (inChatToolInProgress || generationStartInProgress || currentState.isGenerating) return
++        if (inChatToolInProgress || generationStartInProgress || (currentState.isGenerating || currentState.automaticTurnRunning)) return
+         generationStartInProgress = true
+         try {
+             val state = _uiState.value as? ChatUiState.Success ?: return
+             val history = state.messages.filter { it.isPrimaryVariant && it.messageId != userMsg.messageId }
+-            startGenerationInternal(userMsg, history, dataRevision = dataRevision)
++            if (currentChatSettings?.narratorEnabled == true && !hasCoopRoom()) {
++                automaticQueue.clear()
++                automaticQueue.add(GenerationSpeaker.narrator(chatId))
++                runAutomaticQueue(dataRevision)
++            } else {
++                startGenerationInternal(userMsg, history, dataRevision = dataRevision)
++            }
+         } finally {
+             generationStartInProgress = false
+         }
+@@ -683,7 +716,7 @@ class ChatDetailViewModel(
+         val state = _uiState.value as? ChatUiState.Success ?: return
+         if (
+             state.chatSummary.chat.chatType != ChatType.GROUP ||
+-            state.isGenerating ||
++            (state.isGenerating || state.automaticTurnRunning) ||
+             generationStartInProgress ||
+             inChatToolInProgress
+         ) return
+@@ -695,7 +728,7 @@ class ChatDetailViewModel(
+ 
+     fun setGroupCharacterActive(characterId: String, isActive: Boolean) {
+         val state = _uiState.value as? ChatUiState.Success ?: return
+-        if (state.chatSummary.chat.chatType != ChatType.GROUP || state.isGenerating) return
++        if (state.chatSummary.chat.chatType != ChatType.GROUP || (state.isGenerating || state.automaticTurnRunning)) return
+         if (!canEditCoopRoster()) return
+         viewModelScope.launch {
+             chatRepository.setGroupCharacterActive(chatId, characterId, isActive)
+@@ -705,7 +738,7 @@ class ChatDetailViewModel(
+ 
+     fun moveGroupCharacter(characterId: String, direction: Int) {
+         val state = _uiState.value as? ChatUiState.Success ?: return
+-        if (state.chatSummary.chat.chatType != ChatType.GROUP || state.isGenerating) return
++        if (state.chatSummary.chat.chatType != ChatType.GROUP || (state.isGenerating || state.automaticTurnRunning)) return
+         if (direction !in setOf(-1, 1)) return
+         if (!canEditCoopRoster()) return
+         viewModelScope.launch {
+@@ -716,7 +749,7 @@ class ChatDetailViewModel(
+ 
+     fun removeGroupCharacter(characterId: String) {
+         val state = _uiState.value as? ChatUiState.Success ?: return
+-        if (state.chatSummary.chat.chatType != ChatType.GROUP || state.isGenerating) return
++        if (state.chatSummary.chat.chatType != ChatType.GROUP || (state.isGenerating || state.automaticTurnRunning)) return
+         if (!canEditCoopRoster()) return
+         viewModelScope.launch {
+             chatRepository.removeGroupCharacter(chatId, characterId)
+@@ -726,7 +759,7 @@ class ChatDetailViewModel(
+ 
+     fun addGroupCharacter(characterId: String) {
+         val state = _uiState.value as? ChatUiState.Success ?: return
+-        if (state.chatSummary.chat.chatType != ChatType.GROUP || state.isGenerating) return
++        if (state.chatSummary.chat.chatType != ChatType.GROUP || (state.isGenerating || state.automaticTurnRunning)) return
+         if (state.groupCharacters.any { it.character.characterId == characterId }) return
+         if (!canEditCoopRoster()) return
+         viewModelScope.launch {
+@@ -766,7 +799,7 @@ class ChatDetailViewModel(
+         val state = _uiState.value as? ChatUiState.Success ?: return
+         if (
+             state.chatSummary.chat.chatType != ChatType.GROUP ||
+-            state.isGenerating ||
++            (state.isGenerating || state.automaticTurnRunning) ||
+             generationStartInProgress ||
+             inChatToolInProgress
+         ) return
+@@ -815,7 +848,7 @@ class ChatDetailViewModel(
+         val manager = coopSessionManager ?: return
+         // Claim before any failure/completion side effect so duplicate retained ViewModels are inert.
+         if (!manager.tryClaimGenerationExecution(command.executionId)) return
+-        if (state.isGenerating || generationStartInProgress || inChatToolInProgress) {
++        if ((state.isGenerating || state.automaticTurnRunning) || generationStartInProgress || inChatToolInProgress) {
+             manager.finishGeneration(
+                 chatId,
+                 command.request.requestId,
+@@ -882,6 +915,126 @@ class ChatDetailViewModel(
+         }
+     }
+ 
++    private fun hasCoopRoom(): Boolean = coopSessionManager?.state?.value?.room?.chatId == chatId
++
++    /** One explicit Send permits at most narrator + two relevant NPCs + one main Character. */
++    private fun runAutomaticQueue(dataRevision: AppDataRevision) {
++        if (automaticJob?.isActive == true || hasCoopRoom()) return
++        updateSuccessState { it.copy(automaticTurnRunning = true) }
++        automaticJob = viewModelScope.launch {
++            try {
++                while (automaticQueue.isNotEmpty()) {
++                    val speaker = automaticQueue.first
++                    retrySpeaker = speaker
++                    val messages = hidePersistedNpcControlRegions(messageRepository.getMessagesForChatOnce(chatId))
++                        .filter { it.isPrimaryVariant && ContextResetPolicy.includes(it, chatSummary?.chat?.contextResetOrderIndex) }
++                    val current = messages.lastOrNull() ?: break
++                    val job = startGenerationInternal(current, messages.dropLast(1), characterId = speaker.id,
++                        speakerType = speaker.type, dataRevision = dataRevision)
++                    job?.join()
++                    if (!lastGenerationSucceeded) break
++                    retrySpeaker = null
++                    automaticQueue.pollFirst()
++                    if (speaker.type == SpeakerType.NARRATOR) {
++                        val freshHistory = hidePersistedNpcControlRegions(messageRepository.getMessagesForChatOnce(chatId))
++                            .filter { it.isPrimaryVariant && ContextResetPolicy.includes(it, chatSummary?.chat?.contextResetOrderIndex) }
++                        val summary = chatSummary ?: break
++                        val state = _uiState.value as? ChatUiState.Success ?: break
++                        if (npcRepository?.getSettings(chatId)?.isEnabled == true) {
++                            val excludedNames = (summary.characters.map { it.displayName } + summary.personas.map { it.displayName }).map { it.lowercase() }.toSet()
++                            SupportingCastPlanner.select(npcRepository.getProjectedDossiers(chatId).filter {
++                                it.displayName.lowercase() !in excludedNames
++                            }, freshHistory).forEach { npc ->
++                                automaticQueue.add(GenerationSpeaker(npc.npcId, npc.displayName, SpeakerType.NPC))
++                            }
++                        }
++                        val main = if (summary.chat.chatType == ChatType.GROUP) {
++                            state.groupCharacters.firstOrNull { it.isActive && it.character.characterId == state.selectedGroupCharacterId }?.character
++                        } else summary.characters.firstOrNull()
++                        main?.let { automaticQueue.add(GenerationSpeaker(it.characterId, it.displayName, SpeakerType.CHARACTER)) }
++                    }
++                }
++            } catch (cancelled: kotlinx.coroutines.CancellationException) {
++                throw cancelled
++            } catch (_: Exception) {
++                updateSuccessState { it.copy(generationError = "The next speaker could not start. Saved replies were kept; Retry resumes the unfinished turn.") }
++            } finally {
++                updateSuccessState { it.copy(automaticTurnRunning = false) }
++            }
++        }
++    }
++
++    fun generateSpeaker(speaker: GenerationSpeaker) {
++        val state = _uiState.value as? ChatUiState.Success ?: return
++        if (!canMutateMessageNow() || inChatToolInProgress) return
++        if (hasCoopRoom()) {
++            updateSuccessState { it.copy(generationError = "Dedicated narrator and NPC turns are available in local chats. End co-op to use them.") }
++            return
++        }
++        automaticQueue.clear()
++        generationStartInProgress = true
++        retrySpeaker = speaker
++        viewModelScope.launch {
++            try {
++                val messages = hidePersistedNpcControlRegions(messageRepository.getMessagesForChatOnce(chatId))
++                    .filter { it.isPrimaryVariant }
++                val current = messages.lastOrNull() ?: return@launch
++                val job = startGenerationInternal(current, messages.dropLast(1), characterId = speaker.id, speakerType = speaker.type)
++                job?.join()
++                if (lastGenerationSucceeded) retrySpeaker = null
++            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
++            catch (_: Exception) {
++                updateSuccessState { it.copy(generationError = "This speaker could not start. You can retry the turn.") }
++            } finally { generationStartInProgress = false }
++        }
++    }
++
++    private suspend fun prepareSupportingGeneration(
++        currentMessage: MessageEntity,
++        history: List<MessageEntity>,
++        isContinuation: Boolean,
++        speakerId: String?,
++        speakerType: SpeakerType
++    ): PreparedGeneration? {
++        check(!hasCoopRoom()) { "Dedicated supporting turns require a local chat." }
++        require(speakerType == SpeakerType.NARRATOR || speakerType == SpeakerType.NPC)
++        val settings = currentChatSettings ?: return null
++        val summary = chatSummary ?: return null
++        check(settings.providerRoutingMode != com.example.data.model.ProviderRoutingMode.LOCK || !settings.providerEndpoint.isNullOrBlank()) {
++            "Locked routing requires a selected provider endpoint."
++        }
++        val bankEnabled = npcRepository?.getSettings(chatId)?.isEnabled == true
++        val asOf = (history + currentMessage).maxOf { it.orderIndex }
++        val npc = if (speakerType == SpeakerType.NPC) {
++            check(bankEnabled) { "Enable NPC Bank to generate an NPC reply." }
++            requireNotNull(npcRepository?.getProjectedDossiers(chatId, asOf)?.firstOrNull { it.npcId == speakerId }) {
++                "This NPC is no longer available at this point in the story."
++            }
++        } else null
++        if (speakerType == SpeakerType.NARRATOR) check(settings.narratorEnabled) { "Enable the dedicated narrator in Chat Settings." }
++        val speaker = npc?.let { GenerationSpeaker(it.npcId, it.displayName, SpeakerType.NPC) }
++            ?: GenerationSpeaker.narrator(chatId)
++        val personaMessage = (history + currentMessage).lastOrNull { it.speakerType == SpeakerType.PERSONA }
++        val persona = personaRepository.getPersonaById(personaMessage?.speakerId ?: summary.personas.firstOrNull()?.personaId ?: return null)
++            ?: return null
++        val cast = if (bankEnabled && speakerType == SpeakerType.NARRATOR) npcRepository?.relevantContext(
++            chatId, history + currentMessage, activePersonaId = persona.personaId,
++            isGroup = summary.chat.chatType == ChatType.GROUP, asOfOrderIndex = asOf
++        ) else null
++        val lore = if (speakerType == SpeakerType.NARRATOR) lorebookRepository?.resolveActiveLore(
++            chatId, history, currentMessage, AutomaticMemoryManager.DEFAULT_RECENT_MESSAGE_LIMIT
++        ).orEmpty() else emptyList()
++        val rollingSummary = ContextResetPolicy.eligibleSummary(memoryRepository.getSummaryOnce(chatId), summary.chat.contextResetOrderIndex)?.summary
++        val context = SupportingCastContextCompiler().compile(speaker, npc, persona,
++            summary.characters.map { it.displayName }, settings, history, currentMessage, cast, lore,
++            rollingSummary, bankEnabled, isContinuation)
++        return PreparedGeneration(speaker, context, GenerationOptions(
++            modelId = settings.selectedModelId ?: "openrouter/auto",
++            routing = ModelRouting.fromSettings(settings.providerRoutingMode, settings.providerEndpoint),
++            temperature = settings.temperature, topP = settings.topP
++        ), npcBankEnabled = speakerType == SpeakerType.NARRATOR && bankEnabled, activePersonaId = persona.personaId)
++    }
++
+     private suspend fun startGenerationInternal(
+         currentMessage: MessageEntity,
+         history: List<MessageEntity>,
+@@ -889,9 +1042,11 @@ class ChatDetailViewModel(
+         isContinuation: Boolean = false,
+         continuationTarget: MessageEntity? = null,
+         characterId: String? = null,
++        speakerType: SpeakerType = SpeakerType.CHARACTER,
+         dataRevision: AppDataRevision = dataCoordinator.captureRevision()
+-    ) {
+-        if (inChatToolInProgress) return
++    ): Job? {
++        lastGenerationSucceeded = false
++        if (inChatToolInProgress) return null
+         val boundary = chatSummary?.chat?.contextResetOrderIndex
+         if (!ContextResetPolicy.includes(currentMessage, boundary)) {
+             updateSuccessState {
+@@ -899,17 +1054,19 @@ class ChatDetailViewModel(
+                     generationError = "This message is before the Wack context boundary. Retry, Regenerate, and Continue cannot use pre-reset messages."
+                 )
+             }
+-            return
++            return null
+         }
+         dataCoordinator.withMutation(dataRevision) { Unit }
+         val scopedHistory = history.filter { ContextResetPolicy.includes(it, boundary) }
+-        val prepared = prepareGeneration(
++        val prepared = (if (speakerType != SpeakerType.CHARACTER) {
++            prepareSupportingGeneration(currentMessage, scopedHistory, isContinuation, characterId, speakerType)
++        } else prepareGeneration(
+             currentMessage = currentMessage,
+             history = scopedHistory,
+             isContinuation = isContinuation,
+             characterId = characterId
+-        ) ?: return
+-        val fullCharacter = prepared.character
++        )) ?: return null
++        val speaker = prepared.speaker
+ 
+         updateSuccessState {
+             it.copy(
+@@ -918,7 +1075,8 @@ class ChatDetailViewModel(
+                 partialStopped = false,
+                 partialResolutionInProgress = false,
+                 generationError = null,
+-                generationCharacterId = fullCharacter.characterId
++                generationCharacterId = speaker.id,
++                generationSpeakerName = speaker.name
+             )
+         }
+         partialResolutionInProgress = false
+@@ -929,7 +1087,7 @@ class ChatDetailViewModel(
+         var wasUserStopped = false
+         var generationError: String? = null
+         pendingPartialGeneration = PendingPartialGeneration(
+-            character = fullCharacter,
++            speaker = speaker,
+             variantGroupId = variantGroupId,
+             sourceMessage = currentMessage,
+             contextMessages = scopedHistory + currentMessage,
+@@ -939,7 +1097,7 @@ class ChatDetailViewModel(
+             dataRevision = dataRevision
+         )
+         
+-        generationJob = viewModelScope.launch {
++        val job = viewModelScope.launch {
+             // Generation preparation is complete once the provider job starts. Clear this before
+             // any terminal UI state can be published so an immediately tapped Retry is not lost.
+             generationStartInProgress = false
+@@ -1029,10 +1187,10 @@ class ChatDetailViewModel(
+                 } else {
+                     com.example.domain.npc.ParsedNpcOutput(generatedContent)
+                 }
+-                saveGeneratedMessage(
++                lastGenerationSucceeded = saveGeneratedMessage(
+                     content = parsed.storyText,
+                     metadata = currentMetadata,
+-                    character = fullCharacter,
++                    speaker = speaker,
+                     variantGroupId = variantGroupId,
+                     sourceMessage = currentMessage,
+                     contextMessages = scopedHistory + currentMessage,
+@@ -1044,6 +1202,8 @@ class ChatDetailViewModel(
+                 )
+             }
+         }
++        generationJob = job
++        return job
+     }
+ 
+     private suspend fun prepareGeneration(
+@@ -1099,15 +1259,18 @@ class ChatDetailViewModel(
+             recentMessageLimit = AutomaticMemoryManager.DEFAULT_RECENT_MESSAGE_LIMIT
+         ).orEmpty()
+         val activeCoopRoom = coopSessionManager?.state?.value?.room?.takeIf { it.chatId == chatId }
+-        val npcBankEnabled = activeCoopRoom == null && npcRepository?.getSettings(chatId)?.isEnabled == true
+-        val supportingCast = if (npcBankEnabled) {
++        val bankEnabled = activeCoopRoom == null && npcRepository?.getSettings(chatId)?.isEnabled == true
++        val dedicatedNarrator = settings.narratorEnabled && activeCoopRoom == null
++        val npcBankEnabled = bankEnabled && !dedicatedNarrator
++        val supportingCast = if (bankEnabled) {
+             npcRepository?.relevantContext(
+                 chatId = chatId,
+                 recentMessages = history + currentMessage,
+                 observerCharacterId = fullCharacter.characterId,
+                 activePersonaId = fullPersona.personaId,
+                 isGroup = summary.chat.chatType == ChatType.GROUP,
+-                asOfOrderIndex = (history + currentMessage).maxOfOrNull { it.orderIndex }
++                asOfOrderIndex = (history + currentMessage).maxOfOrNull { it.orderIndex },
++                includeStorytellerContinuity = !dedicatedNarrator
+             )
+         } else null
+ 
+@@ -1134,7 +1297,7 @@ class ChatDetailViewModel(
+                 activeLore = activeLore,
+                 supportingCastContext = supportingCast,
+                 npcBankEnabled = npcBankEnabled,
+-                narratorEnabled = settings.narratorEnabled,
++                narratorEnabled = settings.narratorEnabled && !dedicatedNarrator,
+                 narratorInstructions = settings.narratorInstructions
+             )
+         } else {
+@@ -1153,7 +1316,7 @@ class ChatDetailViewModel(
+                 activeLore = activeLore,
+                 supportingCastContext = supportingCast,
+                 npcBankEnabled = npcBankEnabled,
+-                narratorEnabled = settings.narratorEnabled,
++                narratorEnabled = settings.narratorEnabled && !dedicatedNarrator,
+                 narratorInstructions = settings.narratorInstructions
+             )
+         }
+@@ -1182,7 +1345,10 @@ class ChatDetailViewModel(
+                 true -> Unit
+             }
+         }
+-        val providerMessages = if (currentImages.isEmpty()) contextMessages else contextMessages.map { message ->
++        val speakerContext = if (dedicatedNarrator) contextMessages + RoleplayMessage(
++            Role.SYSTEM, "Respond only as ${fullCharacter.displayName}. Narration and NPC dialogue have separate speakers. Never write another speaker's dialogue or actions."
++        ) else contextMessages
++        val providerMessages = if (currentImages.isEmpty()) speakerContext else speakerContext.map { message ->
+             if (message.sourceMessageId == imageSourceMessage?.messageId) message.copy(images = currentImages) else message
+         }
+ 
+@@ -1197,7 +1363,7 @@ class ChatDetailViewModel(
+             // small completion-token cap can exhaust the budget on reasoning before visible text.
+             maxTokens = null
+         )
+-        return PreparedGeneration(fullCharacter, providerMessages, options, npcBankEnabled, fullPersona.personaId)
++        return PreparedGeneration(GenerationSpeaker(fullCharacter.characterId, fullCharacter.displayName, SpeakerType.CHARACTER), providerMessages, options, npcBankEnabled, fullPersona.personaId)
+     }
+ 
+     private suspend fun resolveCoopGenerationInput(
+@@ -1263,7 +1429,7 @@ class ChatDetailViewModel(
+                 append(text.length).append(':').append(text).append('|')
+             }
+             part("elsewhere-coop-context-v1")
+-            part(prepared.character.characterId)
++            part(prepared.speaker.id)
+             prepared.messages.forEach { message ->
+                 part(message.role.name)
+                 part(message.name)
+@@ -1293,7 +1459,7 @@ class ChatDetailViewModel(
+     private suspend fun saveGeneratedMessage(
+         content: String,
+         metadata: GenerationMetadataEntity?,
+-        character: CharacterEntity,
++        speaker: GenerationSpeaker,
+         variantGroupId: String? = null,
+         sourceMessage: MessageEntity? = null,
+         contextMessages: List<MessageEntity> = emptyList(),
+@@ -1431,9 +1597,9 @@ class ChatDetailViewModel(
+             MessageEntity(
+                 messageId = msgId,
+                 chatId = chatId,
+-                speakerType = SpeakerType.CHARACTER,
+-                speakerId = character.characterId,
+-                speakerDisplayNameSnapshot = character.displayName,
++                speakerType = speaker.type,
++                speakerId = speaker.id,
++                speakerDisplayNameSnapshot = speaker.name,
+                 content = content,
+                 orderIndex = storyOrderIndex,
+                 variantGroupId = variantGroupId ?: msgId,
+@@ -1499,13 +1665,14 @@ class ChatDetailViewModel(
+             }
+         }
+ 
+-        if (!isCoopGeneration && sourceMessage?.speakerType == SpeakerType.PERSONA && variantGroupId == null) {
++        val memoryPersona = (contextMessages + listOfNotNull(sourceMessage)).lastOrNull { it.speakerType == SpeakerType.PERSONA }
++        if (!isCoopGeneration && speaker.type == SpeakerType.CHARACTER && memoryPersona != null && variantGroupId == null) {
+             try {
+                 dataCoordinator.withMutation(dataRevision) {
+                     memoryManager.updateAfterCompletedTurn(
+                         chatId = chatId,
+-                        characterId = character.characterId,
+-                        personaMessage = sourceMessage,
++                        characterId = speaker.id,
++                        personaMessage = memoryPersona,
+                         allPrimaryMessages = (contextMessages + botMsg).filter { it.isPrimaryVariant }
+                     )
+                 }
+@@ -1595,6 +1762,8 @@ class ChatDetailViewModel(
+     }
+ 
+     fun stopGeneration() {
++        automaticQueue.clear()
++        automaticJob?.cancel()
+         generationJob?.cancel()
+     }
+ 
+@@ -1621,6 +1790,7 @@ class ChatDetailViewModel(
+     }
+     
+     fun discardPartial() {
++        automaticQueue.clear()
+         val state = _uiState.value as? ChatUiState.Success ?: return
+         if (!state.partialStopped || partialResolutionInProgress) return
+         partialResolutionInProgress = true
+@@ -1652,6 +1822,8 @@ class ChatDetailViewModel(
+     }
+     
+     fun keepPartial() {
++        automaticQueue.clear()
++        retrySpeaker = null
+         val state = _uiState.value as? ChatUiState.Success ?: return
+         if (!state.partialStopped || partialResolutionInProgress) return
+         val content = state.streamingContent ?: return
+@@ -1676,7 +1848,7 @@ class ChatDetailViewModel(
+                 saveGeneratedMessage(
+                     content = content,
+                     metadata = pending.metadata,
+-                    character = pending.character,
++                    speaker = pending.speaker,
+                     variantGroupId = pending.variantGroupId,
+                     sourceMessage = pending.sourceMessage,
+                     contextMessages = pending.contextMessages,
+@@ -1709,7 +1881,13 @@ class ChatDetailViewModel(
+ 
+     fun retryGeneration() {
+         val state = _uiState.value as? ChatUiState.Success ?: return
+-        if (inChatToolInProgress || generationStartInProgress || state.isGenerating) return
++        if (inChatToolInProgress || generationStartInProgress || (state.isGenerating || state.automaticTurnRunning)) return
++        if (state.partialStopped) return
++        if (automaticQueue.isNotEmpty()) {
++            runAutomaticQueue(dataCoordinator.captureRevision())
++            return
++        }
++        retrySpeaker?.let { generateSpeaker(it); return }
+         if (state.chatSummary.chat.chatType == ChatType.GROUP) {
+             generateGroupResponse(state.generationCharacterId ?: state.selectedGroupCharacterId)
+             return
+@@ -1730,7 +1908,7 @@ class ChatDetailViewModel(
+ 
+     fun regenerateMessage(messageId: String) {
+         val state = _uiState.value as? ChatUiState.Success ?: return
+-        if (inChatToolInProgress || generationStartInProgress || state.isGenerating) return
++        if (inChatToolInProgress || generationStartInProgress || (state.isGenerating || state.automaticTurnRunning)) return
+         val primaryMessages = state.messages.filter { it.isPrimaryVariant || it.messageId == messageId }
+         val targetMessage = primaryMessages.find { it.messageId == messageId } ?: return
+         if (!ContextResetPolicy.includes(targetMessage, chatSummary?.chat?.contextResetOrderIndex)) {
+@@ -1740,6 +1918,19 @@ class ChatDetailViewModel(
+             return
+         }
+         val history = primaryMessages.takeWhile { it.messageId != messageId }
++        if (!hasCoopRoom() && (targetMessage.speakerType != SpeakerType.CHARACTER || state.chatSettings.narratorEnabled)) {
++            if (targetMessage.speakerType !in setOf(SpeakerType.CHARACTER, SpeakerType.NPC, SpeakerType.NARRATOR)) return
++            val current = history.lastOrNull() ?: return
++            generationStartInProgress = true
++            viewModelScope.launch {
++                try {
++                    startGenerationInternal(current, history.dropLast(1),
++                        variantGroupId = targetMessage.variantGroupId,
++                        characterId = targetMessage.speakerId, speakerType = targetMessage.speakerType)
++                } finally { generationStartInProgress = false }
++            }
++            return
++        }
+         if (state.chatSummary.chat.chatType == ChatType.GROUP) {
+             val currentMessage = history.lastOrNull() ?: return
+             generationStartInProgress = true
+@@ -1785,9 +1976,9 @@ class ChatDetailViewModel(
+ 
+     fun continueMessage(messageId: String) {
+         val state = _uiState.value as? ChatUiState.Success ?: return
+-        if (inChatToolInProgress || generationStartInProgress || state.isGenerating) return
++        if (inChatToolInProgress || generationStartInProgress || (state.isGenerating || state.automaticTurnRunning)) return
+         val primaryMessages = state.messages.filter { it.isPrimaryVariant }
+-        val targetMessage = primaryMessages.find { it.messageId == messageId && it.speakerType == SpeakerType.CHARACTER } ?: return
++        val targetMessage = primaryMessages.find { it.messageId == messageId && it.speakerType in setOf(SpeakerType.CHARACTER, SpeakerType.NPC, SpeakerType.NARRATOR) } ?: return
+         if (!ContextResetPolicy.includes(targetMessage, chatSummary?.chat?.contextResetOrderIndex)) {
+             updateSuccessState {
+                 it.copy(generationError = "Continue is unavailable for messages before the Wack context boundary.")
+@@ -1812,7 +2003,8 @@ class ChatDetailViewModel(
+                 history = history,
+                 isContinuation = true,
+                 continuationTarget = targetMessage,
+-                characterId = targetMessage.speakerId
++                characterId = targetMessage.speakerId,
++                speakerType = targetMessage.speakerType
+             )
+             } finally {
+                 generationStartInProgress = false
+@@ -1950,7 +2142,7 @@ class ChatDetailViewModel(
+         val roomGenerationActive = coopSessionManager?.state?.value?.room
+             ?.takeIf { it.chatId == chatId }
+             ?.activeGenerationRequestId != null
+-        if (!state.isGenerating && !state.partialStopped && !generationStartInProgress &&
++        if (!(state.isGenerating || state.automaticTurnRunning) && !state.partialStopped && !generationStartInProgress &&
+             generationJob?.isActive != true && !roomGenerationActive
+         ) return true
+         updateSuccessState {
+diff --git a/app/src/main/java/com/example/ui/screens/ChatSettingsScreen.kt b/app/src/main/java/com/example/ui/screens/ChatSettingsScreen.kt
+index 33aac77..884a1fe 100644
+--- a/app/src/main/java/com/example/ui/screens/ChatSettingsScreen.kt
++++ b/app/src/main/java/com/example/ui/screens/ChatSettingsScreen.kt
+@@ -91,14 +91,14 @@ fun ChatSettingsScreen(
+                     horizontalArrangement = Arrangement.SpaceBetween,
+                     verticalAlignment = Alignment.CenterVertically
+                 ) {
+-                    Text("Add narrator guidance")
++                    Text("Dedicated narrator and NPC turns")
+                     Switch(
+                         checked = uiState.settings?.narratorEnabled == true,
+                         onCheckedChange = viewModel::onNarratorEnabledChanged
+                     )
+                 }
+                 Text(
+-                    "Adds scene and world narration to the same normal Character reply. It is not an independent AI, speaker turn, second request, or hard knowledge-isolation boundary. Turning it off keeps these instructions and the NPC Bank intact.",
++                    "When enabled, Send generates a separate Narrator turn, up to two relevant NPC replies when NPC Bank is enabled, then the main Character reply. Each speaker uses a separate request with this chat’s selected model and may incur additional cost. Manual speaker controls are available in the chat. Local chats only; turning this off keeps your instructions and NPC Bank.",
+                     style = MaterialTheme.typography.bodySmall
+                 )
+                 var narratorInstructions by remember(uiState.settings?.chatId) {
+diff --git a/app/src/main/java/com/example/ui/screens/ContextInspectorScreen.kt b/app/src/main/java/com/example/ui/screens/ContextInspectorScreen.kt
+index b6466eb..1f99b5c 100644
+--- a/app/src/main/java/com/example/ui/screens/ContextInspectorScreen.kt
++++ b/app/src/main/java/com/example/ui/screens/ContextInspectorScreen.kt
+@@ -28,6 +28,7 @@ fun ContextInspectorScreen(
+     appContainer: AppContainer,
+     onNavigateBack: () -> Unit
+ ) {
++    var narratorMessages by remember { mutableStateOf<List<RoleplayMessage>>(emptyList()) }
+     var compiledMessages by remember { mutableStateOf<List<RoleplayMessage>>(emptyList()) }
+     var totalMessages by remember { mutableStateOf(0) }
+     var includedMessages by remember { mutableStateOf(0) }
+@@ -53,10 +54,11 @@ fun ContextInspectorScreen(
+                 ?: summary?.characters?.firstOrNull()
+             val character = selectedCharacter?.let { appContainer.characterRepository.getCharacterById(it.characterId) }
+             val persona = summary?.personas?.firstOrNull()?.let { appContainer.personaRepository.getPersonaById(it.personaId) }
++            val dedicatedNarrator = settings.narratorEnabled && appContainer.coopSessionManager?.state?.value?.room?.chatId != chatId
+             val npcBankEnabled = appContainer.npcRepository?.getSettings(chatId)?.isEnabled == true
+             val allPrimaryHistory = appContainer.messageRepository.getMessagesForChatOnce(chatId)
+                 .map { message ->
+-                    if (message.speakerType == com.example.data.model.SpeakerType.CHARACTER) {
++                    if (message.speakerType in setOf(com.example.data.model.SpeakerType.CHARACTER, com.example.data.model.SpeakerType.NPC, com.example.data.model.SpeakerType.NARRATOR)) {
+                         message.copy(
+                             content = com.example.domain.npc.NpcStructuredOutputParser
+                                 .finalVisibleStoryText(message.content)
+@@ -85,6 +87,7 @@ fun ContextInspectorScreen(
+             hasContextReset = resetBoundary != null
+             includedMessages = 0
+             compiledMessages = emptyList()
++            narratorMessages = emptyList()
+ 
+             if (character != null && persona != null && history.isNotEmpty()) {
+                 val currentMessage = history.last()
+@@ -96,7 +99,8 @@ fun ContextInspectorScreen(
+                         observerCharacterId = character.characterId,
+                         activePersonaId = persona.personaId,
+                         isGroup = summary.chat.chatType == ChatType.GROUP,
+-                        asOfOrderIndex = history.maxOfOrNull { it.orderIndex }
++                        asOfOrderIndex = history.maxOfOrNull { it.orderIndex },
++                        includeStorytellerContinuity = !dedicatedNarrator
+                     )
+                 } else null
+                 val activeLore = appContainer.lorebookRepository?.resolveActiveLore(
+@@ -107,6 +111,17 @@ fun ContextInspectorScreen(
+                 ).orEmpty()
+                 val trimmed = priorHistory.takeLast(com.example.domain.memory.AutomaticMemoryManager.DEFAULT_RECENT_MESSAGE_LIMIT)
+                 includedMessages = trimmed.size + 1
++                if (dedicatedNarrator) {
++                    val narratorCast = if (npcBankEnabled) appContainer.npcRepository?.relevantContext(
++                        chatId, history, activePersonaId = persona.personaId, isGroup = summary.chat.chatType == ChatType.GROUP,
++                        asOfOrderIndex = history.maxOfOrNull { it.orderIndex }
++                    ) else null
++                    narratorMessages = com.example.domain.compiler.SupportingCastContextCompiler().compile(
++                        com.example.domain.npc.GenerationSpeaker.narrator(chatId), null, persona,
++                        summary.characters.map { it.displayName }, settings, priorHistory, currentMessage,
++                        narratorCast, activeLore, rollingSummary, npcBankEnabled, false
++                    )
++                }
+                 val compiler = ContextCompilerV1()
+                 compiledMessages = if (summary.chat.chatType == ChatType.GROUP) {
+                     val activeIds = appContainer.chatRepository.getParticipantsForChatOnce(chatId)
+@@ -130,8 +145,8 @@ fun ContextInspectorScreen(
+                         rollingSummary = rollingSummary,
+                         activeLore = activeLore,
+                         supportingCastContext = supportingCast,
+-                        npcBankEnabled = npcBankEnabled,
+-                        narratorEnabled = settings.narratorEnabled,
++                        npcBankEnabled = npcBankEnabled && !dedicatedNarrator,
++                        narratorEnabled = settings.narratorEnabled && !dedicatedNarrator,
+                         narratorInstructions = settings.narratorInstructions
+                     )
+                 } else {
+@@ -148,11 +163,15 @@ fun ContextInspectorScreen(
+                         rollingSummary = rollingSummary,
+                         activeLore = activeLore,
+                         supportingCastContext = supportingCast,
+-                        npcBankEnabled = npcBankEnabled,
+-                        narratorEnabled = settings.narratorEnabled,
++                        npcBankEnabled = npcBankEnabled && !dedicatedNarrator,
++                        narratorEnabled = settings.narratorEnabled && !dedicatedNarrator,
+                         narratorInstructions = settings.narratorInstructions
+                     )
+                 }
++                if (dedicatedNarrator) compiledMessages = compiledMessages + RoleplayMessage(
++                    com.example.domain.provider.Role.SYSTEM,
++                    "Respond only as ${character.displayName}. Narration and NPC dialogue have separate speakers. Never write another speaker's dialogue or actions."
++                )
+             }
+         } finally {
+             isLoading = false
+@@ -232,6 +251,18 @@ fun ContextInspectorScreen(
+                         }
+                     }
+                 }
++                if (narratorMessages.isNotEmpty()) {
++                    item { Text("Narrator request preview · separate call", style = MaterialTheme.typography.titleMedium) }
++                    items(narratorMessages) { msg ->
++                        Card(modifier = Modifier.fillMaxWidth(), border = elsewhereCardBorder()) {
++                            Column(Modifier.padding(16.dp)) {
++                                Text("Role: ${msg.role.name}", style = MaterialTheme.typography.labelLarge)
++                                Text(msg.content, style = MaterialTheme.typography.bodySmall)
++                            }
++                        }
++                    }
++                    item { Text("Character request preview", style = MaterialTheme.typography.titleMedium) }
++                }
+                 items(compiledMessages) { msg ->
+                     Card(modifier = Modifier.fillMaxWidth(), border = elsewhereCardBorder()) {
+                         Column(modifier = Modifier.padding(16.dp)) {
+diff --git a/app/src/test/java/com/example/ChatDetailGenerationTest.kt b/app/src/test/java/com/example/ChatDetailGenerationTest.kt
+index d76644d..54b8860 100644
+--- a/app/src/test/java/com/example/ChatDetailGenerationTest.kt
++++ b/app/src/test/java/com/example/ChatDetailGenerationTest.kt
+@@ -410,7 +410,7 @@ class ChatDetailGenerationTest {
+     }
+ 
+     @Test
+-    fun narratorSoloGenerationUsesOneRequestAndKeepsCharacterSpeakerIdentity() = runBlocking {
++    fun narratorSoloGenerationUsesSeparateRequestsAndSpeakerIdentities() = runBlocking {
+         val provider = RecordingStreamingProvider()
+         val harness = createHarness(
+             provider = provider,
+@@ -423,11 +423,14 @@ class ChatDetailGenerationTest {
+         harness.viewModel.sendMessage()
+ 
+         val completed = withTimeout(15_000) {
+-            harness.messageRepository.getMessagesForChat(harness.chatId).first { it.size == 2 }
++            harness.messageRepository.getMessagesForChat(harness.chatId).first { it.size == 3 }
+         }
+ 
+-        assertEquals(1, provider.requests.size)
+-        assertTrue(provider.requests.single().first().content.contains("Keep the rain present as quiet scene texture."))
++        assertEquals(2, provider.requests.size)
++        assertTrue(provider.requests.first().first().content.contains("Keep the rain present as quiet scene texture."))
++        assertEquals(listOf(SpeakerType.PERSONA, SpeakerType.NARRATOR, SpeakerType.CHARACTER), completed.map { it.speakerType })
++        assertTrue(provider.requests.last().any { it.content.startsWith("Narrator:") })
++        assertFalse(provider.requests.last().first().content.contains("Keep the rain present"))
+         assertEquals("character-1", completed.last().speakerId)
+     }
+ 
+@@ -1180,13 +1183,11 @@ class ChatDetailGenerationTest {
+ 
+         harness.viewModel.onDraftChanged("POST_RESET_PERSONA")
+         harness.viewModel.sendMessage()
+-        withTimeout(15_000) {
+-            harness.messageRepository.getMessagesForChat(harness.chatId).first { it.size == 5 }
+-        }
++        awaitDedicatedTurn(harness, 6)
+         val postResetMessages = harness.messageRepository.getMessagesForChatOnce(harness.chatId)
+             .filter { it.messageId !in setOf(oldPersona.messageId, oldCharacter.messageId, oldAlternate.messageId) }
+         assertTrue(postResetMessages.all { it.orderIndex > requireNotNull(persistedChat.contextResetOrderIndex) })
+-        val requestText = provider.requests.single().joinToString("\n") { it.content }
++        val requestText = provider.requests.last().joinToString("\n") { it.content }
+         assertFalse(requestText.contains("OLD_TRANSCRIPT_PERSONA"))
+         assertFalse(requestText.contains("OLD_TRANSCRIPT_CHARACTER"))
+         assertFalse(requestText.contains("OLD_ALTERNATE_VARIANT"))
+@@ -1428,6 +1429,121 @@ class ChatDetailGenerationTest {
+         )
+     }
+ 
++    @Test
++    fun dedicatedTurnsUseNamedNpcHistoryAndKeepStorytellerSecretsOutOfCharacterRequests() = runBlocking {
++        val provider = TurnProvider(listOf("Arthur waits by the door.", "What do you want?", "Let her pass."))
++        val h = createHarness(provider, ResponseLengthProfile.NORMAL, narratorEnabled = true, npcBankEnabledInitially = true)
++        database.npcDao().insertDossier(NpcDossierEntity(npcId = "arthur", chatId = h.chatId,
++            displayName = "Arthur", keepInScene = true, personality = "Proud", secrets = "STORYTELLER_SECRET", authorNotes = "PRIVATE_NOTE"))
++        database.npcDao().insertDossier(NpcDossierEntity(npcId = "absent", chatId = h.chatId, displayName = "Absent person"))
++        h.viewModel.onDraftChanged("Arthur, let me through.")
++        h.viewModel.sendMessage()
++        val messages = awaitDedicatedTurn(h, 4)
++        assertEquals(listOf(SpeakerType.PERSONA, SpeakerType.NARRATOR, SpeakerType.NPC, SpeakerType.CHARACTER), messages.map { it.speakerType })
++        assertEquals("Arthur", messages[2].speakerDisplayNameSnapshot)
++        assertTrue(provider.requests.last().any { it.role == Role.ASSISTANT && it.content == "Arthur: What do you want?" })
++        assertTrue(provider.requests.first().first().content.contains("STORYTELLER_SECRET"))
++        provider.requests.drop(1).forEach { assertFalse(it.first().content.contains("STORYTELLER_SECRET")) }
++        provider.requests.forEach { assertFalse(it.joinToString { message -> message.content }.contains("PRIVATE_NOTE")) }
++        assertEquals(3, provider.requests.size)
++    }
++
++    @Test
++    fun narratorCanDiscoverAnNpcAndThatNpcRepliesInTheSameAutomaticTurn() = runBlocking {
++        val introduction = "Arthur arrives.\n${NpcStructuredOutputParser.OPEN_MARKER}\n" +
++            "{\"schema_version\":1,\"updates\":[{\"display_name\":\"Arthur\",\"personality\":\"Proud\"}]}\n" + NpcStructuredOutputParser.CLOSE_MARKER
++        val provider = TurnProvider(listOf(introduction, "Good evening.", "Welcome."))
++        val h = createHarness(provider, ResponseLengthProfile.NORMAL, narratorEnabled = true, npcBankEnabledInitially = true)
++        h.viewModel.onDraftChanged("Who is at the door?")
++        h.viewModel.sendMessage()
++        val messages = awaitDedicatedTurn(h, 4)
++        assertEquals("Arthur arrives.", messages[1].content)
++        assertEquals(SpeakerType.NPC, messages[2].speakerType)
++        assertEquals(h.npcRepository.getProjectedDossiers(h.chatId).single().npcId, messages[2].speakerId)
++    }
++
++    @Test
++    fun failedAutomaticNpcRetryDoesNotRepeatNarratorOrPersona() = runBlocking {
++        val provider = TurnProvider(listOf("Arthur waits.", null, "Move aside.", "I stay."))
++        val h = createHarness(provider, ResponseLengthProfile.NORMAL, narratorEnabled = true, npcBankEnabledInitially = true)
++        database.npcDao().insertDossier(NpcDossierEntity(npcId = "arthur", chatId = h.chatId, displayName = "Arthur", keepInScene = true))
++        h.viewModel.onDraftChanged("Arthur?")
++        h.viewModel.sendMessage()
++        withTimeout(15_000) { h.viewModel.uiState.first { it is ChatUiState.Success && it.generationError != null && !it.automaticTurnRunning } }
++        assertEquals(2, h.messageRepository.getMessagesForChatOnce(h.chatId).size)
++        h.viewModel.retryGeneration()
++        val messages = awaitDedicatedTurn(h, 4)
++        assertEquals(1, messages.count { it.speakerType == SpeakerType.PERSONA })
++        assertEquals(1, messages.count { it.speakerType == SpeakerType.NARRATOR })
++        assertEquals(4, provider.requests.size)
++        assertTrue(provider.requests[2].first().content.contains("DEDICATED NPC TURN: Arthur"))
++    }
++
++    @Test
++    fun manualNpcRegenerateAndContinuePreserveNpcIdentityAndEarlierNarration() = runBlocking {
++        val provider = TurnProvider(listOf("Arthur waits.", "Hello.", "Welcome.", "Try again.", " More."))
++        val h = createHarness(provider, ResponseLengthProfile.NORMAL, narratorEnabled = true, npcBankEnabledInitially = true)
++        database.npcDao().insertDossier(NpcDossierEntity(npcId = "arthur", chatId = h.chatId, displayName = "Arthur", keepInScene = true))
++        h.viewModel.onDraftChanged("Arthur?")
++        h.viewModel.sendMessage()
++        val messages = awaitDedicatedTurn(h, 4)
++        val original = messages.single { it.speakerType == SpeakerType.NPC }
++        h.viewModel.regenerateMessage(original.messageId)
++        val withVariant = awaitDedicatedTurn(h, 5)
++        val replacement = withVariant.single { it.speakerType == SpeakerType.NPC && it.isPrimaryVariant }
++        assertEquals("arthur", replacement.speakerId)
++        assertEquals(original.variantGroupId, replacement.variantGroupId)
++        assertTrue(provider.requests[3].any { it.content == "Narrator: Arthur waits." })
++        assertFalse(provider.requests[3].any { it.content.contains("Welcome.") || it.content == "Arthur: Hello." })
++        h.viewModel.continueMessage(replacement.messageId)
++        withTimeout(15_000) { h.messageRepository.getMessagesForChat(h.chatId).first { it.any { m -> m.messageId == replacement.messageId && m.content == "Try again. More." } } }
++        assertEquals(5, provider.requests.size)
++    }
++
++    @Test
++    fun stopNarratorKeepsAttributedPartialAndPreventsRemainingAutomaticCalls() = runBlocking {
++        val provider = object : ModelProvider {
++            var calls = 0
++            override suspend fun getModels() = emptyList<OpenRouterModel>()
++            override suspend fun getEndpoints(modelId: String) = emptyList<ProviderEndpoint>()
++            override fun streamResponse(messages: List<RoleplayMessage>, options: GenerationOptions) = flow {
++                calls++
++                emit(StreamEvent.Content("Rain begins."))
++                awaitCancellation()
++            }
++        }
++        val h = createHarness(provider, ResponseLengthProfile.NORMAL, narratorEnabled = true)
++        h.viewModel.onDraftChanged("Look outside.")
++        h.viewModel.sendMessage()
++        withTimeout(15_000) { h.viewModel.uiState.first { it is ChatUiState.Success && it.streamingContent == "Rain begins." } }
++        h.viewModel.stopGeneration()
++        withTimeout(15_000) { h.viewModel.uiState.first { it is ChatUiState.Success && it.partialStopped && !it.automaticTurnRunning } }
++        h.viewModel.keepPartial()
++        val messages = awaitDedicatedTurn(h, 2)
++        assertEquals(SpeakerType.NARRATOR, messages.last().speakerType)
++        assertEquals("Narrator", messages.last().speakerDisplayNameSnapshot)
++        assertEquals(1, provider.calls)
++        assertTrue(h.messageRepository.getGenerationMetadata(messages.last().messageId)!!.isPartial)
++    }
++
++    private suspend fun awaitDedicatedTurn(h: Harness, count: Int): List<MessageEntity> {
++        withTimeout(15_000) { h.viewModel.uiState.first { it is ChatUiState.Success && it.messages.size == count && !it.isGenerating && !it.automaticTurnRunning && !it.partialResolutionInProgress } }
++        return h.messageRepository.getMessagesForChatOnce(h.chatId)
++    }
++
++    private class TurnProvider(private val replies: List<String?>) : ModelProvider {
++        val requests = mutableListOf<List<RoleplayMessage>>()
++        override suspend fun getModels() = emptyList<OpenRouterModel>()
++        override suspend fun getEndpoints(modelId: String) = emptyList<ProviderEndpoint>()
++        override fun streamResponse(messages: List<RoleplayMessage>, options: GenerationOptions) = flow {
++            val index = requests.size
++            requests += messages
++            val reply = replies.getOrNull(index)
++            if (reply == null) emit(StreamEvent.Error(IllegalStateException("Temporary provider failure")))
++            else { emit(StreamEvent.Content(reply)); emit(StreamEvent.Done(null)) }
++        }
++    }
++
+     private class RecordingStreamingProvider : ModelProvider {
+         lateinit var messages: List<RoleplayMessage>
+         lateinit var options: GenerationOptions
+diff --git a/app/src/test/java/com/example/ChatSettingsScreenInitTest.kt b/app/src/test/java/com/example/ChatSettingsScreenInitTest.kt
+index c85a5ce..db1bc71 100644
+--- a/app/src/test/java/com/example/ChatSettingsScreenInitTest.kt
++++ b/app/src/test/java/com/example/ChatSettingsScreenInitTest.kt
+@@ -71,7 +71,7 @@ class ChatSettingsScreenInitTest {
+         }
+         composeTestRule.onNodeWithTag("chat_settings_content").assertExists()
+         composeTestRule.onNodeWithText("Narrator").assertExists()
+-        composeTestRule.onNodeWithText("Add narrator guidance").assertExists()
++        composeTestRule.onNodeWithText("Dedicated narrator and NPC turns").assertExists()
+         composeTestRule.onNodeWithText("Generation Parameters").assertExists()
+         composeTestRule.onNodeWithText("Failed to fetch models: API key not configured").assertExists()
+     }
+diff --git a/app/src/test/java/com/example/LocalGroupGenerationTest.kt b/app/src/test/java/com/example/LocalGroupGenerationTest.kt
+index 0f3dd06..b2d5d8a 100644
+--- a/app/src/test/java/com/example/LocalGroupGenerationTest.kt
++++ b/app/src/test/java/com/example/LocalGroupGenerationTest.kt
+@@ -333,8 +333,8 @@ class LocalGroupGenerationTest {
+     }
+ 
+     @Test
+-    fun narratorGroupGenerationUsesOneRequestForSelectedCharacterIdentity() = runBlocking {
+-        val provider = SequentialGroupProvider(listOf("C narrated reply"))
++    fun narratorGroupGenerationUsesSeparateNarratorAndSelectedCharacterRequests() = runBlocking {
++        val provider = SequentialGroupProvider(listOf("The storm gathers.", "C reply"))
+         val harness = createHarness(
+             provider = provider,
+             narratorEnabled = true,
+@@ -349,19 +349,17 @@ class LocalGroupGenerationTest {
+             }
+         }
+ 
++        harness.viewModel.selectGroupCharacter("character-c")
+         harness.viewModel.onDraftChanged("C, narrate what happens next.")
+         harness.viewModel.sendMessage()
+-        withTimeout(15_000) {
+-            harness.messageRepository.getMessagesForChat(harness.chatId).first { it.size == 1 }
+-        }
+-        harness.viewModel.selectGroupCharacter("character-c")
+-        harness.viewModel.generateGroupResponse()
+-        val completed = awaitMessages(harness, 2)
++        val completed = awaitMessages(harness, 3)
+ 
+-        assertEquals(1, provider.requests.size)
++        assertEquals(2, provider.requests.size)
+         assertEquals("character-c", completed.last().speakerId)
+-        val systemContext = provider.requests.single().first().content
+-        assertTrue(systemContext.contains("Keep the storm visible in the shared scene."))
++        val systemContext = provider.requests.last().first().content
++        assertTrue(provider.requests.first().first().content.contains("Keep the storm visible in the shared scene."))
++        assertFalse(systemContext.contains("Keep the storm visible"))
++        assertEquals(SpeakerType.NARRATOR, completed[1].speakerType)
+         assertTrue(systemContext.contains("C_ONLY_KNOWLEDGE"))
+         assertFalse(systemContext.contains("A_ONLY_KNOWLEDGE"))
+     }
+diff --git a/app/src/test/java/com/example/NpcRepositoryTest.kt b/app/src/test/java/com/example/NpcRepositoryTest.kt
+index 746b599..3912ded 100644
+--- a/app/src/test/java/com/example/NpcRepositoryTest.kt
++++ b/app/src/test/java/com/example/NpcRepositoryTest.kt
+@@ -91,7 +91,7 @@ class NpcRepositoryTest {
+                 secrets = "NEVER_SEND_SECRET",
+                 authorNotes = "NEVER_SEND_AUTHOR_NOTE",
+                 relationship = "Trusted guide"
+-            )
++            ).copy(keepInScene = true)
+         )
+ 
+         val context = repository.relevantContext("chat", emptyList()).orEmpty()
+@@ -141,6 +141,7 @@ class NpcRepositoryTest {
+     fun groupContextUsesOnlyActivePersonaRelationshipAndRespondingCharacterKnowledge() = runBlocking {
+         repository.saveManual(
+             dossier(secrets = "STORYTELLER_SECRET").copy(
++                keepInScene = true,
+                 personaRelationships = mapOf("persona-a" to "Trusts A", "persona-b" to "Distrusts B"),
+                 characterKnowledge = mapOf("character-a" to "Knows the brass key", "character-b" to "Knows the river route")
+             )
