@@ -7,7 +7,7 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.example.data.model.*
 
-const val APP_DATABASE_VERSION = 8
+const val APP_DATABASE_VERSION = 9
 
 @Database(
     entities = [
@@ -34,7 +34,9 @@ const val APP_DATABASE_VERSION = 8
         MessageAttachmentEntity::class,
         NpcDossierEntity::class,
         NpcBankSettingsEntity::class,
-        NpcDossierUpdateEntity::class
+        NpcDossierUpdateEntity::class,
+        ScenarioEntity::class,
+        ScenarioSessionEntity::class
     ],
     version = APP_DATABASE_VERSION,
     exportSchema = false
@@ -50,9 +52,17 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun coopDao(): CoopDao
     abstract fun messageAttachmentDao(): MessageAttachmentDao
     abstract fun npcDao(): NpcDao
+    abstract fun scenarioDao(): ScenarioDao
     abstract fun backupDao(): BackupDao
 
     companion object {
+        val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE TABLE IF NOT EXISTS scenarios (scenarioId TEXT NOT NULL PRIMARY KEY, definitionJson TEXT NOT NULL, createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL)")
+                db.execSQL("CREATE TABLE IF NOT EXISTS scenario_sessions (chatId TEXT NOT NULL PRIMARY KEY, scenarioId TEXT NOT NULL, definitionJson TEXT NOT NULL, FOREIGN KEY(chatId) REFERENCES chats(chatId) ON UPDATE NO ACTION ON DELETE CASCADE)")
+            }
+        }
+
         val MIGRATION_1_2 = object : Migration(1, 2) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 // Modify messages table

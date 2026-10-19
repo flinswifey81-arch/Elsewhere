@@ -74,12 +74,12 @@ fun ProfileImageAvatar(
     val shape = RoundedCornerShape((size.value * 0.24f).dp.coerceAtLeast(8.dp))
     val fallbackContainer = when (kind) {
         ProfileImageKind.PERSONA -> MaterialTheme.colorScheme.secondaryContainer
-        ProfileImageKind.CHARACTER -> MaterialTheme.colorScheme.primaryContainer
+        ProfileImageKind.SCENARIO, ProfileImageKind.CHARACTER -> MaterialTheme.colorScheme.primaryContainer
         null -> MaterialTheme.colorScheme.surfaceContainerHigh
     }
     val fallbackContent = when (kind) {
         ProfileImageKind.PERSONA -> MaterialTheme.colorScheme.onSecondaryContainer
-        ProfileImageKind.CHARACTER -> MaterialTheme.colorScheme.onPrimaryContainer
+        ProfileImageKind.SCENARIO, ProfileImageKind.CHARACTER -> MaterialTheme.colorScheme.onPrimaryContainer
         null -> MaterialTheme.colorScheme.onSurfaceVariant
     }
 

@@ -5,7 +5,7 @@ import androidx.room.Index
 import androidx.room.PrimaryKey
 import java.util.UUID
 
-enum class SpeakerType { PERSONA, CHARACTER, SYSTEM, DIRECTOR }
+enum class SpeakerType { PERSONA, CHARACTER, SYSTEM, DIRECTOR, NARRATOR }
 
 @Entity(
     tableName = "messages",

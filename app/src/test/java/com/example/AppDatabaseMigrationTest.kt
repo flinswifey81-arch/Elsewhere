@@ -167,16 +167,19 @@ class AppDatabaseMigrationTest {
                 AppDatabase.MIGRATION_4_5,
                 AppDatabase.MIGRATION_5_6,
                 AppDatabase.MIGRATION_6_7,
-                AppDatabase.MIGRATION_7_8
+                AppDatabase.MIGRATION_7_8,
+                AppDatabase.MIGRATION_8_9
             )
             .allowMainThreadQueries()
             .build()
         try {
-            // Opening through Room executes every migration through 8 and validates the resulting schema.
+            // Opening through Room executes every migration through 9 and validates the resulting schema.
             migrated.openHelper.writableDatabase
             assertEquals("Keep Me", migrated.chatDao().getChatById("chat-keep")?.displayName)
             assertEquals("Preserve this", migrated.messageDao().getMessagesForChatOnce("chat-keep").single().content)
             assertTrue(migrated.lorebookDao().getLorebooksOnce().isEmpty())
+            assertTrue(migrated.scenarioDao().getAll().isEmpty())
+            assertTrue(migrated.scenarioDao().sessions().isEmpty())
             assertTrue(migrated.coopDao().getRoomForChat("chat-keep") == null)
             val preserved = migrated.messageDao().getMessagesForChatOnce("chat-keep").single()
             assertTrue(preserved.responsibleParticipantId == null)

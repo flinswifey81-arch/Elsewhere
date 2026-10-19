@@ -163,7 +163,7 @@ fun ChatCard(
                     shape = RoundedCornerShape(4.dp)
                 ) {
                     Text(
-                        text = if (chatSummary.chat.chatType == ChatType.SOLO) "Solo" else "Group",
+                        text = when (chatSummary.chat.chatType) { ChatType.SOLO -> "Solo"; ChatType.GROUP -> "Group"; ChatType.SCENARIO -> "Scenario" },
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)

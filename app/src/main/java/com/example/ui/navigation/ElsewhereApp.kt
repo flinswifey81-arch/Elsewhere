@@ -30,6 +30,7 @@ import com.example.ui.screens.*
 sealed class Screen(val route: String, val title: String, val icon: androidx.compose.ui.graphics.vector.ImageVector) {
     object Home : Screen("home", "Home", Icons.Filled.Home)
     object Characters : Screen("characters", "Characters", Icons.Filled.Person)
+    object Scenarios : Screen("scenarios", "Scenarios", Icons.Filled.AutoStories)
     object Personas : Screen("personas", "Personas", Icons.Filled.Face)
     object Lorebooks : Screen("lorebooks", "Lorebooks", Icons.Filled.MenuBook)
     object Chats : Screen("chats", "Chats", Icons.AutoMirrored.Filled.Chat)
@@ -40,6 +41,7 @@ val bottomNavItems = listOf(
     Screen.Home,
     Screen.Characters,
     Screen.Personas,
+    Screen.Scenarios,
     Screen.Lorebooks,
     Screen.Chats,
     Screen.Settings
@@ -142,7 +144,8 @@ fun ElsewhereApp(container: AppContainer) {
                     onNavigateToSettings = { navController.navigate(Screen.Settings.route) },
                     onNavigateToChats = { navController.navigate(Screen.Chats.route) },
                     onNewSoloChat = { navController.navigate("create_solo_chat") },
-                    onNewGroupChat = { navController.navigate("create_group_chat") }
+                    onNewGroupChat = { navController.navigate("create_group_chat") },
+                    onScenarios = { navController.navigate(Screen.Scenarios.route) }
                 ) 
             }
             composable(Screen.Characters.route) { 
@@ -151,6 +154,10 @@ fun ElsewhereApp(container: AppContainer) {
                     profileImageRepository = container.profileImageRepository,
                     onCharacterSelected = { /* TODO */ }
                 ) 
+            }
+            composable(Screen.Scenarios.route) {
+                ScenariosScreen(container, onChatCreated = { navController.navigate("chat_detail/$it") },
+                    onPersonas = { navController.navigate(Screen.Personas.route) })
             }
             composable(Screen.Personas.route) { 
                 PersonasScreen(

@@ -92,6 +92,7 @@ fun ChatDetailScreen(
             // stay local and usable rather than inheriting stale room restrictions.
             coopSessionManager = null,
             messageAttachmentRepository = appContainer.messageAttachmentRepository,
+            scenarioRepository = appContainer.scenarioRepository,
             npcRepository = appContainer.npcRepository,
             npcOutputParser = appContainer.npcOutputParser
         )
@@ -195,7 +196,7 @@ fun ChatDetailScreen(
                                 leadingIcon = { Icon(Icons.Filled.MenuBook, contentDescription = null) },
                                 onClick = { showChatMenu = false; onNavigateToLorebooks() }
                             )
-                            DropdownMenuItem(
+                            if ((uiState as? ChatUiState.Success)?.chatSummary?.chat?.chatType != ChatType.SCENARIO) DropdownMenuItem(
                                 text = { Text("NPC Bank") },
                                 leadingIcon = { Icon(Icons.Filled.Groups, contentDescription = null) },
                                 onClick = { showChatMenu = false; onNavigateToNpcBank() }
@@ -312,6 +313,7 @@ fun ChatDetailScreen(
                                             ?: state.chatSummary.characters.firstOrNull()?.characterId,
                                         profileImageRepository = appContainer.profileImageRepository,
                                         characterName = generationCharacterName
+                                            ?: (if (state.chatSummary.chat.chatType == ChatType.SCENARIO) "Narrator" else null)
                                             ?: state.chatSummary.characters.firstOrNull()?.displayName
                                             ?: "Character"
                                     )
@@ -557,6 +559,7 @@ fun ChatDetailScreen(
 
 internal fun ChatUiState.Success.isHistoryOnlyChat(): Boolean =
     chatSummary.personas.isEmpty() || when (chatSummary.chat.chatType) {
+        ChatType.SCENARIO -> false
         ChatType.SOLO -> chatSummary.characters.isEmpty()
         ChatType.GROUP -> groupParticipantsLoaded && groupCharacters.isEmpty()
     }

@@ -76,8 +76,10 @@ data class InChatToolStatus(
     val message: String
 )
 
+private data class ResponseSpeaker(val characterId: String, val displayName: String, val type: SpeakerType = SpeakerType.CHARACTER)
+
 private data class PreparedGeneration(
-    val character: CharacterEntity,
+    val character: ResponseSpeaker,
     val messages: List<RoleplayMessage>,
     val options: GenerationOptions,
     val npcBankEnabled: Boolean = false,
@@ -85,7 +87,7 @@ private data class PreparedGeneration(
 )
 
 private data class PendingPartialGeneration(
-    val character: CharacterEntity,
+    val character: ResponseSpeaker,
     val variantGroupId: String?,
     val sourceMessage: MessageEntity,
     val contextMessages: List<MessageEntity>,
@@ -147,7 +149,8 @@ class ChatDetailViewModel(
     private val messageAttachmentRepository: MessageAttachmentRepository? = null,
     private val npcRepository: NpcRepository? = null,
     private val npcOutputParser: NpcStructuredOutputParser? = null,
-    private val dataCoordinator: AppDataMaintenanceCoordinator = AppDataMaintenanceCoordinator.Global
+    private val dataCoordinator: AppDataMaintenanceCoordinator = AppDataMaintenanceCoordinator.Global,
+    private val scenarioRepository: com.example.domain.repository.ScenarioRepository? = null
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow<ChatUiState>(ChatUiState.Loading)
@@ -411,6 +414,7 @@ class ChatDetailViewModel(
             try {
                 val summary = chatSummary ?: state.chatSummary
                 val characterId = when (summary.chat.chatType) {
+                    ChatType.SCENARIO -> "narrator:$chatId"
                     ChatType.SOLO -> summary.characters.singleOrNull()?.characterId
                         ?: throw IllegalStateException("This Solo chat does not have exactly one Character to update.")
                     ChatType.GROUP -> selectedGroupCharacterId?.takeIf { selectedId ->
@@ -431,7 +435,7 @@ class ChatDetailViewModel(
                 val characterName = summary.characters
                     .firstOrNull { it.characterId == characterId }
                     ?.displayName
-                    ?: "the selected Character"
+                    ?: if (summary.chat.chatType == ChatType.SCENARIO) "this scenario" else "the selected Character"
                 val message = when {
                     result.savedMemoryCount > 0 && result.rollingSummaryUpdated ->
                         "Memory updated for $characterName: saved ${result.savedMemoryCount} new durable ${if (result.savedMemoryCount == 1) "memory" else "memories"} and refreshed the rolling summary."
@@ -1046,6 +1050,43 @@ class ChatDetailViewModel(
         }
     }
 
+    private suspend fun prepareScenario(current: MessageEntity, history: List<MessageEntity>, continuation: Boolean): PreparedGeneration? {
+        val settings = currentChatSettings ?: return null
+        val session = scenarioRepository?.session(chatId)
+        if (session == null) {
+            updateSuccessState { it.copy(generationError = "This playthrough's scenario configuration is unavailable.") }
+            return null
+        }
+        val personaId = (history + current).lastOrNull { it.speakerType == SpeakerType.PERSONA }?.speakerId
+            ?: chatSummary?.personas?.firstOrNull()?.personaId ?: return null
+        val persona = personaRepository.getPersonaById(personaId) ?: return null
+        if (settings.providerRoutingMode == com.example.data.model.ProviderRoutingMode.LOCK && settings.providerEndpoint.isNullOrBlank()) {
+            updateSuccessState { it.copy(generationError = "Locked routing requires a selected provider endpoint.") }
+            return null
+        }
+        val modelId = settings.selectedModelId ?: "openrouter/auto"
+        val source = (history + current).lastOrNull { it.speakerType == SpeakerType.PERSONA }?.takeUnless { continuation }
+        val images = source?.let { messageAttachmentRepository?.providerImagesForMessage(it.messageId) }.orEmpty()
+        if (images.isNotEmpty() && modelProvider.supportsImageInput(modelId) != true) {
+            updateSuccessState { it.copy(generationError = "Choose a model with confirmed image input support, then retry.") }
+            return null
+        }
+        val summary = ContextResetPolicy.eligibleSummary(memoryRepository.getSummaryOnce(chatId), chatSummary?.chat?.contextResetOrderIndex)
+            ?.takeIf { it.summarizedThroughOrderIndex < current.orderIndex }?.summary
+        val messages = com.example.domain.compiler.ScenarioContextCompiler().compile(
+            com.example.data.model.ScenarioCodec.decode(session.definitionJson), persona, settings, history, current,
+            summary = summary,
+            memories = memoryRepository.getMemoriesOnce(chatId, "narrator:$chatId").filter { memory ->
+                memory.sourceMessageId == null || (history + current).any { it.messageId == memory.sourceMessageId }
+            },
+            lore = lorebookRepository?.resolveActiveLore(chatId, history, current, AutomaticMemoryManager.DEFAULT_RECENT_MESSAGE_LIMIT).orEmpty(),
+            continuation = continuation
+        ).map { if (it.sourceMessageId == source?.messageId && images.isNotEmpty()) it.copy(images = images) else it }
+        return PreparedGeneration(ResponseSpeaker("narrator:$chatId", "Narrator", SpeakerType.NARRATOR), messages,
+            GenerationOptions(modelId = modelId, routing = ModelRouting.fromSettings(settings.providerRoutingMode, settings.providerEndpoint),
+                temperature = settings.temperature, topP = settings.topP, maxTokens = null), activePersonaId = personaId)
+    }
+
     private suspend fun prepareGeneration(
         currentMessage: MessageEntity,
         history: List<MessageEntity>,
@@ -1054,6 +1095,7 @@ class ChatDetailViewModel(
     ): PreparedGeneration? {
         val summary = chatSummary ?: return null
         val settings = currentChatSettings ?: return null
+        if (summary.chat.chatType == ChatType.SCENARIO) return prepareScenario(currentMessage, history, isContinuation)
         val resolvedCharacterId = characterId ?: summary.characters.firstOrNull()?.characterId ?: return null
         val fullCharacter = characterRepository.getCharacterById(resolvedCharacterId) ?: return null
         val relevantPersonaMessage = (listOf(currentMessage) + history.asReversed())
@@ -1197,7 +1239,7 @@ class ChatDetailViewModel(
             // small completion-token cap can exhaust the budget on reasoning before visible text.
             maxTokens = null
         )
-        return PreparedGeneration(fullCharacter, providerMessages, options, npcBankEnabled, fullPersona.personaId)
+        return PreparedGeneration(ResponseSpeaker(fullCharacter.characterId, fullCharacter.displayName), providerMessages, options, npcBankEnabled, fullPersona.personaId)
     }
 
     private suspend fun resolveCoopGenerationInput(
@@ -1293,7 +1335,7 @@ class ChatDetailViewModel(
     private suspend fun saveGeneratedMessage(
         content: String,
         metadata: GenerationMetadataEntity?,
-        character: CharacterEntity,
+        character: ResponseSpeaker,
         variantGroupId: String? = null,
         sourceMessage: MessageEntity? = null,
         contextMessages: List<MessageEntity> = emptyList(),
@@ -1431,7 +1473,7 @@ class ChatDetailViewModel(
             MessageEntity(
                 messageId = msgId,
                 chatId = chatId,
-                speakerType = SpeakerType.CHARACTER,
+                speakerType = character.type,
                 speakerId = character.characterId,
                 speakerDisplayNameSnapshot = character.displayName,
                 content = content,
@@ -1714,6 +1756,25 @@ class ChatDetailViewModel(
             generateGroupResponse(state.generationCharacterId ?: state.selectedGroupCharacterId)
             return
         }
+        if (state.chatSummary.chat.chatType == ChatType.SCENARIO) {
+            if (state.partialStopped || partialResolutionInProgress) return
+            generationStartInProgress = true
+            val revision = dataCoordinator.captureRevision()
+            viewModelScope.launch {
+                try {
+                    // A fast provider failure can precede Room's UI emission of the saved player turn.
+                    val messages = ContextResetPolicy.eligiblePrimaryMessages(
+                        messageRepository.getMessagesForChatOnce(chatId), chatSummary?.chat?.contextResetOrderIndex)
+                    val current = messages.lastOrNull()?.takeIf { it.speakerType == SpeakerType.PERSONA } ?: return@launch
+                    startGenerationInternal(current, messages.dropLast(1), dataRevision = revision)
+                } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                    throw cancelled
+                } catch (error: Exception) {
+                    updateSuccessState { it.copy(generationError = "Unable to retry narration: ${error.message}") }
+                } finally { generationStartInProgress = false }
+            }
+            return
+        }
         val lastMessage = state.messages.lastOrNull()
         if (lastMessage != null && !ContextResetPolicy.includes(lastMessage, chatSummary?.chat?.contextResetOrderIndex)) {
             updateSuccessState {
@@ -1787,7 +1848,7 @@ class ChatDetailViewModel(
         val state = _uiState.value as? ChatUiState.Success ?: return
         if (inChatToolInProgress || generationStartInProgress || state.isGenerating) return
         val primaryMessages = state.messages.filter { it.isPrimaryVariant }
-        val targetMessage = primaryMessages.find { it.messageId == messageId && it.speakerType == SpeakerType.CHARACTER } ?: return
+        val targetMessage = primaryMessages.find { it.messageId == messageId && it.speakerType in listOf(SpeakerType.CHARACTER, SpeakerType.NARRATOR) } ?: return
         if (!ContextResetPolicy.includes(targetMessage, chatSummary?.chat?.contextResetOrderIndex)) {
             updateSuccessState {
                 it.copy(generationError = "Continue is unavailable for messages before the Wack context boundary.")
@@ -1979,7 +2040,8 @@ class ChatDetailViewModel(
         private val coopSessionManager: CoopSessionManager? = null,
         private val messageAttachmentRepository: MessageAttachmentRepository? = null,
         private val npcRepository: NpcRepository? = null,
-        private val npcOutputParser: NpcStructuredOutputParser? = null
+        private val npcOutputParser: NpcStructuredOutputParser? = null,
+        private val scenarioRepository: com.example.domain.repository.ScenarioRepository? = null
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
@@ -1989,7 +2051,8 @@ class ChatDetailViewModel(
                 coopSessionManager,
                 messageAttachmentRepository,
                 npcRepository,
-                npcOutputParser
+                npcOutputParser,
+                scenarioRepository = scenarioRepository
             ) as T
         }
     }

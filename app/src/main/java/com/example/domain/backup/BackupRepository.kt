@@ -167,6 +167,8 @@ class BackupRepository internal constructor(
         val payload = database.withTransaction {
             BackupPayload(
                 characters = backupDao.getCharacters(),
+                scenarios = database.scenarioDao().getAll(),
+                scenarioSessions = database.scenarioDao().sessions(),
                 personas = backupDao.getPersonas(),
                 chats = backupDao.getChats(),
                 chatParticipants = backupDao.getChatParticipants(),
@@ -256,6 +258,11 @@ class BackupRepository internal constructor(
                 staged
             )
         }
+        payload.scenarios.forEach { scenario ->
+            profileImageRepository.resolveImage(ProfileImageKind.SCENARIO, scenario.scenarioId)?.let { source ->
+                result += profileSource(BackupFileKind.SCENARIO_AVATAR, scenario.scenarioId, source, stagingDirectory)
+            }
+        }
         payload.characters.forEach { character ->
             profileImageRepository.resolveImage(ProfileImageKind.CHARACTER, character.characterId)?.let { source ->
                 result += profileSource(
@@ -285,7 +292,7 @@ class BackupRepository internal constructor(
         source: File,
         stagingDirectory: File
     ): BackupBinarySource {
-        val directory = if (kind == BackupFileKind.CHARACTER_AVATAR) "characters" else "personas"
+        val directory = when (kind) { BackupFileKind.SCENARIO_AVATAR -> "scenarios"; BackupFileKind.CHARACTER_AVATAR -> "characters"; else -> "personas" }
         val staged = File(stagingDirectory, "avatar-${kind.name.lowercase()}-${safeToken(ownerId)}")
         source.copyTo(staged, overwrite = false)
         return BackupBinarySource(
@@ -435,6 +442,8 @@ class BackupRepository internal constructor(
     }
 
     private suspend fun replaceDatabaseContents(payload: BackupPayload) {
+        database.scenarioDao().clearSessions()
+        database.scenarioDao().clearScenarios()
         backupDao.deleteGenerationMetadata()
         backupDao.deleteMessageAttachments()
         backupDao.deleteNpcDossierUpdates()
@@ -463,6 +472,8 @@ class BackupRepository internal constructor(
         if (payload.characters.isNotEmpty()) backupDao.insertCharacters(payload.characters)
         if (payload.personas.isNotEmpty()) backupDao.insertPersonas(payload.personas)
         if (payload.chats.isNotEmpty()) backupDao.insertChats(payload.chats)
+        payload.scenarios.forEach { database.scenarioDao().save(it) }
+        payload.scenarioSessions.forEach { database.scenarioDao().insertSession(it) }
         if (payload.chatParticipants.isNotEmpty()) backupDao.insertChatParticipants(payload.chatParticipants)
         if (payload.chatPersonaParticipants.isNotEmpty()) {
             backupDao.insertChatPersonaParticipants(payload.chatPersonaParticipants)
@@ -501,9 +512,11 @@ class BackupRepository internal constructor(
     private fun prepareProfileImages(validated: ValidatedBackup, stageRoot: File) {
         stageRoot.mkdirs()
         validated.manifest.files.filter {
-            it.kind == BackupFileKind.CHARACTER_AVATAR || it.kind == BackupFileKind.PERSONA_AVATAR
+            it.kind in listOf(BackupFileKind.CHARACTER_AVATAR, BackupFileKind.PERSONA_AVATAR, BackupFileKind.SCENARIO_AVATAR)
         }.forEach { fileManifest ->
-            val kind = if (fileManifest.kind == BackupFileKind.CHARACTER_AVATAR) {
+            val kind = if (fileManifest.kind == BackupFileKind.SCENARIO_AVATAR) {
+                ProfileImageKind.SCENARIO
+            } else if (fileManifest.kind == BackupFileKind.CHARACTER_AVATAR) {
                 ProfileImageKind.CHARACTER
             } else {
                 ProfileImageKind.PERSONA
@@ -536,6 +549,8 @@ class BackupRepository internal constructor(
 
     private fun validatePayload(payload: BackupPayload, manifest: BackupManifest) {
         val entityCount = listOf(
+            payload.scenarios.size,
+            payload.scenarioSessions.size,
             payload.characters.size,
             payload.personas.size,
             payload.chats.size,
@@ -569,6 +584,16 @@ class BackupRepository internal constructor(
                 throw BackupValidationException("Backup contains invalid or duplicate $label identifiers.")
             }
             return values.toSet()
+        }
+        val scenarioIds = unique("scenario", payload.scenarios.map { it.scenarioId })
+        unique("scenario session", payload.scenarioSessions.map { it.chatId })
+        (payload.scenarios.map { it.definitionJson } + payload.scenarioSessions.map { it.definitionJson }).forEach {
+            try { com.example.data.model.ScenarioCodec.decode(it).validate() }
+            catch (e: Exception) { throw BackupValidationException("Backup contains an invalid scenario.", e) }
+        }
+        val scenarioChatIds = payload.chats.filter { it.chatType == com.example.data.model.ChatType.SCENARIO }.map { it.chatId }.toSet()
+        if (payload.scenarioSessions.map { it.chatId }.toSet() != scenarioChatIds) {
+            throw BackupValidationException("Scenario playthrough configuration is missing or mismatched.")
         }
         val characterIds = unique("Character", payload.characters.map { it.characterId })
         val personaIds = unique("Persona", payload.personas.map { it.personaId })
@@ -614,7 +639,7 @@ class BackupRepository internal constructor(
         requireRefs(payload.messages, "message") { it.chatId in chatIds }
         requireRefs(payload.chatSettings, "chat settings") { it.chatId in chatIds }
         requireRefs(payload.generationMetadata, "generation metadata") { it.messageId in messageIds }
-        requireRefs(payload.roleplayMemories, "memory") { it.chatId in chatIds && it.characterId in characterIds }
+        requireRefs(payload.roleplayMemories, "memory") { it.chatId in chatIds && (it.characterId in characterIds || (it.chatId in scenarioChatIds && it.characterId == "narrator:${it.chatId}")) }
         requireRefs(payload.conversationSummaries, "conversation summary") { it.chatId in chatIds }
         requireRefs(payload.lorebookEntries, "Lorebook entry") { it.lorebookId in lorebookIds }
         requireRefs(payload.chatLorebookAttachments, "chat Lorebook attachment") {
@@ -664,6 +689,9 @@ class BackupRepository internal constructor(
             ) {
                 throw BackupValidationException("Backup attachment metadata is inconsistent.")
             }
+        }
+        manifest.files.filter { it.kind == BackupFileKind.SCENARIO_AVATAR }.forEach {
+            if (it.ownerId !in scenarioIds || it.mimeType != "image/png" || it.byteSize !in 1..ProfileImageRepository.MAX_STORED_BYTES) throw BackupValidationException("Scenario artwork metadata is invalid.")
         }
         manifest.files.filter { it.kind == BackupFileKind.CHARACTER_AVATAR }.forEach {
             if (
@@ -717,6 +745,7 @@ class BackupRepository internal constructor(
                         throw BackupValidationException("Backup attachment image metadata does not match its content.")
                     }
                 }
+                BackupFileKind.SCENARIO_AVATAR,
                 BackupFileKind.CHARACTER_AVATAR,
                 BackupFileKind.PERSONA_AVATAR -> {
                     if (
@@ -791,12 +820,13 @@ class BackupRepository internal constructor(
         npcDossiers = payload.npcDossiers.size,
         messageAttachments = payload.messageAttachments.size,
         profileImages = files.count {
-            it.kind == BackupFileKind.CHARACTER_AVATAR || it.kind == BackupFileKind.PERSONA_AVATAR
+            it.kind in listOf(BackupFileKind.CHARACTER_AVATAR, BackupFileKind.PERSONA_AVATAR, BackupFileKind.SCENARIO_AVATAR)
         },
         includesDrafts = payload.chatSettings.any { !it.draftMessage.isNullOrEmpty() } ||
             payload.messageAttachments.any { it.messageId == null },
         includesCoopHistory = payload.coopRooms.isNotEmpty() || payload.coopEvents.isNotEmpty(),
-        coopWillRestoreOffline = true
+        coopWillRestoreOffline = true,
+        scenarios = payload.scenarios.size
     )
 
     private fun BackupAppearanceSettings.toDomain(): AppearanceSettings = AppearanceSettings(

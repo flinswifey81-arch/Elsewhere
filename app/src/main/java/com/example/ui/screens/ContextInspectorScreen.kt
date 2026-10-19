@@ -86,7 +86,22 @@ fun ContextInspectorScreen(
             includedMessages = 0
             compiledMessages = emptyList()
 
-            if (character != null && persona != null && history.isNotEmpty()) {
+            if (summary?.chat?.chatType == ChatType.SCENARIO && persona != null && history.isNotEmpty()) {
+                val session = appContainer.scenarioRepository?.session(chatId)
+                if (session != null) {
+                    inspectedCharacterName = "Scenario Narrator"
+                    val current = history.last()
+                    val scenarioMemories = appContainer.memoryRepository.getMemoriesOnce(chatId, "narrator:$chatId")
+                    durableMemories = scenarioMemories
+                    durableMemoryCount = scenarioMemories.size
+                    compiledMessages = com.example.domain.compiler.ScenarioContextCompiler().compile(
+                        com.example.data.model.ScenarioCodec.decode(session.definitionJson), persona, settings,
+                        history.dropLast(1), current, summary = rollingSummary, memories = scenarioMemories,
+                        lore = appContainer.lorebookRepository?.resolveActiveLore(chatId, history.dropLast(1), current, 24).orEmpty()
+                    )
+                    includedMessages = history.size.coerceAtMost(25)
+                }
+            } else if (character != null && persona != null && history.isNotEmpty()) {
                 val currentMessage = history.last()
                 val priorHistory = history.dropLast(1)
                 val supportingCast = if (npcBankEnabled) {

@@ -76,6 +76,27 @@ class BackupRepositoryTest {
     }
 
     @Test
+    fun scenarioBackupRestoresDefinitionsSnapshotsNarratorMemoryAndArtwork() = runBlocking {
+        val source = environment()
+        source.database.personaDao().insertPersona(completePayload().personas.first())
+        val scenarios = com.example.domain.repository.ScenarioRepository(source.database)
+        val definition = ScenarioDefinition(title = "Court", premise = "A royal invitation", npcs = listOf(ScenarioNpc(name = "Steward")))
+        scenarios.save("scenario-1", definition)
+        val chatId = scenarios.start("scenario-1", PERSONA_ID)
+        source.database.memoryDao().insertMemory(RoleplayMemoryEntity(chatId = chatId, characterId = "narrator:$chatId", category = MemoryCategory.EVENT, content = "The gate is closed"))
+        val artwork = pngBytes(Color.BLUE)
+        writeAvatar(ProfileImageKind.SCENARIO, "scenario-1", artwork)
+        val encrypted = ByteArrayOutputStream()
+        source.repository.exportEncrypted(encrypted, PASSPHRASE.toCharArray())
+        val target = environment()
+        target.repository.restoreEncrypted(ByteArrayInputStream(encrypted.toByteArray()), PASSPHRASE.toCharArray())
+        assertEquals(source.database.scenarioDao().getAll(), target.database.scenarioDao().getAll())
+        assertEquals(source.database.scenarioDao().sessions(), target.database.scenarioDao().sessions())
+        assertEquals(source.database.backupDao().getRoleplayMemories(), target.database.backupDao().getRoleplayMemories())
+        assertArrayEquals(artwork, target.profileImages.resolveImage(ProfileImageKind.SCENARIO, "scenario-1")!!.readBytes())
+    }
+
+    @Test
     fun encryptedRoundTripPreservesEveryDurableCategoryAndSanitizesDeviceSecrets() = runBlocking {
         val source = environment()
         val originalPayload = completePayload()

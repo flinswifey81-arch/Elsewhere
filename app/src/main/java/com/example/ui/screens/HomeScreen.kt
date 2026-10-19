@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.filled.AutoStories
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
@@ -40,7 +41,8 @@ fun HomeScreen(
     onNavigateToChats: () -> Unit,
     onNewSoloChat: () -> Unit,
     onNewGroupChat: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onScenarios: (() -> Unit)? = null
 ) {
     var recentChats by remember(chatRepository) {
         mutableStateOf<List<com.example.data.model.ChatSummary>?>(null)
@@ -189,6 +191,9 @@ fun HomeScreen(
                     }
                 }
                 
+                onScenarios?.let { openScenarios ->
+                    item { ActionCard("Scenarios · Quick Scene or Sandbox", Icons.Filled.AutoStories, openScenarios, Modifier.fillMaxWidth(), horizontal = true) }
+                }
                 // Library Section
                 item {
                     Column {

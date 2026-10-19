@@ -457,7 +457,7 @@ private fun BackupRestoreSettingsCard(repository: BackupRepository) {
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        "${preview.characters} Characters, ${preview.personas} Personas, ${preview.chats} chats, " +
+                        "${preview.characters} Characters, ${preview.personas} Personas, ${preview.scenarios} Scenarios, ${preview.chats} chats, " +
                             "${preview.messages} messages, ${preview.memories} memories, ${preview.lorebooks} Lorebooks, " +
                             "${preview.npcDossiers} NPC dossiers, ${preview.messageAttachments} message images, and " +
                             "${preview.profileImages} avatars passed validation."

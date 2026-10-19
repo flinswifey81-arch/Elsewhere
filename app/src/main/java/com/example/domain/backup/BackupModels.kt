@@ -30,7 +30,8 @@ data class BackupFileManifest(
 enum class BackupFileKind {
     MESSAGE_ATTACHMENT,
     CHARACTER_AVATAR,
-    PERSONA_AVATAR
+    PERSONA_AVATAR,
+    SCENARIO_AVATAR
 }
 
 @JsonClass(generateAdapter = true)
@@ -67,7 +68,9 @@ data class BackupPayload(
     val npcDossiers: List<NpcDossierEntity>,
     val npcBankSettings: List<NpcBankSettingsEntity>,
     val npcDossierUpdates: List<NpcDossierUpdateEntity>,
-    val appearance: BackupAppearanceSettings
+    val appearance: BackupAppearanceSettings,
+    val scenarios: List<ScenarioEntity> = emptyList(),
+    val scenarioSessions: List<ScenarioSessionEntity> = emptyList()
 )
 
 data class BackupPreview(
@@ -85,7 +88,8 @@ data class BackupPreview(
     val profileImages: Int,
     val includesDrafts: Boolean,
     val includesCoopHistory: Boolean,
-    val coopWillRestoreOffline: Boolean
+    val coopWillRestoreOffline: Boolean,
+    val scenarios: Int = 0
 )
 
 data class BackupInspection(

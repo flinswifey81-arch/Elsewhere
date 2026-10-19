@@ -25,7 +25,8 @@ import kotlinx.coroutines.withContext
 
 enum class ProfileImageKind(val directoryName: String) {
     PERSONA("personas"),
-    CHARACTER("characters")
+    CHARACTER("characters"),
+    SCENARIO("scenarios")
 }
 
 data class ProfileImageState(
