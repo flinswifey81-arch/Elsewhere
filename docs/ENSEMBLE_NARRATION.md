@@ -14,6 +14,8 @@ NPC Bank update metadata remains a separate terminal control block. It is parsed
 
 One generated exchange is stored as one existing Character `MessageEntity`. Its `content` contains a versioned JSON envelope prefixed by an internal record marker. This keeps segment order and identity inside the existing message, variant, regeneration, continuation, edit/delete, co-op, and backup lifecycle. It requires no database migration.
 
+The envelope codec uses Moshi's platform JSON values rather than generated adapters, and initializes only when an encoded story is actually read or written. The line-oriented model parser reads segment headers directly with `JsonReader` and is initialized only for generation. Opening a chat therefore does not initialize the structured-output parser, while envelopes saved by the original version remain compatible.
+
 Continue appends parsed segments to the existing logical response. Regenerate creates another complete message variant. Copy and context compilation use readable transcripts; lore activation, memory summaries, and NPC relevance never scan the internal JSON envelope.
 
 Editing an ensemble response presents a readable transcript. Saving that edit intentionally converts it to a normal Character response because a plain text editor cannot preserve speaker boundaries reliably.

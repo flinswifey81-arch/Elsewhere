@@ -182,7 +182,9 @@ class ChatDetailViewModel(
     private val compiler = ContextCompilerV1()
     private val memoryManager = AutomaticMemoryManager(memoryRepository)
     private val parsedNpcOutput = npcOutputParser
-    private val storyOutputParser = StoryOutputParser()
+    // Parsing is generation-only work. Keeping it lazy ensures opening any existing chat does not
+    // initialize the structured-output stack before a narrated response is actually generated.
+    private val storyOutputParser by lazy(LazyThreadSafetyMode.NONE) { StoryOutputParser() }
 
     init {
         loadData()

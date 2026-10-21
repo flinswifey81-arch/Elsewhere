@@ -16,6 +16,20 @@ class StoryResponseTest {
     private val ashford = StorySpeakerIdentity("npc-ashford", "Lady Ashford")
 
     @Test
+    fun persistedGeneratedAdapterEnvelopeRemainsReadableWithoutGeneratedAdapters() {
+        val previouslySaved = "\u001eelsewhere-story-v1\n" +
+            "{\"schemaVersion\":1,\"segments\":[" +
+            "{\"type\":\"NARRATION\",\"content\":\"The old hall waits.\",\"speakerId\":null,\"speakerName\":null}," +
+            "{\"type\":\"CHARACTER\",\"content\":\"\\\"Come in.\\\"\",\"speakerId\":\"character-1\",\"speakerName\":\"Zebulus\"}]}"
+
+        val decoded = requireNotNull(StoryResponseCodec.decode(previouslySaved))
+
+        assertEquals(listOf(StorySegmentType.NARRATION, StorySegmentType.CHARACTER), decoded.segments.map { it.type })
+        assertEquals("Zebulus", decoded.segments.last().speakerName)
+        assertEquals(decoded, StoryResponseCodec.decode(StoryResponseCodec.encode(decoded)))
+    }
+
+    @Test
     fun alternatingNarrationCharacterAndNpcSegmentsPreserveOrderAndIdentity() {
         val output = """
             <|elsewhere_story_v1|>

@@ -1,13 +1,13 @@
 package com.example.domain.story
 
-import com.squareup.moshi.JsonClass
+import com.squareup.moshi.JsonReader
 import com.squareup.moshi.Moshi
 import java.security.MessageDigest
 import java.util.Locale
+import okio.Buffer
 
 enum class StorySegmentType { NARRATION, CHARACTER, NPC }
 
-@JsonClass(generateAdapter = true)
 data class StorySegment(
     val type: StorySegmentType,
     val content: String,
@@ -15,7 +15,6 @@ data class StorySegment(
     val speakerName: String? = null
 )
 
-@JsonClass(generateAdapter = true)
 data class StoryResponse(
     val schemaVersion: Int = 1,
     val segments: List<StorySegment>
@@ -29,7 +28,6 @@ data class StoryParseResult(
     val warning: String? = null
 )
 
-@JsonClass(generateAdapter = true)
 internal data class StorySegmentHeader(
     val type: String,
     val speaker_id: String? = null,
@@ -38,20 +36,49 @@ internal data class StorySegmentHeader(
 
 object StoryResponseCodec {
     private const val PREFIX = "\u001eelsewhere-story-v1\n"
-    private val adapter = Moshi.Builder().build().adapter(StoryResponse::class.java)
+    private val adapter by lazy(LazyThreadSafetyMode.PUBLICATION) {
+        Moshi.Builder().build().adapter(Any::class.java)
+    }
 
-    fun encode(response: StoryResponse): String = PREFIX + adapter.toJson(
-        response.copy(segments = response.segments.filter { it.content.isNotBlank() })
-    )
+    fun encode(response: StoryResponse): String {
+        val payload = mapOf(
+            "schemaVersion" to response.schemaVersion,
+            "segments" to response.segments.filter { it.content.isNotBlank() }.map { segment ->
+                mapOf(
+                    "type" to segment.type.name,
+                    "content" to segment.content,
+                    "speakerId" to segment.speakerId,
+                    "speakerName" to segment.speakerName
+                )
+            }
+        )
+        return PREFIX + adapter.toJson(payload)
+    }
 
     fun decode(content: String): StoryResponse? {
         if (!content.startsWith(PREFIX)) return null
-        return runCatching { adapter.fromJson(content.removePrefix(PREFIX)) }
-            .getOrNull()
-            ?.takeIf { it.schemaVersion == 1 }
-            ?.let { response ->
-                response.copy(segments = response.segments.filter { segment -> segment.content.isNotBlank() })
+        return runCatching {
+            val root = adapter.fromJson(content.removePrefix(PREFIX)) as? Map<*, *> ?: return null
+            val schemaVersion = (root["schemaVersion"] as? Number)?.toInt() ?: return null
+            if (schemaVersion != 1) return null
+            val rawSegments = root["segments"] as? List<*> ?: return null
+            val segments = rawSegments.mapNotNull { raw ->
+                val value = raw as? Map<*, *> ?: return@mapNotNull null
+                val typeName = value["type"] as? String ?: return@mapNotNull null
+                val type = runCatching {
+                    StorySegmentType.valueOf(typeName.uppercase(Locale.ROOT))
+                }.getOrNull() ?: return@mapNotNull null
+                val text = (value["content"] as? String)?.takeIf(String::isNotBlank)
+                    ?: return@mapNotNull null
+                StorySegment(
+                    type = type,
+                    content = text,
+                    speakerId = value["speakerId"] as? String,
+                    speakerName = value["speakerName"] as? String
+                )
             }
+            StoryResponse(schemaVersion = schemaVersion, segments = segments)
+        }.getOrNull()
     }
 
     fun isEncoded(content: String): Boolean = content.startsWith(PREFIX)
@@ -125,8 +152,6 @@ object StoryResponseCodec {
 }
 
 class StoryOutputParser {
-    private val headerAdapter = Moshi.Builder().build().adapter(StorySegmentHeader::class.java)
-
     fun parse(
         output: String,
         primaryCharacter: StorySpeakerIdentity,
@@ -167,7 +192,7 @@ class StoryOutputParser {
                     currentHeader = if (
                         json.startsWith('{') && jsonEnd >= 0 && json.length <= MAX_HEADER_CHARS
                     ) {
-                        runCatching { headerAdapter.fromJson(json) }.getOrNull()
+                        parseHeader(json)
                     } else null
                     if (currentHeader == null) malformed = true
                     val trailingProse = if (jsonEnd >= 0) payload.substring(jsonEnd + 1).trim() else {
@@ -270,6 +295,36 @@ class StoryOutputParser {
         return "story-npc:$digest"
     }
 
+    private fun parseHeader(json: String): StorySegmentHeader? = runCatching {
+        val reader = JsonReader.of(Buffer().writeUtf8(json))
+        var type: String? = null
+        var speakerId: String? = null
+        var speakerName: String? = null
+        reader.beginObject()
+        while (reader.hasNext()) {
+            when (reader.selectName(HEADER_OPTIONS)) {
+                0 -> type = reader.nextString()
+                1 -> speakerId = reader.nextNullableString()
+                2 -> speakerName = reader.nextNullableString()
+                -1 -> {
+                    reader.skipName()
+                    reader.skipValue()
+                }
+            }
+        }
+        reader.endObject()
+        require(reader.peek() == JsonReader.Token.END_DOCUMENT)
+        StorySegmentHeader(
+            type = requireNotNull(type).trim().takeIf(String::isNotEmpty)
+                ?: error("Missing segment type"),
+            speaker_id = speakerId,
+            speaker_name = speakerName
+        )
+    }.getOrNull()
+
+    private fun JsonReader.nextNullableString(): String? =
+        if (peek() == JsonReader.Token.NULL) nextNull() else nextString()
+
     private fun sanitizeControlSyntax(line: String): String {
         var visible = SEGMENT_HEADER_PATTERN.replace(line, "")
             .replace(START_MARKER, "")
@@ -290,6 +345,7 @@ class StoryOutputParser {
         private const val MAX_HEADER_CHARS = 1000
         private const val MAX_ID_CHARS = 120
         private const val MAX_NAME_CHARS = 120
+        private val HEADER_OPTIONS = JsonReader.Options.of("type", "speaker_id", "speaker_name")
         private val SEGMENT_HEADER_PATTERN = Regex("<\\|segment\\|>\\s*\\{[^}\\r\\n]*}")
 
         private fun looksLikeControlFragment(line: String): Boolean =
