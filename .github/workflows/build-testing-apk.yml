@@ -1,0 +1,78 @@
+name: Build Android Testing APK
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-testing-apk:
+    name: Build Elsewhere Test APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out selected branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+          persist-credentials: false
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools
+
+      - name: Install required Android SDK packages
+        run: sdkmanager "platforms;android-36.1" "build-tools;36.0.0"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: true
+
+      - name: Restore dedicated testing signing key
+        env:
+          TEST_KEYSTORE_BASE64: ${{ secrets.ELSEWHERE_TEST_KEYSTORE_BASE64 }}
+          TEST_STORE_PASSWORD: ${{ secrets.ELSEWHERE_TEST_STORE_PASSWORD }}
+          TEST_KEY_ALIAS: ${{ secrets.ELSEWHERE_TEST_KEY_ALIAS }}
+          TEST_KEY_PASSWORD: ${{ secrets.ELSEWHERE_TEST_KEY_PASSWORD }}
+        run: |
+          for value in TEST_KEYSTORE_BASE64 TEST_STORE_PASSWORD TEST_KEY_ALIAS TEST_KEY_PASSWORD; do
+            if [ -z "${!value}" ]; then
+              echo "Missing required testing-signing secret: $value" >&2
+              exit 1
+            fi
+          done
+          umask 077
+          printf '%s' "$TEST_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/elsewhere-test.jks"
+
+      - name: Build separately installable testing APK
+        env:
+          ELSEWHERE_TEST_KEYSTORE_PATH: ${{ runner.temp }}/elsewhere-test.jks
+          ELSEWHERE_TEST_STORE_PASSWORD: ${{ secrets.ELSEWHERE_TEST_STORE_PASSWORD }}
+          ELSEWHERE_TEST_KEY_ALIAS: ${{ secrets.ELSEWHERE_TEST_KEY_ALIAS }}
+          ELSEWHERE_TEST_KEY_PASSWORD: ${{ secrets.ELSEWHERE_TEST_KEY_PASSWORD }}
+        run: bash ./gradlew :app:assembleSandbox --no-daemon --no-configuration-cache
+
+      - name: Remove temporary testing signing key
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/elsewhere-test.jks" ]; then
+            shred --remove "$RUNNER_TEMP/elsewhere-test.jks" 2>/dev/null || rm -f "$RUNNER_TEMP/elsewhere-test.jks"
+          fi
+
+      - name: Upload testing APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Elsewhere-Test-APK
+          path: app/build/outputs/apk/sandbox/app-sandbox.apk
+          if-no-files-found: error
+          retention-days: 14
