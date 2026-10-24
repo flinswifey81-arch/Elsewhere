@@ -1,4 +1,4 @@
-name: Build Android Debug APK
+name: Build Temporary Elsewhere Test APK
 
 on:
   workflow_dispatch:
@@ -8,7 +8,7 @@ permissions:
 
 jobs:
   build-debug-apk:
-    name: Build app-debug.apk
+    name: Build temporary app-sandbox.apk
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -33,13 +33,13 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Build debug APK
-        run: bash ./gradlew :app:assembleDebug --no-daemon
+      - name: Build temporary sandbox APK
+        run: bash ./gradlew :app:assembleSandbox --no-daemon
 
-      - name: Upload debug APK
+      - name: Upload temporary test APK
         uses: actions/upload-artifact@v4
         with:
-          name: Elsewhere-Debug-APK
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: Elsewhere-Temporary-Test-APK
+          path: app/build/outputs/apk/sandbox/app-sandbox.apk
           if-no-files-found: error
           retention-days: 14
