@@ -20,9 +20,11 @@ debug.keystore
 # Local release preservation and private signing material. Never commit these.
 /.local-release-archive/
 /my-upload-key.jks
-/*.jks
-/*.keystore
-/*.p12
-/*.pfx
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.b64
+*.base64
 /keystore.properties
 /signing.properties

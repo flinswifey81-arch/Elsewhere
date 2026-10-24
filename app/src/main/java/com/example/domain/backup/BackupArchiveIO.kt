@@ -14,8 +14,16 @@ import java.util.zip.ZipOutputStream
 
 internal class BackupArchiveIO(
     moshi: Moshi,
-    private val expectedApplicationId: String
+    private val acceptedApplicationIds: Set<String>
 ) {
+    constructor(moshi: Moshi, expectedApplicationId: String) : this(moshi, setOf(expectedApplicationId))
+
+    init {
+        require(acceptedApplicationIds.isNotEmpty() && acceptedApplicationIds.none(String::isBlank)) {
+            "At least one non-blank backup application ID is required."
+        }
+    }
+
     private val manifestAdapter = moshi.adapter(BackupManifest::class.java).indent("  ")
     private val payloadAdapter = moshi.adapter(BackupPayload::class.java).indent("  ")
 
@@ -117,7 +125,7 @@ internal class BackupArchiveIO(
         if (manifest.formatVersion != FORMAT_VERSION) {
             throw BackupValidationException("Unsupported backup format version: ${manifest.formatVersion}")
         }
-        if (manifest.applicationId != expectedApplicationId) {
+        if (manifest.applicationId !in acceptedApplicationIds) {
             throw BackupValidationException("This backup belongs to a different application.")
         }
         if (manifest.databaseVersion > APP_DATABASE_VERSION) {

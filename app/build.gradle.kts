@@ -5,18 +5,28 @@ plugins {
   alias(libs.plugins.roborazzi)
 }
 
+val productionApplicationId = "com.aistudio.elsewhere.abwzy"
+val testSigningValues = mapOf(
+  "path" to System.getenv("ELSEWHERE_TEST_KEYSTORE_PATH"),
+  "storePassword" to System.getenv("ELSEWHERE_TEST_STORE_PASSWORD"),
+  "keyAlias" to System.getenv("ELSEWHERE_TEST_KEY_ALIAS"),
+  "keyPassword" to System.getenv("ELSEWHERE_TEST_KEY_PASSWORD")
+)
+val hasCompleteTestSigningConfiguration = testSigningValues.values.all { !it.isNullOrBlank() }
+
 android {
   namespace = "com.example"
   compileSdk { version = release(36) { minorApiLevel = 1 } }
 
   defaultConfig {
-    applicationId = "com.aistudio.elsewhere.abwzy"
+    applicationId = productionApplicationId
     minSdk = 33
     targetSdk = 36
     versionCode = 1
     versionName = "1.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    buildConfigField("String", "BACKUP_IMPORT_SOURCE_APPLICATION_ID", "\"\"")
   }
 
   signingConfigs {
@@ -26,6 +36,14 @@ android {
       storePassword = System.getenv("STORE_PASSWORD")
       keyAlias = "upload"
       keyPassword = System.getenv("KEY_PASSWORD")
+    }
+    if (hasCompleteTestSigningConfiguration) {
+      create("testing") {
+        storeFile = file(requireNotNull(testSigningValues.getValue("path")))
+        storePassword = testSigningValues.getValue("storePassword")
+        keyAlias = testSigningValues.getValue("keyAlias")
+        keyPassword = testSigningValues.getValue("keyPassword")
+      }
     }
   }
 
@@ -37,6 +55,18 @@ android {
       signingConfig = signingConfigs.getByName("release")
     }
     debug { }
+    create("sandbox") {
+      initWith(getByName("debug"))
+      applicationIdSuffix = ".test"
+      versionNameSuffix = "-test"
+      buildConfigField(
+        "String",
+        "BACKUP_IMPORT_SOURCE_APPLICATION_ID",
+        "\"$productionApplicationId\""
+      )
+      matchingFallbacks += listOf("debug")
+      signingConfigs.findByName("testing")?.let { signingConfig = it }
+    }
   }
   compileOptions {
     sourceCompatibility = JavaVersion.VERSION_11
@@ -50,6 +80,12 @@ android {
   dependenciesInfo {
     includeInApk = false
     includeInBundle = true
+  }
+}
+
+androidComponents {
+  beforeVariants(selector().withBuildType("sandbox")) { variantBuilder ->
+    (variantBuilder as com.android.build.api.variant.HasUnitTestBuilder).enableUnitTest = true
   }
 }
 
@@ -103,6 +139,8 @@ dependencies {
   androidTestImplementation(libs.androidx.runner)
   debugImplementation(libs.androidx.compose.ui.test.manifest)
   debugImplementation(libs.androidx.compose.ui.tooling)
+  add("sandboxImplementation", libs.androidx.compose.ui.test.manifest)
+  add("sandboxImplementation", libs.androidx.compose.ui.tooling)
   "ksp"(libs.androidx.room.compiler)
   "ksp"(libs.moshi.kotlin.codegen)
 }

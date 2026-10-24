@@ -45,7 +45,15 @@ class BackupRepository internal constructor(
     private val snapshotHook: suspend () -> Unit = {},
     private val beforeDataReplacement: suspend () -> Unit = {}
 ) {
-    private val archiveIO = BackupArchiveIO(moshi, BuildConfig.APPLICATION_ID)
+    private val archiveIO = BackupArchiveIO(
+        moshi,
+        buildSet {
+            add(BuildConfig.APPLICATION_ID)
+            BuildConfig.BACKUP_IMPORT_SOURCE_APPLICATION_ID
+                .takeIf(String::isNotBlank)
+                ?.let(::add)
+        }
+    )
     private val coopCodec = CoopCodec(moshi)
     private val backupDao = database.backupDao()
     private val operationMutex = Mutex()

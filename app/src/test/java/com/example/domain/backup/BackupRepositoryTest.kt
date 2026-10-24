@@ -497,6 +497,36 @@ class BackupRepositoryTest {
     }
 
     @Test
+    fun testAppBackupPolicyAcceptsProductionArchivesWithoutWeakeningProductionValidation() {
+        val productionId = "com.aistudio.elsewhere.abwzy"
+        val testingId = "$productionId.test"
+        val productionArchive = BackupArchiveIO(moshi, setOf(productionId))
+        val testingArchive = BackupArchiveIO(moshi, setOf(testingId, productionId))
+        val manifest = BackupManifest(
+            formatVersion = BackupArchiveIO.FORMAT_VERSION,
+            applicationId = productionId,
+            appVersionCode = 1,
+            appVersionName = "test",
+            databaseVersion = APP_DATABASE_VERSION,
+            createdAt = 1,
+            payloadSha256 = "0".repeat(64),
+            files = emptyList(),
+            excludedCategories = emptyList(),
+            coopRestoreMode = "OFFLINE_NON_RESUMABLE_HISTORY"
+        )
+
+        testingArchive.validateManifest(manifest)
+        productionArchive.validateManifest(manifest)
+
+        val testingManifest = manifest.copy(applicationId = testingId)
+        testingArchive.validateManifest(testingManifest)
+        assertTrue(
+            runCatching { productionArchive.validateManifest(testingManifest) }
+                .exceptionOrNull() is BackupValidationException
+        )
+    }
+
+    @Test
     fun snapshotBlocksConcurrentRepositoryWriteUntilImmutableFilesAreStaged() = runBlocking {
         val snapshotReached = CountDownLatch(1)
         val allowSnapshot = CountDownLatch(1)
