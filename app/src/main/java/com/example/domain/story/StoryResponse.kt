@@ -151,8 +151,8 @@ object StoryResponseCodec {
         }
 }
 
-class StoryOutputParser {
-    fun parse(
+open class StoryOutputParser {
+    open fun parse(
         output: String,
         primaryCharacter: StorySpeakerIdentity,
         knownNpcs: List<StorySpeakerIdentity> = emptyList(),
@@ -352,6 +352,23 @@ class StoryOutputParser {
             line.startsWith("<|elsewhere_") ||
                 line.startsWith("<|segment") ||
                 line.startsWith("<|end_story")
+
+        fun fallbackVisibleText(output: String): String = output.lineSequence()
+            .map { line ->
+                var visible = SEGMENT_HEADER_PATTERN.replace(line, "")
+                    .replace(START_MARKER, "")
+                    .replace(END_MARKER, "")
+                    .replace(SEGMENT_MARKER, "")
+                val incompleteControlStart = listOf("<|elsewhere_", "<|segment", "<|end_story")
+                    .map(visible::indexOf)
+                    .filter { it >= 0 }
+                    .minOrNull()
+                if (incompleteControlStart != null) visible = visible.substring(0, incompleteControlStart)
+                visible.trimEnd()
+            }
+            .filterNot { looksLikeControlFragment(it.trim()) }
+            .joinToString("\n")
+            .trim()
 
         val OUTPUT_INSTRUCTION: String = """
             --- ENSEMBLE STORY RESPONSE CONTRACT ---

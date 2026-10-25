@@ -155,7 +155,8 @@ class ChatDetailViewModel(
     private val npcRepository: NpcRepository? = null,
     private val npcOutputParser: NpcStructuredOutputParser? = null,
     private val dataCoordinator: AppDataMaintenanceCoordinator = AppDataMaintenanceCoordinator.Global,
-    private val scenarioRepository: com.example.domain.repository.ScenarioRepository? = null
+    private val scenarioRepository: com.example.domain.repository.ScenarioRepository? = null,
+    private val storyOutputParserFactory: () -> StoryOutputParser = ::StoryOutputParser
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow<ChatUiState>(ChatUiState.Loading)
@@ -184,7 +185,7 @@ class ChatDetailViewModel(
     private val parsedNpcOutput = npcOutputParser
     // Parsing is generation-only work. Keeping it lazy ensures opening any existing chat does not
     // initialize the structured-output stack before a narrated response is actually generated.
-    private val storyOutputParser by lazy(LazyThreadSafetyMode.NONE) { StoryOutputParser() }
+    private val storyOutputParser by lazy(LazyThreadSafetyMode.NONE, storyOutputParserFactory)
 
     init {
         loadData()
@@ -686,6 +687,18 @@ class ChatDetailViewModel(
             val state = _uiState.value as? ChatUiState.Success ?: return
             val history = state.messages.filter { it.isPrimaryVariant && it.messageId != userMsg.messageId }
             startGenerationInternal(userMsg, history, dataRevision = dataRevision)
+        } catch (cancellation: kotlinx.coroutines.CancellationException) {
+            throw cancellation
+        } catch (_: Exception) {
+            pendingPartialGeneration = null
+            updateSuccessState {
+                it.copy(
+                    isGenerating = false,
+                    streamingContent = null,
+                    generationCharacterId = null,
+                    generationError = "The response could not be prepared. No provider request was sent."
+                )
+            }
         } finally {
             generationStartInProgress = false
         }
@@ -992,82 +1005,124 @@ class ChatDetailViewModel(
             // incorrectly rejected as if generation were still running.
             generationJob = null
 
-            if (stopped) {
-                val visiblePartial = visibleGeneratedContent(generatedContent, prepared)
-                if (!hasVisibleContent(visiblePartial)) {
-                    pendingPartialGeneration = null
-                } else {
-                    val partialMetadata = (currentMetadata ?: GenerationMetadataEntity(
-                        messageId = "pending-partial",
-                        requestedModelId = prepared.options.modelId
-                    )).copy(
-                        isPartial = true,
+            try {
+                if (stopped) {
+                    val visiblePartial = visibleGeneratedContent(generatedContent, prepared)
+                    retainPartialGeneration(
+                        visibleContent = visiblePartial,
+                        metadata = currentMetadata,
+                        requestedModelId = prepared.options.modelId,
                         wasUserStopped = wasUserStopped,
-                        finishReason = currentMetadata?.finishReason
-                            ?: if (wasUserStopped) "user_stopped" else "partial_error"
+                        errorMessage = generationError
                     )
-                    pendingPartialGeneration = pendingPartialGeneration?.copy(metadata = partialMetadata)
-                }
-                updateSuccessState {
-                    it.copy(
-                        isGenerating = false,
-                        partialStopped = hasVisibleContent(visiblePartial),
-                        partialResolutionInProgress = false,
-                        streamingContent = visiblePartial.takeIf(::hasVisibleContent),
-                        generationError = generationError
-                    )
-                }
-                if (!hasVisibleContent(visiblePartial)) {
-                    finishCoopGenerationWithError(generationError ?: "Generation stopped")
-                }
-            } else if (generatedContent.isBlank()) {
-                pendingPartialGeneration = null
-                val finishReason = currentMetadata?.finishReason?.takeIf(String::isNotBlank)
-                updateSuccessState {
-                    it.copy(
-                        isGenerating = false,
-                        streamingContent = null,
-                        generationCharacterId = null,
-                        generationError = finishReason?.let {
-                            "The provider returned no visible response (finish reason: $it). You can retry this turn."
-                        } ?: "The provider returned no response. You can retry this turn."
-                    )
-                }
-                finishCoopGenerationWithError("Provider returned no visible response")
-            } else {
-                pendingPartialGeneration = null
-                val parsed = if (prepared.npcBankEnabled && parsedNpcOutput != null) {
-                    parsedNpcOutput.parse(generatedContent)
+                    if (!hasVisibleContent(visiblePartial)) {
+                        finishCoopGenerationWithError(generationError ?: "Generation stopped")
+                    }
+                } else if (generatedContent.isBlank()) {
+                    pendingPartialGeneration = null
+                    val finishReason = currentMetadata?.finishReason?.takeIf(String::isNotBlank)
+                    updateSuccessState {
+                        it.copy(
+                            isGenerating = false,
+                            streamingContent = null,
+                            generationCharacterId = null,
+                            generationError = finishReason?.let {
+                                "The provider returned no visible response (finish reason: $it). You can retry this turn."
+                            } ?: "The provider returned no response. You can retry this turn."
+                        )
+                    }
+                    finishCoopGenerationWithError("Provider returned no visible response")
                 } else {
-                    com.example.domain.npc.ParsedNpcOutput(generatedContent)
-                }
-                val storyParsed = if (prepared.ensembleNarrationEnabled) {
-                    storyOutputParser.parse(
-                        output = parsed.storyText,
-                        primaryCharacter = StorySpeakerIdentity(fullCharacter.characterId, fullCharacter.displayName),
-                        knownNpcs = prepared.knownNpcSpeakers,
-                        final = true
+                    val parsed = if (prepared.npcBankEnabled && parsedNpcOutput != null) {
+                        parsedNpcOutput.parse(generatedContent)
+                    } else {
+                        com.example.domain.npc.ParsedNpcOutput(generatedContent)
+                    }
+                    val storyParsed = if (prepared.ensembleNarrationEnabled) {
+                        storyOutputParser.parse(
+                            output = parsed.storyText,
+                            primaryCharacter = StorySpeakerIdentity(fullCharacter.characterId, fullCharacter.displayName),
+                            knownNpcs = prepared.knownNpcSpeakers,
+                            final = true
+                        )
+                    } else null
+                    val persistedContent = storyParsed?.response?.let(StoryResponseCodec::encode)
+                        ?: parsed.storyText
+                    val formatWarning = listOfNotNull(parsed.warning, storyParsed?.warning)
+                        .joinToString(" ")
+                        .takeIf(String::isNotBlank)
+                    val saved = saveGeneratedMessage(
+                        content = persistedContent,
+                        metadata = currentMetadata,
+                        character = fullCharacter,
+                        variantGroupId = variantGroupId,
+                        sourceMessage = currentMessage,
+                        contextMessages = scopedHistory + currentMessage,
+                        continuationTarget = continuationTarget,
+                        npcUpdates = parsed.updates,
+                        npcWarning = formatWarning,
+                        activePersonaId = prepared.activePersonaId,
+                        dataRevision = dataRevision
                     )
-                } else null
-                val persistedContent = storyParsed?.response?.let(StoryResponseCodec::encode)
-                    ?: parsed.storyText
-                val formatWarning = listOfNotNull(parsed.warning, storyParsed?.warning)
-                    .joinToString(" ")
-                    .takeIf(String::isNotBlank)
-                saveGeneratedMessage(
-                    content = persistedContent,
+                    if (saved) pendingPartialGeneration = null
+                }
+            } catch (cancellation: kotlinx.coroutines.CancellationException) {
+                throw cancellation
+            } catch (_: Exception) {
+                val visiblePartial = safeVisibleGeneratedContent(generatedContent, prepared)
+                retainPartialGeneration(
+                    visibleContent = visiblePartial,
                     metadata = currentMetadata,
-                    character = fullCharacter,
-                    variantGroupId = variantGroupId,
-                    sourceMessage = currentMessage,
-                    contextMessages = scopedHistory + currentMessage,
-                    continuationTarget = continuationTarget,
-                    npcUpdates = parsed.updates,
-                    npcWarning = formatWarning,
-                    activePersonaId = prepared.activePersonaId,
-                    dataRevision = dataRevision
+                    requestedModelId = prepared.options.modelId,
+                    wasUserStopped = false,
+                    errorMessage = "The response could not be processed safely. Generated text was retained so you can keep or discard it."
                 )
             }
+        }
+    }
+
+    private fun retainPartialGeneration(
+        visibleContent: String,
+        metadata: GenerationMetadataEntity?,
+        requestedModelId: String,
+        wasUserStopped: Boolean,
+        errorMessage: String?
+    ) {
+        val hasContent = hasVisibleContent(visibleContent)
+        if (!hasContent) {
+            pendingPartialGeneration = null
+        } else {
+            val partialMetadata = (metadata ?: GenerationMetadataEntity(
+                messageId = "pending-partial",
+                requestedModelId = requestedModelId
+            )).copy(
+                isPartial = true,
+                wasUserStopped = wasUserStopped,
+                finishReason = metadata?.finishReason
+                    ?: if (wasUserStopped) "user_stopped" else "partial_error"
+            )
+            pendingPartialGeneration = pendingPartialGeneration?.copy(metadata = partialMetadata)
+        }
+        updateSuccessState {
+            it.copy(
+                isGenerating = false,
+                partialStopped = hasContent,
+                partialResolutionInProgress = false,
+                streamingContent = visibleContent.takeIf { hasContent },
+                generationCharacterId = if (hasContent) it.generationCharacterId else null,
+                generationError = errorMessage
+            )
+        }
+    }
+
+    private fun safeVisibleGeneratedContent(content: String, prepared: PreparedGeneration): String {
+        return runCatching { visibleGeneratedContent(content, prepared) }.getOrElse {
+            val storyText = if (prepared.npcBankEnabled) {
+                runCatching { NpcStructuredOutputParser.visibleStoryText(content) }.getOrDefault(content)
+            } else content
+            if (prepared.ensembleNarrationEnabled) {
+                StoryOutputParser.fallbackVisibleText(storyText)
+            } else storyText
         }
     }
 
@@ -1441,14 +1496,13 @@ class ChatDetailViewModel(
                     }
                     null
                 } catch (error: Exception) {
-                    updateSuccessState {
-                        it.copy(
-                            isGenerating = false,
-                            streamingContent = null,
-                            generationCharacterId = null,
-                            generationError = "The continuation could not be saved."
-                        )
-                    }
+                    retainPartialGeneration(
+                        visibleContent = content,
+                        metadata = metadata,
+                        requestedModelId = metadata?.requestedModelId ?: "unknown",
+                        wasUserStopped = false,
+                        errorMessage = "The continuation could not be saved. Generated text was retained so you can try again or discard it."
+                    )
                     finishCoopGenerationWithError(error.message ?: "Continuation persistence failed")
                     return false
                 }
@@ -1492,11 +1546,7 @@ class ChatDetailViewModel(
                         ?: npcUpdateWarning
                 )
             }
-            chatRepository.getChatSummaryById(chatId)?.let { summary ->
-                dataCoordinator.withMutation(dataRevision) {
-                    chatRepository.updateChat(summary.chat.copy(updatedAt = System.currentTimeMillis()))
-                }
-            }
+            refreshChatTimestamp(dataRevision)
             return syncError == null && completionError == null
         }
 
@@ -1571,14 +1621,13 @@ class ChatDetailViewModel(
                 }
                 null
             } catch (error: Exception) {
-                updateSuccessState {
-                    it.copy(
-                        isGenerating = false,
-                        streamingContent = null,
-                        generationCharacterId = null,
-                        generationError = "The generated response could not be saved."
-                    )
-                }
+                retainPartialGeneration(
+                    visibleContent = content,
+                    metadata = metadata,
+                    requestedModelId = metadata?.requestedModelId ?: "unknown",
+                    wasUserStopped = false,
+                    errorMessage = "The generated response could not be saved. Generated text was retained so you can try again or discard it."
+                )
                 finishCoopGenerationWithError(error.message ?: "Response persistence failed")
                 return false
             }
@@ -1638,13 +1687,27 @@ class ChatDetailViewModel(
             )
         }
         
-        val summary = chatRepository.getChatSummaryById(chatId)
-        summary?.let {
-            dataCoordinator.withMutation(dataRevision) {
-                chatRepository.updateChat(it.chat.copy(updatedAt = System.currentTimeMillis()))
+        refreshChatTimestamp(dataRevision)
+        return syncError == null && completionError == null
+    }
+
+    private suspend fun refreshChatTimestamp(dataRevision: AppDataRevision) {
+        try {
+            chatRepository.getChatSummaryById(chatId)?.let { summary ->
+                dataCoordinator.withMutation(dataRevision) {
+                    chatRepository.updateChat(summary.chat.copy(updatedAt = System.currentTimeMillis()))
+                }
+            }
+        } catch (cancellation: kotlinx.coroutines.CancellationException) {
+            throw cancellation
+        } catch (_: Exception) {
+            updateSuccessState { state ->
+                state.copy(
+                    generationError = state.generationError
+                        ?: "The response was saved, but the chat's updated time could not be refreshed."
+                )
             }
         }
-        return syncError == null && completionError == null
     }
 
     private suspend fun finishCoopGenerationSuccessfully(

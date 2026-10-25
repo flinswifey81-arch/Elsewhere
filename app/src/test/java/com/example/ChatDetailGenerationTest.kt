@@ -36,6 +36,7 @@ import com.example.domain.provider.StreamEvent
 import com.example.domain.repository.CharacterRepository
 import com.example.domain.repository.AppDataMaintenanceCoordinator
 import com.example.domain.repository.ChatRepository
+import com.example.domain.repository.LorebookRepository
 import com.example.domain.repository.MemoryRepository
 import com.example.domain.repository.MessageRepository
 import com.example.domain.repository.MessageAttachmentRepository
@@ -505,6 +506,173 @@ class ChatDetailGenerationTest {
         val npc = story.segments.single { it.type == StorySegmentType.NPC }
         assertEquals("npc-ashford", npc.speakerId)
         assertEquals("Lady Ashford", npc.speakerName)
+    }
+
+    @Test
+    fun narratorNpcBankAndLorebookGenerateTogetherInOneRequest() = runBlocking {
+        val provider = SequentialResponseProvider(
+            listOf(
+                """
+                    <|elsewhere_story_v1|>
+                    <|segment|>{"type":"narration"}
+                    The observatory lens catches a thread of moonlight.
+                    <|segment|>{"type":"character"}
+                    "The old chart was right."
+                    <|segment|>{"type":"npc","speaker_id":"npc-keeper","speaker_name":"Keeper"}
+                    "It usually is."
+                    <|end_story|>
+                """.trimIndent()
+            )
+        )
+        val harness = createHarness(
+            provider = provider,
+            responseLengthProfile = ResponseLengthProfile.NORMAL,
+            narratorEnabled = true,
+            npcBankEnabledInitially = true
+        )
+        harness.lorebookRepository.saveDefinition(
+            LorebookEntity(lorebookId = "observatory-book", name = "Observatory"),
+            listOf(
+                LorebookEntryEntity(
+                    entryId = "observatory-entry",
+                    lorebookId = "observatory-book",
+                    title = "Moon Lens",
+                    activationMode = "always",
+                    currentContent = "The moon lens reveals hidden constellations."
+                )
+            )
+        )
+        harness.lorebookRepository.attachLorebook(harness.chatId, "observatory-book")
+        harness.npcRepository.saveManual(
+            NpcDossier(
+                npcId = "npc-keeper",
+                chatId = harness.chatId,
+                displayName = "Keeper",
+                aliases = emptyList(),
+                role = "Observatory keeper",
+                appearance = "Silver spectacles",
+                personality = "Dry and watchful",
+                relationshipToPersona = "",
+                personaRelationships = emptyMap(),
+                characterKnowledge = emptyMap(),
+                goals = "Protect the moon lens",
+                secrets = "",
+                authorNotes = "",
+                keepInScene = true,
+                isManualBase = true,
+                createdAt = 1,
+                updatedAt = 1
+            )
+        )
+
+        harness.viewModel.onDraftChanged("Use the lens.")
+        harness.viewModel.sendMessage()
+        val completed = withTimeout(15_000) {
+            harness.messageRepository.getMessagesForChat(harness.chatId).first { it.size == 2 }
+        }
+
+        assertEquals(1, provider.requests.size)
+        val systemPrompt = provider.requests.single().first { it.role == Role.SYSTEM }.content
+        assertTrue(systemPrompt.contains("The moon lens reveals hidden constellations."))
+        assertTrue(systemPrompt.contains("Keeper"))
+        assertEquals(
+            listOf(StorySegmentType.NARRATION, StorySegmentType.CHARACTER, StorySegmentType.NPC),
+            requireNotNull(StoryResponseCodec.decode(completed.last().content)).segments.map { it.type }
+        )
+    }
+
+    @Test
+    fun finalStoryParserFailureRetainsSanitizedGeneratedTextAsPartial() = runBlocking {
+        val raw = """
+            <|elsewhere_story_v1|>
+            <|segment|>{"type":"character"}
+            "I can still answer."
+            <|end_story|>
+        """.trimIndent()
+        val provider = SequentialResponseProvider(listOf(raw))
+        val harness = createHarness(
+            provider = provider,
+            responseLengthProfile = ResponseLengthProfile.NORMAL,
+            narratorEnabled = true,
+            storyOutputParserFactory = {
+                object : StoryOutputParser() {
+                    override fun parse(
+                        output: String,
+                        primaryCharacter: com.example.domain.story.StorySpeakerIdentity,
+                        knownNpcs: List<com.example.domain.story.StorySpeakerIdentity>,
+                        final: Boolean
+                    ): com.example.domain.story.StoryParseResult {
+                        if (final) error("PRIVATE generated text must not enter the error")
+                        return super.parse(output, primaryCharacter, knownNpcs, final)
+                    }
+                }
+            }
+        )
+
+        harness.viewModel.onDraftChanged("Answer.")
+        harness.viewModel.sendMessage()
+        val failed = withTimeout(15_000) {
+            harness.viewModel.uiState.first { it is ChatUiState.Success && it.partialStopped }
+        } as ChatUiState.Success
+
+        assertEquals(1, provider.requests.size)
+        assertTrue(failed.streamingContent.orEmpty().contains("I can still answer."))
+        assertFalse(failed.streamingContent.orEmpty().contains("<|"))
+        assertTrue(failed.generationError.orEmpty().contains("could not be processed safely"))
+        assertFalse(failed.generationError.orEmpty().contains("PRIVATE"))
+        assertEquals(1, harness.messageRepository.getMessagesForChat(harness.chatId).first().size)
+    }
+
+    @Test
+    fun generatedMessagePersistenceFailureRetainsTextAndCanBeRetried() = runBlocking {
+        val provider = SequentialResponseProvider(listOf("Unsaved reply."))
+        val harness = createHarness(provider, ResponseLengthProfile.NORMAL)
+        database.openHelper.writableDatabase.execSQL(
+            """
+                CREATE TRIGGER fail_generated_message
+                BEFORE INSERT ON messages
+                WHEN NEW.speakerType = 'CHARACTER'
+                BEGIN
+                    SELECT RAISE(ABORT, 'forced test failure');
+                END
+            """.trimIndent()
+        )
+
+        harness.viewModel.onDraftChanged("Answer.")
+        harness.viewModel.sendMessage()
+        val failed = withTimeout(15_000) {
+            harness.viewModel.uiState.first { it is ChatUiState.Success && it.partialStopped }
+        } as ChatUiState.Success
+
+        assertEquals("Unsaved reply.", failed.streamingContent)
+        assertTrue(failed.generationError.orEmpty().contains("could not be saved"))
+        assertEquals(1, harness.messageRepository.getMessagesForChat(harness.chatId).first().size)
+
+        database.openHelper.writableDatabase.execSQL("DROP TRIGGER fail_generated_message")
+        harness.viewModel.keepPartial()
+        val saved = withTimeout(15_000) {
+            harness.messageRepository.getMessagesForChat(harness.chatId).first { it.size == 2 }
+        }
+        assertEquals("Unsaved reply.", saved.last().content)
+        assertEquals(1, provider.requests.size)
+    }
+
+    @Test
+    fun providerFailureBeforeFirstChunkIsReportedWithoutCrashing() = runBlocking {
+        val provider = ThrowingProvider()
+        val harness = createHarness(provider, ResponseLengthProfile.NORMAL)
+
+        harness.viewModel.onDraftChanged("Answer.")
+        harness.viewModel.sendMessage()
+        val failed = withTimeout(15_000) {
+            harness.viewModel.uiState.first {
+                it is ChatUiState.Success && !it.isGenerating && it.generationError != null
+            }
+        } as ChatUiState.Success
+
+        assertEquals(1, provider.requestCount)
+        assertFalse(failed.partialStopped)
+        assertEquals(1, harness.messageRepository.getMessagesForChat(harness.chatId).first().size)
     }
 
     @Test
@@ -1617,7 +1785,8 @@ class ChatDetailGenerationTest {
         val messageRepository: MessageRepository,
         val memoryRepository: MemoryRepository,
         val attachmentRepository: MessageAttachmentRepository,
-        val npcRepository: NpcRepository
+        val npcRepository: NpcRepository,
+        val lorebookRepository: LorebookRepository
     )
 
     private suspend fun createHarness(
@@ -1628,7 +1797,8 @@ class ChatDetailGenerationTest {
         narratorEnabled: Boolean = false,
         narratorInstructions: String = "",
         npcBankEnabledInitially: Boolean = false,
-        initialStoredCharacterContent: String? = null
+        initialStoredCharacterContent: String? = null,
+        storyOutputParserFactory: () -> StoryOutputParser = ::StoryOutputParser
     ): Harness {
         val moshi = Moshi.Builder().addLast(KotlinJsonAdapterFactory()).build()
         val characterRepository = CharacterRepository(database.characterDao(), moshi, dataCoordinator = dataCoordinator)
@@ -1639,6 +1809,7 @@ class ChatDetailGenerationTest {
         val npcRepository = NpcRepository(database, moshi, dataCoordinator)
         val npcParser = NpcStructuredOutputParser(moshi)
         val memoryRepository = MemoryRepository(database.memoryDao(), dataCoordinator)
+        val lorebookRepository = LorebookRepository(database.lorebookDao(), moshi, dataCoordinator)
         database.characterDao().insertCharacter(character())
         database.personaDao().insertPersona(persona())
         val chatId = chatRepository.createSoloChat("Cutoff Test", "persona-1", "character-1")
@@ -1675,10 +1846,12 @@ class ChatDetailGenerationTest {
                 personaRepository,
                 provider,
                 memoryRepository,
+                lorebookRepository = lorebookRepository,
                 messageAttachmentRepository = attachmentRepository,
                 npcRepository = npcRepository,
                 npcOutputParser = npcParser,
-                dataCoordinator = dataCoordinator
+                dataCoordinator = dataCoordinator,
+                storyOutputParserFactory = storyOutputParserFactory
             )
         }
         withTimeout(15_000) { viewModel.uiState.first { it is ChatUiState.Success } }
@@ -1689,7 +1862,8 @@ class ChatDetailGenerationTest {
             messageRepository,
             memoryRepository,
             attachmentRepository,
-            npcRepository
+            npcRepository,
+            lorebookRepository
         )
     }
 
@@ -1781,6 +1955,21 @@ class ChatDetailGenerationTest {
             options: GenerationOptions
         ): Flow<StreamEvent> = flow {
             requestCount += 1
+        }
+    }
+
+    private class ThrowingProvider : ModelProvider {
+        var requestCount = 0
+
+        override suspend fun getModels(): List<OpenRouterModel> = emptyList()
+        override suspend fun getEndpoints(modelId: String): List<ProviderEndpoint> = emptyList()
+
+        override fun streamResponse(
+            messages: List<RoleplayMessage>,
+            options: GenerationOptions
+        ): Flow<StreamEvent> = flow {
+            requestCount += 1
+            error("provider failed before first chunk")
         }
     }
 

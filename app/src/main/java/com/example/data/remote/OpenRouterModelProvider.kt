@@ -314,7 +314,10 @@ class OpenRouterModelProvider(
                 if (t != null) {
                     trySend(StreamEvent.Error(t))
                 } else if (response != null && !response.isSuccessful) {
-                    val err = response.body?.string() ?: "Unknown error"
+                    val err = runCatching { response.body?.string() }
+                        .getOrNull()
+                        ?.takeIf(String::isNotBlank)
+                        ?: "Unknown error"
                     trySend(StreamEvent.Error(IOException("HTTP ${response.code}: $err")))
                 } else {
                     trySend(StreamEvent.Error(IOException("Unknown streaming failure")))
