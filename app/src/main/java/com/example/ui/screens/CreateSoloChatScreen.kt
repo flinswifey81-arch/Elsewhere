@@ -52,27 +52,23 @@ fun CreateSoloChatScreen(
     var showPasteDialogCharacter by remember { mutableStateOf(false) }
     var pasteContent by remember { mutableStateOf("") }
     var importError by remember { mutableStateOf<String?>(null) }
+    var batchImportSummary by remember { mutableStateOf<BatchImportSummary?>(null) }
+    var batchImportLabel by remember { mutableStateOf("profile") }
 
-    val personaLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        uri?.let {
+    val personaLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        if (uris.isNotEmpty()) {
             coroutineScope.launch {
-                try {
-                    val stream = context.contentResolver.openInputStream(it)
-                    val json = stream?.bufferedReader()?.use { r -> r.readText() }
-                    if (json != null) personaRepository.importPersonaJson(json)
-                } catch (e: Exception) { importError = e.localizedMessage }
+                batchImportLabel = "persona"
+                batchImportSummary = importJsonDocuments(context, uris) { personaRepository.importPersonaJson(it) }
             }
         }
     }
     
-    val characterLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        uri?.let {
+    val characterLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        if (uris.isNotEmpty()) {
             coroutineScope.launch {
-                try {
-                    val stream = context.contentResolver.openInputStream(it)
-                    val json = stream?.bufferedReader()?.use { r -> r.readText() }
-                    if (json != null) characterRepository.importCharacterJson(json)
-                } catch (e: Exception) { importError = e.localizedMessage }
+                batchImportLabel = "character"
+                batchImportSummary = importJsonDocuments(context, uris) { characterRepository.importCharacterJson(it) }
             }
         }
     }
@@ -137,6 +133,14 @@ fun CreateSoloChatScreen(
             confirmButton = { TextButton(onClick = { importError = null }) { Text("OK") } }
         )
     }
+    batchImportSummary?.let { summary ->
+        BatchImportSummaryDialog(
+            title = "${batchImportLabel.replaceFirstChar(Char::uppercase)} Import",
+            summary = summary,
+            itemLabel = batchImportLabel,
+            onDismiss = { batchImportSummary = null }
+        )
+    }
 
     Scaffold(
         topBar = {
@@ -164,7 +168,7 @@ fun CreateSoloChatScreen(
                             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
                                 Text("No Persona yet", style = MaterialTheme.typography.titleMedium)
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Button(onClick = { personaLauncher.launch(arrayOf("application/json", "*/*")) }) { Text("Import Persona") }
+                                    Button(onClick = { personaLauncher.launch(arrayOf("application/json", "*/*")) }) { Text("Import Personas") }
                                     OutlinedButton(onClick = { showPasteDialogPersona = true }) { Text("Paste JSON") }
                                 }
                             }
@@ -181,7 +185,7 @@ fun CreateSoloChatScreen(
                             item {
                                 Spacer(modifier = Modifier.height(16.dp))
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                    TextButton(onClick = { personaLauncher.launch(arrayOf("application/json", "*/*")) }) { Text("Import File") }
+                                    TextButton(onClick = { personaLauncher.launch(arrayOf("application/json", "*/*")) }) { Text("Import Files") }
                                     TextButton(onClick = { showPasteDialogPersona = true }) { Text("Paste JSON") }
                                 }
                             }
@@ -201,7 +205,7 @@ fun CreateSoloChatScreen(
                             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
                                 Text("No Character yet", style = MaterialTheme.typography.titleMedium)
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Button(onClick = { characterLauncher.launch(arrayOf("application/json", "*/*")) }) { Text("Import Character") }
+                                    Button(onClick = { characterLauncher.launch(arrayOf("application/json", "*/*")) }) { Text("Import Characters") }
                                     OutlinedButton(onClick = { showPasteDialogCharacter = true }) { Text("Paste JSON") }
                                 }
                             }
@@ -222,7 +226,7 @@ fun CreateSoloChatScreen(
                             item {
                                 Spacer(modifier = Modifier.height(16.dp))
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                    TextButton(onClick = { characterLauncher.launch(arrayOf("application/json", "*/*")) }) { Text("Import File") }
+                                    TextButton(onClick = { characterLauncher.launch(arrayOf("application/json", "*/*")) }) { Text("Import Files") }
                                     TextButton(onClick = { showPasteDialogCharacter = true }) { Text("Paste JSON") }
                                 }
                             }

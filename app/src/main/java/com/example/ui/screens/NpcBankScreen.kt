@@ -188,29 +188,36 @@ fun NpcBankScreen(
     var showExportOptions by remember { mutableStateOf(false) }
     var showLibrary by remember { mutableStateOf(false) }
     var libraryImportJson by remember { mutableStateOf("") }
+    var batchImportSummary by remember { mutableStateOf<BatchImportSummary?>(null) }
     val chatSummary by androidx.compose.runtime.produceState<ChatSummary?>(null, chatId) {
         value = chatRepository.getChatSummaryById(chatId)
     }
 
-    val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        uri ?: return@rememberLauncherForActivityResult
-        scope.launch {
-            val result = withContext(Dispatchers.IO) {
-                runCatching {
-                    context.contentResolver.openInputStream(uri)?.use(::readNpcJsonBounded)
-                        ?: throw IllegalArgumentException("The selected NPC JSON could not be opened.")
-                }
-            }
-            result.onSuccess(viewModel::importJson).onFailure(viewModel::reportImportFailure)
+    val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        if (uris.isNotEmpty()) scope.launch {
+            batchImportSummary = importJsonDocuments(
+                context = context,
+                uris = uris,
+                reader = { readNpcDocument(context, it) }
+            ) { json -> repository.importJson(chatId, json, NpcImportCollisionMode.IMPORT_AS_NEW) }
         }
     }
-    val libraryImportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        uri ?: return@rememberLauncherForActivityResult
-        scope.launch {
-            val result = withContext(Dispatchers.IO) {
-                runCatching { context.contentResolver.openInputStream(uri)?.use(::readNpcJsonBounded) ?: error("The selected NPC JSON could not be opened.") }
+    val libraryImportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        if (uris.isNotEmpty()) scope.launch {
+            if (uris.size == 1) {
+                runCatching { readNpcDocument(context, uris.single()) }
+                    .onSuccess { libraryImportJson = it; showLibrary = true }
+                    .onFailure(viewModel::reportImportFailure)
+            } else {
+                batchImportSummary = importNamedJsonDocuments(
+                    context = context,
+                    uris = uris,
+                    reader = { readNpcDocument(context, it) }
+                ) { fileName, json ->
+                    val bankName = fileName.substringBeforeLast('.').ifBlank { "Imported NPC Bank" }
+                    repository.importLibraryBank(bankName, json)
+                }
             }
-            result.onSuccess { libraryImportJson = it; showLibrary = true }.onFailure(viewModel::reportImportFailure)
         }
     }
     var pendingExport by remember { mutableStateOf<String?>(null) }
@@ -231,6 +238,9 @@ fun NpcBankScreen(
             kotlinx.coroutines.delay(3500)
             viewModel.clearNotice()
         }
+    }
+    batchImportSummary?.let { summary ->
+        BatchImportSummaryDialog("NPC Bank Import", summary, "NPC Bank") { batchImportSummary = null }
     }
 
     Scaffold(
@@ -266,7 +276,7 @@ fun NpcBankScreen(
                 }
                 OutlinedButton(onClick = { importLauncher.launch(arrayOf("application/json", "text/json", "text/plain")) }) {
                     Icon(Icons.Filled.FileUpload, contentDescription = null)
-                    Text("Import")
+                    Text("Import Files")
                 }
                 OutlinedButton(onClick = { showPaste = true }) { Text("Paste JSON") }
             }
@@ -435,7 +445,7 @@ private fun NpcLibraryDialog(
                 item { Text("Import a bank once, or save this chat's current NPCs. Adding NPCs creates independent chat copies.", style = MaterialTheme.typography.bodySmall) }
                 item { OutlinedTextField(name, { name = it.take(120) }, label = { Text("Library bank name") }, modifier = Modifier.fillMaxWidth()) }
                 item { OutlinedTextField(json, { json = it.take(1_000_000) }, label = { Text("NPC Bank JSON") }, minLines = 3, modifier = Modifier.fillMaxWidth()) }
-                item { TextButton(onClick = onPickFile) { Text("Choose JSON file") } }
+                item { TextButton(onClick = onPickFile) { Text("Choose JSON files") } }
                 item {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(enabled = name.isNotBlank() && json.isNotBlank(), onClick = { onImport(name, json); name = ""; json = "" }) { Text("Save import") }
@@ -482,6 +492,12 @@ internal fun readNpcJsonBounded(input: InputStream, maxBytes: Int = 1_000_000): 
     }
     return output.toString(Charsets.UTF_8.name())
 }
+
+private suspend fun readNpcDocument(context: android.content.Context, uri: android.net.Uri): String =
+    withContext(Dispatchers.IO) {
+        context.contentResolver.openInputStream(uri)?.use(::readNpcJsonBounded)
+            ?: throw IllegalArgumentException("The selected NPC JSON could not be opened.")
+    }
 
 @Composable
 private fun NpcEditorDialog(

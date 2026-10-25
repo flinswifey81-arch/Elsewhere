@@ -52,6 +52,7 @@ fun PersonasScreen(
     var showPasteDialog by remember { mutableStateOf(false) }
     var pasteContent by remember { mutableStateOf("") }
     var importError by remember { mutableStateOf<String?>(null) }
+    var batchImportSummary by remember { mutableStateOf<BatchImportSummary?>(null) }
     var showEditor by remember { mutableStateOf(false) }
     var editingPersona by remember { mutableStateOf<PersonaEntity?>(null) }
     var personaPendingDeletion by remember { mutableStateOf<PersonaEntity?>(null) }
@@ -60,21 +61,12 @@ fun PersonasScreen(
     var deletionSucceeded by remember { mutableStateOf(false) }
     
     val launcher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocument()
-    ) { uri: Uri? ->
-        uri?.let {
+        contract = ActivityResultContracts.OpenMultipleDocuments()
+    ) { uris: List<Uri> ->
+        if (uris.isNotEmpty()) {
             coroutineScope.launch {
-                try {
-                    val inputStream = context.contentResolver.openInputStream(it)
-                    val json = inputStream?.bufferedReader()?.use { reader -> reader.readText() }
-                    if (json != null) {
-                        repository.importPersonaJson(json, replaceExisting = false, importAsNew = false)
-                        importError = null
-                    } else {
-                        importError = "Failed to read file."
-                    }
-                } catch (e: Exception) {
-                    importError = e.localizedMessage ?: "Unknown error"
+                batchImportSummary = importJsonDocuments(context, uris) { json ->
+                    repository.importPersonaJson(json, replaceExisting = false, importAsNew = false)
                 }
             }
         }
@@ -93,7 +85,7 @@ fun PersonasScreen(
                         },
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("Import JSON File")
+                        Text("Choose JSON Files")
                     }
                     Button(
                         onClick = { 
@@ -162,6 +154,9 @@ fun PersonasScreen(
                 }
             }
         )
+    }
+    batchImportSummary?.let { summary ->
+        BatchImportSummaryDialog("Persona Import", summary, "persona") { batchImportSummary = null }
     }
 
     personaPendingDeletion?.let { persona ->
@@ -333,7 +328,7 @@ fun PersonasScreen(
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(onClick = { launcher.launch(arrayOf("application/json", "*/*")) }) {
-                            Text("Import JSON File")
+                            Text("Choose JSON Files")
                         }
                         OutlinedButton(onClick = { showPasteDialog = true }) {
                             Text("Paste JSON")

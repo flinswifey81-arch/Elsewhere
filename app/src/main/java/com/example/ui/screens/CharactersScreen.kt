@@ -52,6 +52,7 @@ fun CharactersScreen(
     var showPasteDialog by remember { mutableStateOf(false) }
     var pasteContent by remember { mutableStateOf("") }
     var importError by remember { mutableStateOf<String?>(null) }
+    var batchImportSummary by remember { mutableStateOf<BatchImportSummary?>(null) }
     var showEditor by remember { mutableStateOf(false) }
     var editingCharacter by remember { mutableStateOf<CharacterEntity?>(null) }
     var characterPendingDeletion by remember { mutableStateOf<CharacterEntity?>(null) }
@@ -60,21 +61,12 @@ fun CharactersScreen(
     var deletionSucceeded by remember { mutableStateOf(false) }
     
     val launcher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocument()
-    ) { uri: Uri? ->
-        uri?.let {
+        contract = ActivityResultContracts.OpenMultipleDocuments()
+    ) { uris: List<Uri> ->
+        if (uris.isNotEmpty()) {
             coroutineScope.launch {
-                try {
-                    val inputStream = context.contentResolver.openInputStream(it)
-                    val json = inputStream?.bufferedReader()?.use { reader -> reader.readText() }
-                    if (json != null) {
-                        repository.importCharacterJson(json, replaceExisting = false, importAsNew = false)
-                        importError = null
-                    } else {
-                        importError = "Failed to read file."
-                    }
-                } catch (e: Exception) {
-                    importError = e.localizedMessage ?: "Unknown error"
+                batchImportSummary = importJsonDocuments(context, uris) { json ->
+                    repository.importCharacterJson(json, replaceExisting = false, importAsNew = false)
                 }
             }
         }
@@ -93,7 +85,7 @@ fun CharactersScreen(
                         },
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("Import JSON File")
+                        Text("Choose JSON Files")
                     }
                     Button(
                         onClick = { 
@@ -162,6 +154,9 @@ fun CharactersScreen(
                 }
             }
         )
+    }
+    batchImportSummary?.let { summary ->
+        BatchImportSummaryDialog("Character Import", summary, "character") { batchImportSummary = null }
     }
 
     characterPendingDeletion?.let { character ->
@@ -331,7 +326,7 @@ fun CharactersScreen(
                             Text("New Character")
                         }
                         OutlinedButton(onClick = { launcher.launch(arrayOf("application/json", "*/*")) }) {
-                            Text("Import JSON File")
+                            Text("Choose JSON Files")
                         }
                     }
                 }

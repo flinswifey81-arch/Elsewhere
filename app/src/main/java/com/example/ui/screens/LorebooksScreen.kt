@@ -60,6 +60,7 @@ fun LorebooksScreen(
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var noticeMessage by remember { mutableStateOf<String?>(null) }
     var pendingExportJson by remember { mutableStateOf<String?>(null) }
+    var batchImportSummary by remember { mutableStateOf<BatchImportSummary?>(null) }
 
     fun previewJson(json: String) {
         scope.launch {
@@ -75,13 +76,23 @@ fun LorebooksScreen(
         }
     }
 
-    val importFileLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
-        uri?.let {
+    val importFileLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris: List<Uri> ->
+        if (uris.isNotEmpty()) {
             scope.launch {
-                try {
-                    previewJson(readBoundedLorebookJson(context, it))
-                } catch (error: Exception) {
-                    errorMessage = error.message ?: "Unable to read the selected file."
+                if (uris.size == 1) {
+                    try {
+                        previewJson(readBoundedLorebookJson(context, uris.single()))
+                    } catch (error: Exception) {
+                        errorMessage = error.message ?: "Unable to read the selected file."
+                    }
+                } else {
+                    batchImportSummary = importJsonDocuments(
+                        context = context,
+                        uris = uris,
+                        reader = { readBoundedLorebookJson(context, it) }
+                    ) { json ->
+                        repository.importJson(json, LorebookImportMode.REJECT_DUPLICATE)
+                    }
                 }
             }
         }
@@ -133,6 +144,9 @@ fun LorebooksScreen(
             confirmButton = { TextButton(onClick = { noticeMessage = null }) { Text("OK") } }
         )
     }
+    batchImportSummary?.let { summary ->
+        BatchImportSummaryDialog("Lorebook Import", summary, "Lorebook") { batchImportSummary = null }
+    }
 
     editingDefinition?.let { definition ->
         LorebookEditor(
@@ -166,7 +180,7 @@ fun LorebooksScreen(
                             importFileLauncher.launch(arrayOf("application/json", "text/json", "*/*"))
                         },
                         modifier = Modifier.fillMaxWidth()
-                    ) { Text("Choose JSON File") }
+                    ) { Text("Choose JSON Files") }
                     OutlinedButton(
                         onClick = {
                             showImportOptions = false
