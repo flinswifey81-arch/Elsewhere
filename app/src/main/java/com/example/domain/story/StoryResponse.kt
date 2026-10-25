@@ -346,7 +346,7 @@ open class StoryOutputParser {
         private const val MAX_ID_CHARS = 120
         private const val MAX_NAME_CHARS = 120
         private val HEADER_OPTIONS = JsonReader.Options.of("type", "speaker_id", "speaker_name")
-        private val SEGMENT_HEADER_PATTERN = Regex("<\\|segment\\|>\\s*\\{[^}\\r\\n]*}")
+        private val SEGMENT_HEADER_PATTERN = Regex("<\\|segment\\|>\\s*\\{[^}\\r\\n]*\\}")
 
         private fun looksLikeControlFragment(line: String): Boolean =
             line.startsWith("<|elsewhere_") ||
