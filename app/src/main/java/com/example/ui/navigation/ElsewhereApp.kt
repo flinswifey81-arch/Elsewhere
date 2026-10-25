@@ -188,6 +188,8 @@ fun ElsewhereApp(container: AppContainer) {
                 SettingsScreen(
                     settingsRepository = container.settingsRepository,
                     appearanceRepository = container.appearanceRepository,
+                    chatRepository = container.chatRepository,
+                    modelProvider = container.modelProvider,
                     backupRepository = container.backupRepository
                 ) 
             }

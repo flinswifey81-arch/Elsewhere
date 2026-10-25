@@ -119,6 +119,23 @@ class BackupRepositoryTest {
     }
 
     @Test
+    fun payloadFromBeforeUsabilityPassDefaultsEngineAndNpcLibraryCollectionsToEmpty() {
+        val payload = completePayload().copy(engineDefaults = emptyList(), npcLibraryBanks = emptyList(), npcLibraryEntries = emptyList())
+        val currentJson = BackupArchiveIO(moshi, BuildConfig.APPLICATION_ID).payloadToJson(payload)
+        val legacyJson = currentJson
+            .replace(Regex(",\\s*\"engineDefaults\"\\s*:\\s*\\[\\]"), "")
+            .replace(Regex(",\\s*\"npcLibraryBanks\"\\s*:\\s*\\[\\]"), "")
+            .replace(Regex(",\\s*\"npcLibraryEntries\"\\s*:\\s*\\[\\]"), "")
+            .replace(Regex(",\\s*\"useGlobalEngineDefaults\"\\s*:\\s*false"), "")
+        val decoded = requireNotNull(moshi.adapter(BackupPayload::class.java).fromJson(legacyJson))
+        assertTrue(decoded.engineDefaults.isEmpty())
+        assertTrue(decoded.npcLibraryBanks.isEmpty())
+        assertTrue(decoded.npcLibraryEntries.isEmpty())
+        assertFalse(decoded.chatSettings.single().useGlobalEngineDefaults)
+        assertEquals(payload.chats, decoded.chats)
+    }
+
+    @Test
     fun encryptedBackupPreservesNarratedEnsembleEnvelope() = runBlocking {
         val source = environment()
         val storyContent = StoryResponseCodec.encode(
@@ -228,6 +245,9 @@ class BackupRepositoryTest {
         assertEquals(originalPayload.npcDossiers, restored.npcDossiers)
         assertEquals(originalPayload.npcBankSettings, restored.npcBankSettings)
         assertEquals(originalPayload.npcDossierUpdates, restored.npcDossierUpdates)
+        assertEquals(originalPayload.engineDefaults, restored.engineDefaults)
+        assertEquals(originalPayload.npcLibraryBanks, restored.npcLibraryBanks)
+        assertEquals(originalPayload.npcLibraryEntries, restored.npcLibraryEntries)
         assertEquals(originalPayload.appearance, restored.appearance)
 
         val restoredRoom = restored.coopRooms.single()
@@ -712,6 +732,9 @@ class BackupRepositoryTest {
         dao.insertNpcDossiers(payload.npcDossiers)
         dao.insertNpcBankSettings(payload.npcBankSettings)
         dao.insertNpcDossierUpdates(payload.npcDossierUpdates)
+        dao.insertEngineDefaults(payload.engineDefaults)
+        dao.insertNpcLibraryBanks(payload.npcLibraryBanks)
+        dao.insertNpcLibraryEntries(payload.npcLibraryEntries)
     }
 
     private suspend fun Environment.readPayload(): BackupPayload {
@@ -742,6 +765,9 @@ class BackupRepositoryTest {
             npcDossiers = dao.getNpcDossiers(),
             npcBankSettings = dao.getNpcBankSettings(),
             npcDossierUpdates = dao.getNpcDossierUpdates(),
+            engineDefaults = dao.getEngineDefaults(),
+            npcLibraryBanks = dao.getNpcLibraryBanks(),
+            npcLibraryEntries = dao.getNpcLibraryEntries(),
             appearance = BackupAppearanceSettings(
                 settings.themeMode.name,
                 settings.fontSize,
@@ -989,6 +1015,19 @@ class BackupRepositoryTest {
                     "new",
                     true,
                     73
+                )
+            ),
+            engineDefaults = listOf(
+                EngineDefaultsEntity(selectedModelId = "default/model", temperature = 0.55f)
+            ),
+            npcLibraryBanks = listOf(
+                NpcLibraryBankEntity("library-bank", "Reusable cast", 74, 75)
+            ),
+            npcLibraryEntries = listOf(
+                NpcLibraryEntryEntity(
+                    libraryNpcId = "library-npc", bankId = "library-bank", displayName = "Library NPC",
+                    role = "advisor", secrets = "private continuity", authorNotes = "private notes", sortPosition = 0,
+                    createdAt = 76, updatedAt = 77
                 )
             ),
             appearance = BackupAppearanceSettings(ThemeMode.DARK.name, 19f, ColorPalette.FOREST_GREEN.storageId)

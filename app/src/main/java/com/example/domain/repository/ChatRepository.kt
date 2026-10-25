@@ -10,6 +10,8 @@ import com.example.data.model.ChatSummary
 import com.example.data.model.ChatType
 import com.example.data.model.MessageEntity
 import com.example.data.model.SpeakerType
+import com.example.data.model.EngineDefaultsEntity
+import com.example.data.model.withEngineDefaults
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -41,6 +43,7 @@ class ChatRepository(
             chatDao.insertChat(chat)
             chatDao.insertChatPersonaParticipant(ChatPersonaParticipantEntity(chatId = chat.chatId, personaId = personaId))
             chatDao.insertChatParticipant(ChatParticipantEntity(chatId = chat.chatId, characterId = characterId))
+            chatDao.insertChatSettings(ChatSettingsEntity(chatId = chat.chatId, useGlobalEngineDefaults = true))
             if (!initialCharacterMessage.isNullOrEmpty() && characterDisplayName != null) {
                 requireNotNull(messageDao) { "MessageDao is required to persist an initial Character message" }
                     .insertMessage(
@@ -72,6 +75,7 @@ class ChatRepository(
             characterIds.forEachIndexed { index, cId ->
                 chatDao.insertChatParticipant(ChatParticipantEntity(chatId = chat.chatId, characterId = cId, sortPosition = index))
             }
+            chatDao.insertChatSettings(ChatSettingsEntity(chatId = chat.chatId, useGlobalEngineDefaults = true))
             chat.chatId
         }
     }
@@ -87,6 +91,23 @@ class ChatRepository(
 
     fun getChatSettingsFlow(chatId: String): Flow<ChatSettingsEntity?> =
         chatDao.getChatSettingsFlow(chatId)
+
+    suspend fun getEngineDefaults(): EngineDefaultsEntity = withContext(Dispatchers.IO) {
+        chatDao.getEngineDefaults() ?: EngineDefaultsEntity()
+    }
+
+    fun observeEngineDefaults(): Flow<EngineDefaultsEntity?> = chatDao.observeEngineDefaults()
+
+    suspend fun saveEngineDefaults(defaults: EngineDefaultsEntity) = dataCoordinator.withMutation {
+        withContext(Dispatchers.IO) { chatDao.upsertEngineDefaults(defaults.copy(defaultsId = EngineDefaultsEntity.GLOBAL_ID)) }
+    }
+
+    suspend fun getEffectiveChatSettings(chatId: String): ChatSettingsEntity? = withContext(Dispatchers.IO) {
+        chatDao.getChatSettings(chatId)?.let { settings ->
+            if (settings.useGlobalEngineDefaults) settings.withEngineDefaults(chatDao.getEngineDefaults() ?: EngineDefaultsEntity())
+            else settings
+        }
+    }
 
     fun getParticipantsForChat(chatId: String): Flow<List<ChatParticipantEntity>> =
         chatDao.getParticipantsForChat(chatId)

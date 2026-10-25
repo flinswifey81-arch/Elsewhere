@@ -46,7 +46,7 @@ fun ContextInspectorScreen(
     LaunchedEffect(chatId, characterId, refreshVersion) {
         try {
             val summary = appContainer.chatRepository.getChatSummaryById(chatId)
-            val settings = appContainer.chatRepository.getChatSettings(chatId)
+            val settings = appContainer.chatRepository.getEffectiveChatSettings(chatId)
                 ?: com.example.data.model.ChatSettingsEntity(chatId = chatId)
             val selectedCharacter = summary?.characters
                 ?.firstOrNull { it.characterId == characterId }

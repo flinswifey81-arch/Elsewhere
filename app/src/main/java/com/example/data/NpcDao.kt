@@ -8,10 +8,36 @@ import androidx.room.Update
 import com.example.data.model.NpcBankSettingsEntity
 import com.example.data.model.NpcDossierEntity
 import com.example.data.model.NpcDossierUpdateEntity
+import com.example.data.model.NpcLibraryBankEntity
+import com.example.data.model.NpcLibraryEntryEntity
 import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface NpcDao {
+    @Query("SELECT * FROM npc_library_banks ORDER BY name COLLATE NOCASE, createdAt")
+    fun observeLibraryBanks(): Flow<List<NpcLibraryBankEntity>>
+
+    @Query("SELECT * FROM npc_library_banks ORDER BY name COLLATE NOCASE, createdAt")
+    suspend fun getLibraryBanks(): List<NpcLibraryBankEntity>
+
+    @Query("SELECT * FROM npc_library_entries WHERE bankId = :bankId ORDER BY sortPosition, displayName COLLATE NOCASE")
+    suspend fun getLibraryEntries(bankId: String): List<NpcLibraryEntryEntity>
+
+    @Query("SELECT * FROM npc_library_entries ORDER BY bankId, sortPosition, displayName COLLATE NOCASE")
+    suspend fun getAllLibraryEntries(): List<NpcLibraryEntryEntity>
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertLibraryBank(bank: NpcLibraryBankEntity)
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertLibraryEntries(entries: List<NpcLibraryEntryEntity>)
+
+    @Query("DELETE FROM npc_library_entries WHERE bankId = :bankId")
+    suspend fun deleteLibraryEntries(bankId: String)
+
+    @Query("DELETE FROM npc_library_banks WHERE bankId = :bankId")
+    suspend fun deleteLibraryBank(bankId: String)
+
     @Query("SELECT * FROM npc_dossiers WHERE chatId = :chatId ORDER BY keepInScene DESC, displayName COLLATE NOCASE")
     fun observeDossiers(chatId: String): Flow<List<NpcDossierEntity>>
 

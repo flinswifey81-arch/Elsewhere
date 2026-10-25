@@ -204,6 +204,9 @@ class BackupRepository internal constructor(
                 npcDossiers = backupDao.getNpcDossiers(),
                 npcBankSettings = backupDao.getNpcBankSettings(),
                 npcDossierUpdates = backupDao.getNpcDossierUpdates(),
+                engineDefaults = backupDao.getEngineDefaults(),
+                npcLibraryBanks = backupDao.getNpcLibraryBanks(),
+                npcLibraryEntries = backupDao.getNpcLibraryEntries(),
                 appearance = appearance.toBackup()
             )
         }
@@ -455,6 +458,9 @@ class BackupRepository internal constructor(
         backupDao.deleteGenerationMetadata()
         backupDao.deleteMessageAttachments()
         backupDao.deleteNpcDossierUpdates()
+        backupDao.deleteNpcLibraryEntries()
+        backupDao.deleteNpcLibraryBanks()
+        backupDao.deleteEngineDefaults()
         backupDao.deleteNpcDossiers()
         backupDao.deleteNpcBankSettings()
         backupDao.deleteCoopMessageTombstones()
@@ -515,6 +521,9 @@ class BackupRepository internal constructor(
         if (payload.npcDossiers.isNotEmpty()) backupDao.insertNpcDossiers(payload.npcDossiers)
         if (payload.npcBankSettings.isNotEmpty()) backupDao.insertNpcBankSettings(payload.npcBankSettings)
         if (payload.npcDossierUpdates.isNotEmpty()) backupDao.insertNpcDossierUpdates(payload.npcDossierUpdates)
+        if (payload.engineDefaults.isNotEmpty()) backupDao.insertEngineDefaults(payload.engineDefaults)
+        if (payload.npcLibraryBanks.isNotEmpty()) backupDao.insertNpcLibraryBanks(payload.npcLibraryBanks)
+        if (payload.npcLibraryEntries.isNotEmpty()) backupDao.insertNpcLibraryEntries(payload.npcLibraryEntries)
     }
 
     private fun prepareProfileImages(validated: ValidatedBackup, stageRoot: File) {
@@ -582,7 +591,10 @@ class BackupRepository internal constructor(
             payload.messageAttachments.size,
             payload.npcDossiers.size,
             payload.npcBankSettings.size,
-            payload.npcDossierUpdates.size
+            payload.npcDossierUpdates.size,
+            payload.engineDefaults.size,
+            payload.npcLibraryBanks.size,
+            payload.npcLibraryEntries.size
         ).sumOf(Int::toLong)
         if (entityCount > MAX_TOTAL_ENTITY_RECORDS || payload.messages.size > MAX_MESSAGE_RECORDS) {
             throw BackupValidationException("Backup contains too many data records.")
@@ -613,6 +625,12 @@ class BackupRepository internal constructor(
         val participantIds = unique("co-op participant", payload.coopParticipants.map { it.participantId })
         val attachmentIds = unique("attachment", payload.messageAttachments.map { it.attachmentId })
         val npcIds = unique("NPC", payload.npcDossiers.map { it.npcId })
+        val npcLibraryBankIds = unique("NPC library bank", payload.npcLibraryBanks.map { it.bankId })
+        unique("NPC library entry", payload.npcLibraryEntries.map { it.libraryNpcId })
+        unique("engine defaults", payload.engineDefaults.map { it.defaultsId })
+        if (payload.engineDefaults.size > 1 || payload.engineDefaults.any { it.defaultsId != EngineDefaultsEntity.GLOBAL_ID }) {
+            throw BackupValidationException("Backup contains invalid engine defaults.")
+        }
         unique("relationship", payload.relationships.map { it.relationshipId })
         unique("memory", payload.roleplayMemories.map { it.memoryId })
         unique("co-op event", payload.coopEvents.map { it.eventId })
@@ -673,6 +691,7 @@ class BackupRepository internal constructor(
         requireRefs(payload.npcDossierUpdates, "NPC update") {
             it.chatId in chatIds && it.npcId in npcIds && it.sourceMessageId in messageIds
         }
+        requireRefs(payload.npcLibraryEntries, "NPC library entry") { it.bankId in npcLibraryBankIds }
 
         val binaryAttachmentIds = manifest.files.filter { it.kind == BackupFileKind.MESSAGE_ATTACHMENT }
             .map { it.ownerId }

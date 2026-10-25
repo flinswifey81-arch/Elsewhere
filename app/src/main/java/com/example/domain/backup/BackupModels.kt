@@ -70,7 +70,10 @@ data class BackupPayload(
     val npcDossierUpdates: List<NpcDossierUpdateEntity>,
     val appearance: BackupAppearanceSettings,
     val scenarios: List<ScenarioEntity> = emptyList(),
-    val scenarioSessions: List<ScenarioSessionEntity> = emptyList()
+    val scenarioSessions: List<ScenarioSessionEntity> = emptyList(),
+    val engineDefaults: List<EngineDefaultsEntity> = emptyList(),
+    val npcLibraryBanks: List<NpcLibraryBankEntity> = emptyList(),
+    val npcLibraryEntries: List<NpcLibraryEntryEntity> = emptyList()
 )
 
 data class BackupPreview(

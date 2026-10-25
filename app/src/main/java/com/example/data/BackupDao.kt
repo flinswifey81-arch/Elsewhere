@@ -86,6 +86,15 @@ interface BackupDao {
     @Query("SELECT * FROM npc_dossier_updates ORDER BY chatId, sourceOrderIndex, sourceRevision, updateId")
     suspend fun getNpcDossierUpdates(): List<NpcDossierUpdateEntity>
 
+    @Query("SELECT * FROM engine_defaults ORDER BY defaultsId")
+    suspend fun getEngineDefaults(): List<EngineDefaultsEntity>
+
+    @Query("SELECT * FROM npc_library_banks ORDER BY bankId")
+    suspend fun getNpcLibraryBanks(): List<NpcLibraryBankEntity>
+
+    @Query("SELECT * FROM npc_library_entries ORDER BY bankId, sortPosition, libraryNpcId")
+    suspend fun getNpcLibraryEntries(): List<NpcLibraryEntryEntity>
+
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insertCharacters(values: List<CharacterEntity>)
 
@@ -157,6 +166,24 @@ interface BackupDao {
 
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insertNpcDossierUpdates(values: List<NpcDossierUpdateEntity>)
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertEngineDefaults(values: List<EngineDefaultsEntity>)
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertNpcLibraryBanks(values: List<NpcLibraryBankEntity>)
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertNpcLibraryEntries(values: List<NpcLibraryEntryEntity>)
+
+    @Query("DELETE FROM npc_library_entries")
+    suspend fun deleteNpcLibraryEntries()
+
+    @Query("DELETE FROM npc_library_banks")
+    suspend fun deleteNpcLibraryBanks()
+
+    @Query("DELETE FROM engine_defaults")
+    suspend fun deleteEngineDefaults()
 
     @Query("DELETE FROM generation_metadata")
     suspend fun deleteGenerationMetadata()

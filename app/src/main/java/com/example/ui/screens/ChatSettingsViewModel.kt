@@ -4,6 +4,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.example.data.model.ChatSettingsEntity
+import com.example.data.model.EngineDefaultsEntity
+import com.example.data.model.withEngineDefaults
 import com.example.data.model.ProviderRoutingMode
 import com.example.data.model.ResponseLengthProfile
 import com.example.domain.provider.ModelProvider
@@ -18,6 +20,7 @@ import kotlinx.coroutines.launch
 
 data class ChatSettingsUiState(
     val settings: ChatSettingsEntity? = null,
+    val storedSettings: ChatSettingsEntity? = null,
     val isLoading: Boolean = true,
     val error: String? = null,
     val models: List<OpenRouterModel> = emptyList(),
@@ -34,6 +37,7 @@ class ChatSettingsViewModel(
     private val chatRepository: ChatRepository,
     private val modelProvider: ModelProvider
 ) : ViewModel() {
+    private var engineDefaults = EngineDefaultsEntity()
     private val _uiState = MutableStateFlow(ChatSettingsUiState())
     val uiState: StateFlow<ChatSettingsUiState> = _uiState.asStateFlow()
 
@@ -50,8 +54,10 @@ class ChatSettingsViewModel(
                     settings = ChatSettingsEntity(chatId = chatId)
                     chatRepository.insertChatSettings(settings)
                 }
-                _uiState.update { it.copy(settings = settings, isLoading = false) }
-                settings.selectedModelId?.let { fetchEndpoints(it) }
+                engineDefaults = chatRepository.getEngineDefaults()
+                val effective = if (settings.useGlobalEngineDefaults) settings.withEngineDefaults(engineDefaults) else settings
+                _uiState.update { it.copy(settings = effective, storedSettings = settings, isLoading = false) }
+                effective.selectedModelId?.let { fetchEndpoints(it) }
             } catch (e: Exception) {
                 _uiState.update { it.copy(isLoading = false, error = e.message) }
             }
@@ -98,28 +104,28 @@ class ChatSettingsViewModel(
     }
 
     fun onModelSelected(modelId: String) {
-        updateSettings { it.copy(selectedModelId = modelId) }
+        updateEngineSettings { it.copy(selectedModelId = modelId) }
         fetchEndpoints(modelId)
     }
 
     fun onRoutingModeSelected(mode: ProviderRoutingMode) {
-        updateSettings { it.copy(providerRoutingMode = mode) }
+        updateEngineSettings { it.copy(providerRoutingMode = mode) }
     }
 
     fun onEndpointSelected(endpoint: String?) {
-        updateSettings { it.copy(providerEndpoint = endpoint) }
+        updateEngineSettings { it.copy(providerEndpoint = endpoint) }
     }
 
     fun onTemperatureChanged(temp: Float?) {
-        updateSettings { it.copy(temperature = temp) }
+        updateEngineSettings { it.copy(temperature = temp) }
     }
 
     fun onTopPChanged(topP: Float?) {
-        updateSettings { it.copy(topP = topP) }
+        updateEngineSettings { it.copy(topP = topP) }
     }
 
     fun onResponseProfileSelected(profile: ResponseLengthProfile) {
-        updateSettings { it.copy(responseLengthProfile = profile) }
+        updateEngineSettings { it.copy(responseLengthProfile = profile) }
     }
 
     fun onNarratorEnabledChanged(enabled: Boolean) {
@@ -137,7 +143,7 @@ class ChatSettingsViewModel(
 
     fun onCustomLengthsChanged(min: Int, target: Int, max: Int) {
         if (isValidCustomLengths(min, target, max)) {
-            updateSettings { 
+            updateEngineSettings {
                 it.copy(
                     customMin = min,
                     customTargetMax = target,
@@ -153,12 +159,29 @@ class ChatSettingsViewModel(
     }
 
     private fun updateSettings(updater: (ChatSettingsEntity) -> ChatSettingsEntity) {
-        val currentSettings = _uiState.value.settings ?: return
-        val newSettings = updater(currentSettings)
-        _uiState.update { it.copy(settings = newSettings) }
+        val stored = _uiState.value.storedSettings ?: return
+        val newSettings = updater(stored)
+        val effective = if (newSettings.useGlobalEngineDefaults) newSettings.withEngineDefaults(engineDefaults) else newSettings
+        _uiState.update { it.copy(settings = effective, storedSettings = newSettings) }
         viewModelScope.launch {
             chatRepository.insertChatSettings(newSettings)
         }
+    }
+
+    private fun updateEngineSettings(updater: (ChatSettingsEntity) -> ChatSettingsEntity) {
+        val currentEffective = _uiState.value.settings ?: return
+        val newSettings = updater(currentEffective).copy(useGlobalEngineDefaults = false)
+        _uiState.update { it.copy(settings = newSettings, storedSettings = newSettings) }
+        viewModelScope.launch { chatRepository.insertChatSettings(newSettings) }
+    }
+
+    fun onUseGlobalDefaultsChanged(enabled: Boolean) {
+        val stored = _uiState.value.storedSettings ?: return
+        val replacement = if (enabled) stored.copy(useGlobalEngineDefaults = true)
+        else (_uiState.value.settings ?: stored).copy(useGlobalEngineDefaults = false)
+        val effective = if (enabled) replacement.withEngineDefaults(engineDefaults) else replacement
+        _uiState.update { it.copy(settings = effective, storedSettings = replacement) }
+        viewModelScope.launch { chatRepository.insertChatSettings(replacement) }
     }
 
     @Suppress("UNCHECKED_CAST")

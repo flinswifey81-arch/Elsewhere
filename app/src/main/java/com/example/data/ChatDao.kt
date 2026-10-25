@@ -201,4 +201,13 @@ interface ChatDao {
 
     @Query("SELECT * FROM chat_settings WHERE chatId = :chatId")
     fun getChatSettingsFlow(chatId: String): Flow<com.example.data.model.ChatSettingsEntity?>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertEngineDefaults(defaults: com.example.data.model.EngineDefaultsEntity)
+
+    @Query("SELECT * FROM engine_defaults WHERE defaultsId = 'global' LIMIT 1")
+    suspend fun getEngineDefaults(): com.example.data.model.EngineDefaultsEntity?
+
+    @Query("SELECT * FROM engine_defaults WHERE defaultsId = 'global' LIMIT 1")
+    fun observeEngineDefaults(): Flow<com.example.data.model.EngineDefaultsEntity?>
 }

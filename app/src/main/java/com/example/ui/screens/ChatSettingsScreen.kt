@@ -127,6 +127,22 @@ fun ChatSettingsScreen(
 
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Use Default Engine", style = MaterialTheme.typography.titleMedium)
+                        Text("Follow the values saved in main Settings.", style = MaterialTheme.typography.bodySmall)
+                    }
+                    Switch(
+                        checked = uiState.storedSettings?.useGlobalEngineDefaults == true,
+                        onCheckedChange = viewModel::onUseGlobalDefaultsChanged
+                    )
+                }
+                if (uiState.storedSettings?.useGlobalEngineDefaults == true) {
+                    Text("Changing an engine value below creates a per-chat override.", style = MaterialTheme.typography.bodySmall)
+                }
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
                 // Advanced Generation Params
                 Text("Generation Parameters", style = MaterialTheme.typography.titleMedium)
                 

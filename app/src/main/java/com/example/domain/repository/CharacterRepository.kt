@@ -36,12 +36,41 @@ class CharacterRepository(
         result
     }
 
-    fun getManualFields(character: CharacterEntity): ManualCharacterFields =
-        ManualCharacterFieldsCodec.toEditableFields(character)
+    fun getManualFields(character: CharacterEntity): ManualCharacterFields {
+        val fields = ManualCharacterFieldsCodec.toEditableFields(character)
+        return if (fields.initialMessage.isBlank()) {
+            fields.copy(initialMessage = getOpeningMessages(character).firstOrNull().orEmpty())
+        } else fields
+    }
 
     fun getInitialMessage(character: CharacterEntity): String =
-        ManualCharacterFieldsCodec.readStored(character)?.initialMessage
-            ?: ManualCharacterFieldsCodec.toEditableFields(character).initialMessage
+        getOpeningMessages(character).firstOrNull().orEmpty()
+
+    /** Ordered, de-duplicated greetings from Elsewhere and common character-card fields. */
+    fun getOpeningMessages(character: CharacterEntity): List<String> {
+        val values = mutableListOf<String>()
+        ManualCharacterFieldsCodec.readStored(character)?.initialMessage?.let(values::add)
+        fun collect(map: Map<*, *>) {
+            listOf("initial_message", "first_message", "first_mes", "greeting", "opening_message").forEach { key ->
+                (map[key] as? String)?.let(values::add)
+            }
+            listOf("alternate_greetings", "alternateGreetings", "greetings").forEach { key ->
+                when (val value = map[key]) {
+                    is String -> values += value
+                    is List<*> -> value.filterIsInstance<String>().forEach(values::add)
+                }
+            }
+            listOf("data", "character", "card").forEach { key -> (map[key] as? Map<*, *>)?.let(::collect) }
+        }
+        character.examplesJson?.let { json ->
+            when (val parsed = runCatching { moshi.adapter(Any::class.java).fromJson(json) }.getOrNull()) {
+                is String -> values += parsed
+                is Map<*, *> -> collect(parsed)
+            }
+        }
+        character.extensionFieldsJson?.let { json -> mapAdapter.fromJson(json)?.let(::collect) }
+        return values.filter(String::isNotBlank).distinct()
+    }
 
     suspend fun createManualCharacter(fields: ManualCharacterFields): String =
         dataCoordinator.withMutation {
@@ -101,14 +130,20 @@ class CharacterRepository(
         dataCoordinator.withMutation {
         val rootMap = mapAdapter.fromJson(jsonString) ?: throw IllegalArgumentException("Invalid JSON format")
         
-        val schemaVersion = (rootMap["schema_version"] as? Number)?.toInt() 
-            ?: throw IllegalArgumentException("Missing required field: schema_version")
-        var characterId = rootMap["character_id"] as? String 
-            ?: throw IllegalArgumentException("Missing required field: character_id")
-        val displayName = rootMap["display_name"] as? String 
-            ?: throw IllegalArgumentException("Missing required field: display_name")
-        val characterName = rootMap["character_name"] as? String 
-            ?: throw IllegalArgumentException("Missing required field: character_name")
+        val nestedData = rootMap["data"] as? Map<*, *>
+        val schemaVersion = (rootMap["schema_version"] as? Number)?.toInt() ?: 1
+        var characterId = (rootMap["character_id"] as? String)
+            ?: (nestedData?.get("character_id") as? String)
+            ?: UUID.randomUUID().toString()
+        val displayName = (rootMap["display_name"] as? String)
+            ?: (rootMap["name"] as? String)
+            ?: (nestedData?.get("display_name") as? String)
+            ?: (nestedData?.get("name") as? String)
+            ?: throw IllegalArgumentException("Missing required character name")
+        val characterName = (rootMap["character_name"] as? String)
+            ?: (nestedData?.get("character_name") as? String)
+            ?: (nestedData?.get("name") as? String)
+            ?: displayName
         
         val aliases = (rootMap["aliases"] as? List<*>)?.mapNotNull { it?.toString() } ?: emptyList()
         

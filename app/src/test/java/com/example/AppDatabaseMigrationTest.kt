@@ -132,7 +132,7 @@ class AppDatabaseMigrationTest {
     }
 
     @Test
-    fun migrationFrom3To9ValidatesAgainstRoomAndPreservesExistingChatData() = runBlocking {
+    fun migrationFrom3To10ValidatesAgainstRoomAndPreservesExistingChatData() = runBlocking {
         val helper = FrameworkSQLiteOpenHelperFactory().create(
             SupportSQLiteOpenHelper.Configuration.builder(context)
                 .name(databaseName)
@@ -168,12 +168,13 @@ class AppDatabaseMigrationTest {
                 AppDatabase.MIGRATION_5_6,
                 AppDatabase.MIGRATION_6_7,
                 AppDatabase.MIGRATION_7_8,
-                AppDatabase.MIGRATION_8_9
+                AppDatabase.MIGRATION_8_9,
+                AppDatabase.MIGRATION_9_10
             )
             .allowMainThreadQueries()
             .build()
         try {
-            // Opening through Room executes every migration through 9 and validates the resulting schema.
+            // Opening through Room executes every migration through 10 and validates the resulting schema.
             migrated.openHelper.writableDatabase
             assertEquals("Keep Me", migrated.chatDao().getChatById("chat-keep")?.displayName)
             assertEquals("Preserve this", migrated.messageDao().getMessagesForChatOnce("chat-keep").single().content)
@@ -187,10 +188,36 @@ class AppDatabaseMigrationTest {
             assertTrue(preserved.coOpEventId == null)
             assertTrue(migrated.messageAttachmentDao().getForChat("chat-keep").isEmpty())
             assertTrue(migrated.npcDao().getDossiers("chat-keep").isEmpty())
+            assertTrue(migrated.npcDao().getLibraryBanks().isEmpty())
             assertTrue(migrated.chatDao().getChatById("chat-keep")?.contextResetOrderIndex == null)
         } finally {
             migrated.close()
         }
+    }
+
+    @Test
+    fun migrationFrom9To10PreservesPerChatSettingsAndCreatesReusableDefaultsAndNpcLibrary() {
+        val helper = FrameworkSQLiteOpenHelperFactory().create(
+            SupportSQLiteOpenHelper.Configuration.builder(context).name(databaseName)
+                .callback(object : SupportSQLiteOpenHelper.Callback(9) {
+                    override fun onCreate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                        db.execSQL("CREATE TABLE chat_settings (chatId TEXT NOT NULL PRIMARY KEY, selectedModelId TEXT, providerRoutingMode TEXT NOT NULL, providerEndpoint TEXT, temperature REAL, topP REAL, responseLengthProfile TEXT NOT NULL, customMin INTEGER, customTargetMax INTEGER, customHardMax INTEGER, draftMessage TEXT, narratorEnabled INTEGER NOT NULL DEFAULT 0, narratorInstructions TEXT NOT NULL DEFAULT '')")
+                    }
+                    override fun onUpgrade(db: androidx.sqlite.db.SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+                }).build()
+        )
+        try {
+            val db = helper.writableDatabase
+            db.execSQL("INSERT INTO chat_settings (chatId, selectedModelId, providerRoutingMode, responseLengthProfile, narratorEnabled, narratorInstructions) VALUES ('old-chat', 'old-model', 'LOCK', 'LONG', 1, 'keep')")
+            AppDatabase.MIGRATION_9_10.migrate(db)
+            db.query("SELECT selectedModelId, useGlobalEngineDefaults, narratorInstructions FROM chat_settings WHERE chatId='old-chat'").use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals("old-model", cursor.getString(0))
+                assertEquals(0, cursor.getInt(1))
+                assertEquals("keep", cursor.getString(2))
+            }
+            db.query("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('engine_defaults','npc_library_banks','npc_library_entries')").use { assertEquals(3, it.count) }
+        } finally { helper.close() }
     }
 
     @Test

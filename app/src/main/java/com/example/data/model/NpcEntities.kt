@@ -86,3 +86,36 @@ data class NpcDossier(
     val createdAt: Long,
     val updatedAt: Long
 )
+
+@Entity(tableName = "npc_library_banks")
+data class NpcLibraryBankEntity(
+    @PrimaryKey val bankId: String = UUID.randomUUID().toString(),
+    val name: String,
+    val createdAt: Long = System.currentTimeMillis(),
+    val updatedAt: Long = System.currentTimeMillis()
+)
+
+@Entity(
+    tableName = "npc_library_entries",
+    indices = [Index(value = ["bankId"])]
+)
+data class NpcLibraryEntryEntity(
+    @PrimaryKey val libraryNpcId: String = UUID.randomUUID().toString(),
+    val bankId: String,
+    val displayName: String,
+    val aliasesJson: String = "[]",
+    val role: String = "",
+    val appearance: String = "",
+    val personality: String = "",
+    val relationshipToPersona: String = "",
+    val personaRelationshipsJson: String = "{}",
+    val characterKnowledgeJson: String = "{}",
+    val goals: String = "",
+    val secrets: String = "",
+    val authorNotes: String = "",
+    val keepInScene: Boolean = false,
+    val extensionFieldsJson: String? = null,
+    val sortPosition: Int = 0,
+    val createdAt: Long = System.currentTimeMillis(),
+    val updatedAt: Long = System.currentTimeMillis()
+)

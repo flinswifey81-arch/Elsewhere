@@ -22,6 +22,13 @@ import com.example.domain.repository.ApiKeyRepository
 import com.example.domain.repository.ColorPalette
 import kotlinx.coroutines.launch
 import com.example.domain.repository.ThemeMode
+import com.example.domain.repository.ChatRepository
+import com.example.data.model.EngineDefaultsEntity
+import com.example.data.model.ProviderRoutingMode
+import com.example.data.model.ResponseLengthProfile
+import com.example.domain.provider.ModelProvider
+import com.example.domain.provider.OpenRouterModel
+import com.example.domain.provider.ProviderEndpoint
 import com.example.domain.backup.BackupInspection
 import com.example.domain.backup.BackupRepository
 import com.example.ui.components.elsewhereCardBorder
@@ -35,6 +42,8 @@ import com.example.ui.theme.getLightColorScheme
 fun SettingsScreen(
     settingsRepository: ApiKeyRepository,
     appearanceRepository: AppearanceRepository,
+    chatRepository: ChatRepository? = null,
+    modelProvider: ModelProvider? = null,
     backupRepository: BackupRepository? = null,
     modifier: Modifier = Modifier
 ) {
@@ -216,6 +225,10 @@ fun SettingsScreen(
                 }
             }
 
+            if (chatRepository != null) {
+                item { EngineDefaultsCard(chatRepository, modelProvider) }
+            }
+
             // About Section
             if (backupRepository != null) {
                 item {
@@ -245,6 +258,111 @@ fun SettingsScreen(
                         Text("Version 1.0", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun EngineDefaultsCard(repository: ChatRepository, modelProvider: ModelProvider?) {
+    val scope = rememberCoroutineScope()
+    var defaults by remember { mutableStateOf(EngineDefaultsEntity()) }
+    var loaded by remember { mutableStateOf(false) }
+    var modelId by remember { mutableStateOf("") }
+    var endpoint by remember { mutableStateOf("") }
+    var status by remember { mutableStateOf<String?>(null) }
+    var models by remember { mutableStateOf<List<OpenRouterModel>>(emptyList()) }
+    var modelSearch by remember { mutableStateOf("") }
+    var showModels by remember { mutableStateOf(false) }
+    var endpoints by remember { mutableStateOf<List<ProviderEndpoint>>(emptyList()) }
+    var isFetchingCatalog by remember { mutableStateOf(false) }
+    LaunchedEffect(repository) {
+        defaults = repository.getEngineDefaults()
+        modelId = defaults.selectedModelId.orEmpty()
+        endpoint = defaults.providerEndpoint.orEmpty()
+        loaded = true
+    }
+    Text("Default Engine", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(bottom = 8.dp, start = 8.dp))
+    Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow), border = elsewhereCardBorder()) {
+        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("New chats inherit these values. Existing chats keep their current engine settings unless you switch them to global defaults.", style = MaterialTheme.typography.bodySmall)
+            if (!loaded) CircularProgressIndicator() else {
+                OutlinedTextField(modelId, { modelId = it }, label = { Text("Model ID") }, modifier = Modifier.fillMaxWidth(), colors = elsewhereTextFieldColors())
+                if (modelProvider != null) {
+                    OutlinedButton(onClick = {
+                        showModels = !showModels
+                        if (showModels && models.isEmpty()) scope.launch {
+                            isFetchingCatalog = true
+                            runCatching { modelProvider.getModels() }
+                                .onSuccess { models = it }
+                                .onFailure { status = "Model catalog could not be loaded: ${it.message}" }
+                            isFetchingCatalog = false
+                        }
+                    }, modifier = Modifier.fillMaxWidth()) { Text(if (showModels) "Hide model catalog" else "Choose from model catalog") }
+                    if (showModels) {
+                        OutlinedTextField(modelSearch, { modelSearch = it }, label = { Text("Search models") }, modifier = Modifier.fillMaxWidth(), colors = elsewhereTextFieldColors())
+                        if (isFetchingCatalog) CircularProgressIndicator()
+                        models.filter { it.name.contains(modelSearch, true) || it.id.contains(modelSearch, true) }.take(12).forEach { model ->
+                            ModelItem(model, model.id == modelId) {
+                                modelId = model.id
+                                scope.launch {
+                                    endpoints = runCatching { modelProvider.getEndpoints(model.id) }.getOrDefault(emptyList())
+                                }
+                            }
+                        }
+                    }
+                }
+                Text("Provider routing", style = MaterialTheme.typography.labelLarge)
+                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                    ProviderRoutingMode.entries.forEachIndexed { index, mode ->
+                        SegmentedButton(selected = defaults.providerRoutingMode == mode,
+                            onClick = { defaults = defaults.copy(providerRoutingMode = mode) },
+                            shape = SegmentedButtonDefaults.itemShape(index, ProviderRoutingMode.entries.size)) { Text(mode.name.lowercase().replaceFirstChar(Char::uppercase)) }
+                    }
+                }
+                if (defaults.providerRoutingMode != ProviderRoutingMode.AUTO) {
+                    OutlinedTextField(endpoint, { endpoint = it }, label = { Text("Provider endpoint") }, modifier = Modifier.fillMaxWidth(), colors = elsewhereTextFieldColors())
+                    endpoints.forEach { candidate ->
+                        TextButton(onClick = { endpoint = candidate.identifier }) { Text(candidate.name) }
+                    }
+                }
+                Text("Temperature: ${defaults.temperature?.toString() ?: "Provider default"}")
+                Slider(defaults.temperature ?: 1f, { defaults = defaults.copy(temperature = it) }, valueRange = 0f..2f, steps = 19)
+                TextButton(onClick = { defaults = defaults.copy(temperature = null) }) { Text("Use provider temperature") }
+                Text("Top P: ${defaults.topP?.toString() ?: "Provider default"}")
+                Slider(defaults.topP ?: 1f, { defaults = defaults.copy(topP = it) }, valueRange = 0f..1f, steps = 9)
+                TextButton(onClick = { defaults = defaults.copy(topP = null) }) { Text("Use provider Top P") }
+                Text("Response length", style = MaterialTheme.typography.labelLarge)
+                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                    ResponseLengthProfile.entries.forEachIndexed { index, profile ->
+                        SegmentedButton(selected = defaults.responseLengthProfile == profile,
+                            onClick = { defaults = defaults.copy(responseLengthProfile = profile) },
+                            shape = SegmentedButtonDefaults.itemShape(index, ResponseLengthProfile.entries.size)) { Text(profile.name.lowercase().replaceFirstChar(Char::uppercase)) }
+                    }
+                }
+                if (defaults.responseLengthProfile == ResponseLengthProfile.CUSTOM) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf("Min" to defaults.customMin, "Target" to defaults.customTargetMax, "Max" to defaults.customHardMax).forEach { (label, value) ->
+                            OutlinedTextField(value?.toString().orEmpty(), { raw ->
+                                val parsed = raw.toIntOrNull()
+                                defaults = when (label) { "Min" -> defaults.copy(customMin = parsed); "Target" -> defaults.copy(customTargetMax = parsed); else -> defaults.copy(customHardMax = parsed) }
+                            }, label = { Text(label) }, modifier = Modifier.weight(1f), colors = elsewhereTextFieldColors())
+                        }
+                    }
+                }
+                Button(onClick = {
+                    scope.launch {
+                        val candidate = defaults.copy(selectedModelId = modelId.trim().takeIf(String::isNotEmpty), providerEndpoint = endpoint.trim().takeIf(String::isNotEmpty))
+                        val customValid = candidate.responseLengthProfile != ResponseLengthProfile.CUSTOM ||
+                            listOf(candidate.customMin, candidate.customTargetMax, candidate.customHardMax).all { it != null } &&
+                            candidate.customMin!! <= candidate.customTargetMax!! && candidate.customTargetMax!! <= candidate.customHardMax!!
+                        if (!customValid) status = "Custom lengths must be filled in from smallest to largest."
+                        else { repository.saveEngineDefaults(candidate); defaults = candidate; status = "Default engine saved." }
+                    }
+                }, modifier = Modifier.fillMaxWidth()) { Text("Save Default Engine") }
+                status?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
             }
         }
     }

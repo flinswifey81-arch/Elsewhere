@@ -46,6 +46,7 @@ fun CreateSoloChatScreen(
     var selectedPersona by remember { mutableStateOf<PersonaEntity?>(null) }
     var selectedCharacter by remember { mutableStateOf<CharacterEntity?>(null) }
     var chatName by remember { mutableStateOf("") }
+    var selectedOpening by remember { mutableStateOf<String?>(null) }
     
     var showPasteDialogPersona by remember { mutableStateOf(false) }
     var showPasteDialogCharacter by remember { mutableStateOf(false) }
@@ -214,6 +215,7 @@ fun CreateSoloChatScreen(
                                     onClick = { 
                                         selectedCharacter = character
                                         chatName = "Chat with ${character.displayName}"
+                                        selectedOpening = characterRepository.getOpeningMessages(character).firstOrNull()
                                     }
                                 )
                             }
@@ -243,7 +245,28 @@ fun CreateSoloChatScreen(
                         colors = elsewhereTextFieldColors(),
                         modifier = Modifier.fillMaxWidth()
                     )
-                    Spacer(modifier = Modifier.weight(1f))
+                    val openings = selectedCharacter?.let(characterRepository::getOpeningMessages).orEmpty()
+                    if (openings.isNotEmpty()) {
+                        Spacer(Modifier.height(16.dp))
+                        Text("Opening message", style = MaterialTheme.typography.titleSmall)
+                        Text("Saved as the first Character message without contacting a model.", style = MaterialTheme.typography.bodySmall)
+                        LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            items(openings) { opening ->
+                                Card(
+                                    modifier = Modifier.fillMaxWidth().clickable { selectedOpening = opening },
+                                    colors = CardDefaults.cardColors(containerColor = if (selectedOpening == opening) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerLow),
+                                    border = elsewhereCardBorder()
+                                ) {
+                                    Row(Modifier.padding(12.dp), verticalAlignment = Alignment.Top) {
+                                        RadioButton(selected = selectedOpening == opening, onClick = { selectedOpening = opening })
+                                        Text(opening, modifier = Modifier.padding(start = 8.dp), maxLines = 5)
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        Spacer(modifier = Modifier.weight(1f))
+                    }
                     Button(
                         onClick = {
                             coroutineScope.launch {
@@ -252,7 +275,7 @@ fun CreateSoloChatScreen(
                                     personaId = selectedPersona!!.personaId,
                                     characterId = selectedCharacter!!.characterId,
                                     characterDisplayName = selectedCharacter!!.displayName,
-                                    initialCharacterMessage = characterRepository.getInitialMessage(selectedCharacter!!)
+                                    initialCharacterMessage = selectedOpening
                                 )
                                 onChatCreated(chatId)
                             }

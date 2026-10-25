@@ -7,7 +7,7 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.example.data.model.*
 
-const val APP_DATABASE_VERSION = 9
+const val APP_DATABASE_VERSION = 10
 
 @Database(
     entities = [
@@ -36,7 +36,10 @@ const val APP_DATABASE_VERSION = 9
         NpcBankSettingsEntity::class,
         NpcDossierUpdateEntity::class,
         ScenarioEntity::class,
-        ScenarioSessionEntity::class
+        ScenarioSessionEntity::class,
+        EngineDefaultsEntity::class,
+        NpcLibraryBankEntity::class,
+        NpcLibraryEntryEntity::class
     ],
     version = APP_DATABASE_VERSION,
     exportSchema = false
@@ -56,6 +59,16 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun backupDao(): BackupDao
 
     companion object {
+        val MIGRATION_9_10 = object : Migration(9, 10) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE chat_settings ADD COLUMN useGlobalEngineDefaults INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("CREATE TABLE IF NOT EXISTS engine_defaults (defaultsId TEXT NOT NULL PRIMARY KEY, selectedModelId TEXT, providerRoutingMode TEXT NOT NULL, providerEndpoint TEXT, temperature REAL, topP REAL, responseLengthProfile TEXT NOT NULL, customMin INTEGER, customTargetMax INTEGER, customHardMax INTEGER)")
+                db.execSQL("CREATE TABLE IF NOT EXISTS npc_library_banks (bankId TEXT NOT NULL PRIMARY KEY, name TEXT NOT NULL, createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL)")
+                db.execSQL("CREATE TABLE IF NOT EXISTS npc_library_entries (libraryNpcId TEXT NOT NULL PRIMARY KEY, bankId TEXT NOT NULL, displayName TEXT NOT NULL, aliasesJson TEXT NOT NULL, role TEXT NOT NULL, appearance TEXT NOT NULL, personality TEXT NOT NULL, relationshipToPersona TEXT NOT NULL, personaRelationshipsJson TEXT NOT NULL, characterKnowledgeJson TEXT NOT NULL, goals TEXT NOT NULL, secrets TEXT NOT NULL, authorNotes TEXT NOT NULL, keepInScene INTEGER NOT NULL, extensionFieldsJson TEXT, sortPosition INTEGER NOT NULL, createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_npc_library_entries_bankId ON npc_library_entries(bankId)")
+            }
+        }
+
         val MIGRATION_8_9 = object : Migration(8, 9) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("CREATE TABLE IF NOT EXISTS scenarios (scenarioId TEXT NOT NULL PRIMARY KEY, definitionJson TEXT NOT NULL, createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL)")

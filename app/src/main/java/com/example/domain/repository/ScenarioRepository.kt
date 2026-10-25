@@ -25,6 +25,7 @@ class ScenarioRepository(
             val chat = ChatEntity(displayName = definition.displayTitle.ifBlank { definition.title }, chatType = ChatType.SCENARIO)
             database.chatDao().insertChat(chat)
             database.chatDao().insertChatPersonaParticipant(ChatPersonaParticipantEntity(chatId = chat.chatId, personaId = personaId))
+            database.chatDao().insertChatSettings(ChatSettingsEntity(chatId = chat.chatId, useGlobalEngineDefaults = true))
             database.scenarioDao().insertSession(ScenarioSessionEntity(chat.chatId, scenarioId, scenario.definitionJson))
             if (definition.openingMessage.isNotBlank()) database.messageDao().insertMessage(MessageEntity(
                 chatId = chat.chatId, speakerType = SpeakerType.NARRATOR, speakerId = "narrator:${chat.chatId}",

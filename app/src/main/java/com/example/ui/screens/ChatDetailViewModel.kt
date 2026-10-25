@@ -1127,7 +1127,7 @@ class ChatDetailViewModel(
     }
 
     private suspend fun prepareScenario(current: MessageEntity, history: List<MessageEntity>, continuation: Boolean): PreparedGeneration? {
-        val settings = currentChatSettings ?: return null
+        val settings = chatRepository.getEffectiveChatSettings(chatId) ?: currentChatSettings ?: return null
         val session = scenarioRepository?.session(chatId)
         if (session == null) {
             updateSuccessState { it.copy(generationError = "This playthrough's scenario configuration is unavailable.") }
@@ -1170,7 +1170,7 @@ class ChatDetailViewModel(
         characterId: String?
     ): PreparedGeneration? {
         val summary = chatSummary ?: return null
-        val settings = currentChatSettings ?: return null
+        val settings = chatRepository.getEffectiveChatSettings(chatId) ?: currentChatSettings ?: return null
         if (summary.chat.chatType == ChatType.SCENARIO) return prepareScenario(currentMessage, history, isContinuation)
         val resolvedCharacterId = characterId ?: summary.characters.firstOrNull()?.characterId ?: return null
         val fullCharacter = characterRepository.getCharacterById(resolvedCharacterId) ?: return null

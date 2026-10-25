@@ -8,6 +8,8 @@ import com.example.data.model.NpcBankSettingsEntity
 import com.example.data.model.NpcDossier
 import com.example.data.model.NpcDossierEntity
 import com.example.data.model.NpcDossierUpdateEntity
+import com.example.data.model.NpcLibraryBankEntity
+import com.example.data.model.NpcLibraryEntryEntity
 import com.example.domain.npc.NpcStructuredUpdate
 import com.example.domain.npc.NpcStructuredOutputParser
 import com.example.domain.story.StoryResponseCodec
@@ -53,6 +55,8 @@ data class NpcContextSelection(
     val score: Int
 )
 
+data class NpcLibraryBank(val bank: NpcLibraryBankEntity, val entries: List<NpcLibraryEntryEntity>)
+
 class NpcRepository(
     private val database: AppDatabase,
     private val moshi: Moshi,
@@ -74,6 +78,68 @@ class NpcRepository(
         }
 
     fun observeSettings(chatId: String): Flow<NpcBankSettingsEntity?> = dao.observeSettings(chatId)
+
+    fun observeLibraryBanks(): Flow<List<NpcLibraryBankEntity>> = dao.observeLibraryBanks()
+
+    suspend fun getLibraryBank(bankId: String): NpcLibraryBank? = withContext(Dispatchers.IO) {
+        dao.getLibraryBanks().firstOrNull { it.bankId == bankId }?.let { NpcLibraryBank(it, dao.getLibraryEntries(bankId)) }
+    }
+
+    suspend fun importLibraryBank(name: String, json: String): String = dataCoordinator.withMutation {
+        withContext(Dispatchers.IO) {
+            require(name.isNotBlank()) { "Library bank name is required." }
+            require(json.length <= MAX_IMPORT_CHARS) { "NPC JSON is too large." }
+            val document = parseImportDocument(json)
+            require(document.schemaVersion == 1) { "Unsupported NPC schema version ${document.schemaVersion}." }
+            require(document.npcs.isNotEmpty()) { "The NPC bank is empty." }
+            require(document.npcs.size <= MAX_IMPORT_NPCS) { "An NPC import can contain at most $MAX_IMPORT_NPCS records." }
+            document.npcs.forEach(::validateCard)
+            val bank = NpcLibraryBankEntity(name = name.trim())
+            database.withTransaction {
+                dao.insertLibraryBank(bank)
+                dao.insertLibraryEntries(document.npcs.mapIndexed { index, card -> card.toLibrary(bank.bankId, index) })
+            }
+            bank.bankId
+        }
+    }
+
+    suspend fun saveChatToLibrary(chatId: String, name: String): String = dataCoordinator.withMutation {
+        withContext(Dispatchers.IO) {
+            require(name.isNotBlank()) { "Library bank name is required." }
+            val projected = getProjectedDossiers(chatId)
+            require(projected.isNotEmpty()) { "This chat has no NPCs to save." }
+            val baseExtensions = dao.getDossiers(chatId).associate { it.npcId to it.extensionFieldsJson }
+            val bank = NpcLibraryBankEntity(name = name.trim())
+            database.withTransaction {
+                dao.insertLibraryBank(bank)
+                dao.insertLibraryEntries(projected.mapIndexed { index, npc ->
+                    npc.toLibrary(bank.bankId, index).copy(extensionFieldsJson = baseExtensions[npc.npcId])
+                })
+            }
+            bank.bankId
+        }
+    }
+
+    suspend fun addLibraryNpcsToChat(chatId: String, bankId: String, selectedIds: Set<String>? = null): Int =
+        dataCoordinator.withMutation {
+            withContext(Dispatchers.IO) {
+                val entries = dao.getLibraryEntries(bankId).filter { selectedIds == null || it.libraryNpcId in selectedIds }
+                require(entries.isNotEmpty()) { "Select at least one NPC." }
+                database.withTransaction {
+                    entries.forEach { entry -> dao.insertDossier(entry.toDossier(chatId)) }
+                }
+                entries.size
+            }
+        }
+
+    suspend fun deleteLibraryBank(bankId: String) = dataCoordinator.withMutation {
+        withContext(Dispatchers.IO) {
+            database.withTransaction {
+                dao.deleteLibraryEntries(bankId)
+                dao.deleteLibraryBank(bankId)
+            }
+        }
+    }
 
     suspend fun getSettings(chatId: String): NpcBankSettingsEntity =
         dataCoordinator.withMutation {
@@ -501,6 +567,28 @@ class NpcRepository(
         val normalizedRoot = root.toMutableMap().apply { this["npcs"] = normalizedNpcs }
         return requireNotNull(bankAdapter.fromJson(mapAdapter.toJson(normalizedRoot))) { "NPC JSON is empty." }
     }
+
+    private fun NpcCardJson.toLibrary(bankId: String, position: Int) = NpcLibraryEntryEntity(
+        bankId = bankId, displayName = displayName.trim(), aliasesJson = aliasesAdapter.toJson(aliases.map(String::trim).filter(String::isNotEmpty).distinct()),
+        role = role.trim(), appearance = appearance.trim(), personality = personality.trim(), relationshipToPersona = relationshipToPersona.trim(),
+        personaRelationshipsJson = stringMapAdapter.toJson(personaRelationships.cleanMap()), characterKnowledgeJson = stringMapAdapter.toJson(characterKnowledge.cleanMap()),
+        goals = goals.trim(), secrets = secrets.trim(), authorNotes = authorNotes.trim(), keepInScene = keepInScene,
+        extensionFieldsJson = extensionFields.takeIf(Map<*, *>::isNotEmpty)?.let(mapAdapter::toJson), sortPosition = position
+    )
+
+    private fun NpcDossier.toLibrary(bankId: String, position: Int) = NpcLibraryEntryEntity(
+        bankId = bankId, displayName = displayName, aliasesJson = aliasesAdapter.toJson(aliases), role = role, appearance = appearance,
+        personality = personality, relationshipToPersona = relationshipToPersona, personaRelationshipsJson = stringMapAdapter.toJson(personaRelationships),
+        characterKnowledgeJson = stringMapAdapter.toJson(characterKnowledge), goals = goals, secrets = secrets, authorNotes = authorNotes,
+        keepInScene = keepInScene, sortPosition = position
+    )
+
+    private fun NpcLibraryEntryEntity.toDossier(chatId: String) = NpcDossierEntity(
+        npcId = UUID.randomUUID().toString(), chatId = chatId, displayName = displayName, aliasesJson = aliasesJson, role = role,
+        appearance = appearance, personality = personality, relationshipToPersona = relationshipToPersona,
+        personaRelationshipsJson = personaRelationshipsJson, characterKnowledgeJson = characterKnowledgeJson, goals = goals, secrets = secrets,
+        authorNotes = authorNotes, keepInScene = keepInScene, isManualBase = true, extensionFieldsJson = extensionFieldsJson
+    )
 
     private fun project(
         bases: List<NpcDossierEntity>,

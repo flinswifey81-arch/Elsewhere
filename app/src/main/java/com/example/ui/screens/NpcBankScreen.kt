@@ -32,6 +32,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -52,6 +53,8 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.data.model.NpcDossier
+import com.example.data.model.NpcLibraryBankEntity
+import com.example.data.model.NpcLibraryEntryEntity
 import com.example.domain.repository.NpcImportCollisionMode
 import com.example.domain.repository.NpcRepository
 import com.example.domain.repository.ChatRepository
@@ -74,7 +77,8 @@ data class NpcBankUiState(
     val isEnabled: Boolean = false,
     val dossiers: List<NpcDossier> = emptyList(),
     val isLoaded: Boolean = false,
-    val notice: String? = null
+    val notice: String? = null,
+    val libraryBanks: List<NpcLibraryBankEntity> = emptyList()
 )
 
 class NpcBankViewModel(
@@ -98,6 +102,11 @@ class NpcBankViewModel(
                         isLoaded = true
                     )
                 }
+        }
+        viewModelScope.launch {
+            repository.observeLibraryBanks().collect { banks ->
+                _uiState.value = _uiState.value.copy(libraryBanks = banks)
+            }
         }
     }
 
@@ -130,6 +139,24 @@ class NpcBankViewModel(
 
     fun clearNotice() { _uiState.value = _uiState.value.copy(notice = null) }
 
+    fun importLibrary(name: String, json: String) = viewModelScope.launch {
+        runCatching { repository.importLibraryBank(name, json) }
+            .onSuccess { notice("NPC bank saved to the library.") }
+            .onFailure { notice(it.message ?: "NPC bank could not be saved.") }
+    }
+
+    fun saveChatToLibrary(name: String) = viewModelScope.launch {
+        runCatching { repository.saveChatToLibrary(chatId, name) }
+            .onSuccess { notice("This chat's NPCs were copied to the library.") }
+            .onFailure { notice(it.message ?: "NPCs could not be saved to the library.") }
+    }
+
+    fun addFromLibrary(bankId: String, selectedIds: Set<String>?) = viewModelScope.launch {
+        runCatching { repository.addLibraryNpcsToChat(chatId, bankId, selectedIds) }
+            .onSuccess { count -> notice("Added $count independent NPC cop${if (count == 1) "y" else "ies"} to this chat.") }
+            .onFailure { notice(it.message ?: "Library NPCs could not be added.") }
+    }
+
     fun reportImportFailure(error: Throwable) {
         notice(error.message ?: "NPC JSON could not be read.")
     }
@@ -159,6 +186,8 @@ fun NpcBankScreen(
     var pasteText by remember { mutableStateOf("") }
     var deleteTarget by remember { mutableStateOf<NpcDossier?>(null) }
     var showExportOptions by remember { mutableStateOf(false) }
+    var showLibrary by remember { mutableStateOf(false) }
+    var libraryImportJson by remember { mutableStateOf("") }
     val chatSummary by androidx.compose.runtime.produceState<ChatSummary?>(null, chatId) {
         value = chatRepository.getChatSummaryById(chatId)
     }
@@ -173,6 +202,15 @@ fun NpcBankScreen(
                 }
             }
             result.onSuccess(viewModel::importJson).onFailure(viewModel::reportImportFailure)
+        }
+    }
+    val libraryImportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri ?: return@rememberLauncherForActivityResult
+        scope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching { context.contentResolver.openInputStream(uri)?.use(::readNpcJsonBounded) ?: error("The selected NPC JSON could not be opened.") }
+            }
+            result.onSuccess { libraryImportJson = it; showLibrary = true }.onFailure(viewModel::reportImportFailure)
         }
     }
     var pendingExport by remember { mutableStateOf<String?>(null) }
@@ -231,10 +269,13 @@ fun NpcBankScreen(
                     Text("Import")
                 }
                 OutlinedButton(onClick = { showPaste = true }) { Text("Paste JSON") }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 FilledTonalButton(onClick = { showExportOptions = true }) {
                     Icon(Icons.Filled.FileDownload, contentDescription = null)
                     Text("Export")
                 }
+                OutlinedButton(onClick = { showLibrary = true }) { Text("Library") }
             }
             state.notice?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary) }
             if (!state.isEnabled) {
@@ -337,6 +378,18 @@ fun NpcBankScreen(
             }
         )
     }
+    if (showLibrary) {
+        NpcLibraryDialog(
+            banks = state.libraryBanks,
+            repository = repository,
+            initialJson = libraryImportJson,
+            onPickFile = { libraryImportLauncher.launch(arrayOf("application/json", "text/json", "text/plain")) },
+            onDismiss = { showLibrary = false },
+            onImport = viewModel::importLibrary,
+            onSaveChat = viewModel::saveChatToLibrary,
+            onAdd = viewModel::addFromLibrary
+        )
+    }
     deleteTarget?.let { dossier ->
         AlertDialog(
             onDismissRequest = { deleteTarget = null },
@@ -351,6 +404,69 @@ fun NpcBankScreen(
             dismissButton = { TextButton(onClick = { deleteTarget = null }) { Text("Cancel") } }
         )
     }
+}
+
+@Composable
+private fun NpcLibraryDialog(
+    banks: List<NpcLibraryBankEntity>,
+    repository: NpcRepository,
+    initialJson: String,
+    onPickFile: () -> Unit,
+    onDismiss: () -> Unit,
+    onImport: (String, String) -> Unit,
+    onSaveChat: (String) -> Unit,
+    onAdd: (String, Set<String>?) -> Unit
+) {
+    var name by remember { mutableStateOf("") }
+    var json by remember { mutableStateOf("") }
+    var selectedBank by remember { mutableStateOf<String?>(null) }
+    var entries by remember { mutableStateOf<List<NpcLibraryEntryEntity>>(emptyList()) }
+    var selectedEntries by remember { mutableStateOf<Set<String>>(emptySet()) }
+    LaunchedEffect(selectedBank) {
+        entries = selectedBank?.let { repository.getLibraryBank(it)?.entries }.orEmpty()
+        selectedEntries = entries.mapTo(mutableSetOf()) { it.libraryNpcId }
+    }
+    LaunchedEffect(initialJson) { if (initialJson.isNotBlank()) json = initialJson }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Reusable NPC Library") },
+        text = {
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                item { Text("Import a bank once, or save this chat's current NPCs. Adding NPCs creates independent chat copies.", style = MaterialTheme.typography.bodySmall) }
+                item { OutlinedTextField(name, { name = it.take(120) }, label = { Text("Library bank name") }, modifier = Modifier.fillMaxWidth()) }
+                item { OutlinedTextField(json, { json = it.take(1_000_000) }, label = { Text("NPC Bank JSON") }, minLines = 3, modifier = Modifier.fillMaxWidth()) }
+                item { TextButton(onClick = onPickFile) { Text("Choose JSON file") } }
+                item {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(enabled = name.isNotBlank() && json.isNotBlank(), onClick = { onImport(name, json); name = ""; json = "" }) { Text("Save import") }
+                        OutlinedButton(enabled = name.isNotBlank(), onClick = { onSaveChat(name); name = "" }) { Text("Save chat NPCs") }
+                    }
+                }
+                if (banks.isEmpty()) item { Text("No reusable banks saved yet.") }
+                items(banks, key = { it.bankId }) { bank ->
+                    OutlinedButton(onClick = { selectedBank = bank.bankId }, modifier = Modifier.fillMaxWidth()) { Text(bank.name) }
+                }
+                if (entries.isNotEmpty()) {
+                    item { Text("Choose NPCs", style = MaterialTheme.typography.titleSmall) }
+                    items(entries, key = { it.libraryNpcId }) { npc ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(checked = npc.libraryNpcId in selectedEntries, onCheckedChange = { checked ->
+                                selectedEntries = if (checked) selectedEntries + npc.libraryNpcId else selectedEntries - npc.libraryNpcId
+                            })
+                            Text(npc.displayName)
+                        }
+                    }
+                    item {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(onClick = { selectedBank?.let { onAdd(it, null) }; onDismiss() }) { Text("Add entire bank") }
+                            OutlinedButton(enabled = selectedEntries.isNotEmpty(), onClick = { selectedBank?.let { onAdd(it, selectedEntries) }; onDismiss() }) { Text("Add selected") }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } }
+    )
 }
 
 internal fun readNpcJsonBounded(input: InputStream, maxBytes: Int = 1_000_000): String {
