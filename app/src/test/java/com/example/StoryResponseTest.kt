@@ -148,4 +148,111 @@ class StoryResponseTest {
         assertEquals(listOf(StorySegmentType.CHARACTER, StorySegmentType.NARRATION), decoded.segments.map { it.type })
         assertTrue(StoryResponseCodec.promptTranscript(appended).contains("Narrator: The clock strikes midnight."))
     }
+
+    @Test
+    fun transcriptStyleFallbackRecoversNarrationCharacterAndNpcSegments() {
+        val output = """
+            Narrator: The lift doors close with a muted chime.
+
+            Character (Zebulus): *He watches the floor numbers climb.* "You can still leave."
+
+            NPC (Lady Ashford): "And miss this? Never."
+
+            Narrator:
+            Silence settles over the three of them.
+        """.trimIndent()
+
+        val parsed = parser.parse(output, primary, listOf(ashford))
+
+        assertFalse(parsed.usedStructuredFormat)
+        assertEquals(
+            listOf(
+                StorySegmentType.NARRATION,
+                StorySegmentType.CHARACTER,
+                StorySegmentType.NPC,
+                StorySegmentType.NARRATION
+            ),
+            parsed.response.segments.map { it.type }
+        )
+        assertEquals("Lady Ashford", parsed.response.segments[2].speakerName)
+        assertTrue(parsed.response.segments.none { it.content.contains("Character (Zebulus):") })
+        assertTrue(parsed.response.segments.none { it.content.contains("Narrator:") })
+    }
+
+    @Test
+    fun transcriptLabelsInsideOrdinaryProseOrQuotationsAreNotReinterpreted() {
+        val output = """
+            He sets down a book titled Character (Zebulus): A Study in Winter.
+            "Narrator: You make everything sound ominous," she says.
+            The phrase NPC (Lady Ashford): remains written in the margin.
+        """.trimIndent()
+
+        val parsed = parser.parse(output, primary, listOf(ashford))
+
+        assertEquals(1, parsed.response.segments.size)
+        assertEquals(StorySegmentType.CHARACTER, parsed.response.segments.single().type)
+        assertEquals(output, parsed.response.segments.single().content)
+
+        val quotedAtStart = "\"Narrator: That is not what I said,\" she replies."
+        assertEquals(
+            quotedAtStart,
+            parser.parse(quotedAtStart, primary, listOf(ashford)).response.segments.single().content
+        )
+        val mismatchedCharacter = "Character (Lady Ashford): A Biography remains on the shelf."
+        assertEquals(
+            mismatchedCharacter,
+            parser.parse(mismatchedCharacter, primary, listOf(ashford)).response.segments.single().content
+        )
+    }
+
+    @Test
+    fun loneBareSpeakerNameRemainsOrdinaryButMultipleKnownLabelsFormTranscript() {
+        val ordinary = parser.parse("Zebulus: A Biography lies open on the desk.", primary, listOf(ashford))
+        assertEquals("Zebulus: A Biography lies open on the desk.", ordinary.response.segments.single().content)
+
+        val transcript = parser.parse(
+            """
+                Zebulus: "We should go."
+                Lady Ashford: "At last, some sense."
+            """.trimIndent(),
+            primary,
+            listOf(ashford)
+        )
+        assertEquals(
+            listOf(StorySegmentType.CHARACTER, StorySegmentType.NPC),
+            transcript.response.segments.map { it.type }
+        )
+    }
+
+    @Test
+    fun ensemblePromptHistoryUsesMarkersAndRepairsPreviouslyCollapsedTranscript() {
+        val previouslyCollapsed = StoryResponseCodec.encode(
+            com.example.domain.story.StoryResponse(
+                segments = listOf(
+                    com.example.domain.story.StorySegment(
+                        type = StorySegmentType.CHARACTER,
+                        content = """
+                            Narrator: The rain starts again.
+                            Character (Zebulus): "It always does."
+                            NPC (Lady Ashford): "Only when you complain."
+                        """.trimIndent(),
+                        speakerId = primary.id,
+                        speakerName = primary.name
+                    )
+                )
+            )
+        )
+
+        val history = StoryResponseCodec.promptStructuredHistory(previouslyCollapsed, primary, listOf(ashford))
+        val reparsed = parser.parse(history, primary, listOf(ashford))
+
+        assertTrue(history.startsWith(StoryOutputParser.START_MARKER))
+        assertTrue(history.endsWith(StoryOutputParser.END_MARKER))
+        assertFalse(history.contains("Character (Zebulus):"))
+        assertFalse(history.contains("NPC (Lady Ashford):"))
+        assertEquals(
+            listOf(StorySegmentType.NARRATION, StorySegmentType.CHARACTER, StorySegmentType.NPC),
+            reparsed.response.segments.map { it.type }
+        )
+    }
 }

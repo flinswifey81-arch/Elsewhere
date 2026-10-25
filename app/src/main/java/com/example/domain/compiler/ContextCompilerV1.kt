@@ -14,6 +14,7 @@ import com.example.domain.lore.ActiveLoreEntry
 import com.example.domain.npc.NpcStructuredOutputParser
 import com.example.domain.story.StoryOutputParser
 import com.example.domain.story.StoryResponseCodec
+import com.example.domain.story.StorySpeakerIdentity
 
 class ContextCompilerV1 {
 
@@ -36,7 +37,8 @@ class ContextCompilerV1 {
         npcBankEnabled: Boolean = false,
         narratorEnabled: Boolean = false,
         narratorInstructions: String = "",
-        ensembleNarrationEnabled: Boolean = narratorEnabled && groupParticipantNames.isEmpty()
+        ensembleNarrationEnabled: Boolean = narratorEnabled && groupParticipantNames.isEmpty(),
+        knownNpcSpeakers: List<StorySpeakerIdentity> = emptyList()
     ): List<RoleplayMessage> {
         val messages = mutableListOf<RoleplayMessage>()
         fun resolveMacros(source: String): String = IdentityMacroResolver.resolve(
@@ -206,6 +208,21 @@ class ContextCompilerV1 {
         
         // Older messages are represented by the persisted rolling summary. Keep recent turns verbatim.
         val trimmedHistory = chatHistory.filter { it.isPrimaryVariant }.takeLast(recentMessageLimit)
+        fun promptContent(message: MessageEntity): String {
+            val visibleContent = NpcStructuredOutputParser.finalVisibleStoryText(message.content)
+            val promptHistory = if (
+                ensembleNarrationEnabled && message.speakerType == SpeakerType.CHARACTER
+            ) {
+                StoryResponseCodec.promptStructuredHistory(
+                    content = visibleContent,
+                    primaryCharacter = StorySpeakerIdentity(character.characterId, character.displayName),
+                    knownNpcs = knownNpcSpeakers
+                )
+            } else {
+                StoryResponseCodec.promptTranscript(visibleContent)
+            }
+            return resolveMacros(promptHistory)
+        }
         
         for (msg in trimmedHistory) {
             val role = when (msg.speakerType) {
@@ -213,11 +230,7 @@ class ContextCompilerV1 {
                 SpeakerType.PERSONA -> Role.USER
                 else -> Role.SYSTEM
             }
-            val content = resolveMacros(
-                StoryResponseCodec.promptTranscript(
-                    NpcStructuredOutputParser.finalVisibleStoryText(msg.content)
-                )
-            )
+            val content = promptContent(msg)
             messages.add(
                 RoleplayMessage(
                     role = role,
@@ -233,11 +246,7 @@ class ContextCompilerV1 {
             SpeakerType.PERSONA -> Role.USER
             else -> Role.SYSTEM
         }
-        val currentContent = resolveMacros(
-            StoryResponseCodec.promptTranscript(
-                NpcStructuredOutputParser.finalVisibleStoryText(currentMessage.content)
-            )
-        )
+        val currentContent = promptContent(currentMessage)
         messages.add(
             RoleplayMessage(
                 role = role,

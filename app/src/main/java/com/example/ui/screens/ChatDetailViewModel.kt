@@ -1280,7 +1280,8 @@ class ChatDetailViewModel(
                 npcBankEnabled = npcBankEnabled,
                 narratorEnabled = settings.narratorEnabled,
                 narratorInstructions = settings.narratorInstructions,
-                ensembleNarrationEnabled = ensembleNarrationEnabled
+                ensembleNarrationEnabled = ensembleNarrationEnabled,
+                knownNpcSpeakers = knownNpcSpeakers
             )
         }
 

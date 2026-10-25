@@ -582,6 +582,141 @@ class ChatDetailGenerationTest {
     }
 
     @Test
+    fun ensembleNarrationRecoversFromFormatDriftAcrossSixTurnsWithoutContaminatingHistory() = runBlocking {
+        fun structured(vararg blocks: Pair<String, String>): String = buildString {
+            appendLine(StoryOutputParser.START_MARKER)
+            blocks.forEach { (header, content) ->
+                appendLine("${StoryOutputParser.SEGMENT_MARKER}$header")
+                appendLine(content)
+            }
+            append(StoryOutputParser.END_MARKER)
+        }
+        val provider = SequentialResponseProvider(
+            listOf(
+                structured(
+                    "{\"type\":\"narration\"}" to "Rain moves softly against the windows.",
+                    "{\"type\":\"character\"}" to "\"The road will flood before midnight.\"",
+                    "{\"type\":\"npc\",\"speaker_id\":\"npc-keeper\",\"speaker_name\":\"Keeper\"}" to "\"Then leave before the bells.\""
+                ),
+                structured(
+                    "{\"type\":\"character\"}" to "*Rowan folds the map.* \"We have time.\"",
+                    "{\"type\":\"npc\",\"speaker_id\":\"npc-ashford\",\"speaker_name\":\"Lady Ashford\"}" to "\"That is what you said yesterday.\"",
+                    "{\"type\":\"narration\"}" to "The Keeper turns away to hide a smile."
+                ),
+                """
+                    Narrator: Thunder rolls beyond the eastern ridge.
+                    Character (Rowan): *He glances toward the glass.* "That changes things."
+                    NPC (Keeper): "At last, we agree."
+                """.trimIndent(),
+                "An ordinary reply without narration or a speaker label.",
+                structured(
+                    "{\"type\":\"narration\"}" to "The first bell sounds.",
+                    "{\"type\":\"npc\",\"speaker_id\":\"npc-ashford\",\"speaker_name\":\"Lady Ashford\"}" to "\"Now do you believe me?\"",
+                    "{\"type\":\"character\"}" to "\"Enough to start walking.\""
+                ),
+                structured(
+                    "{\"type\":\"character\"}" to "*Rowan opens the door.* \"Stay close.\"",
+                    "{\"type\":\"narration\"}" to "Cold rain sweeps into the hall."
+                )
+            )
+        )
+        val harness = createHarness(
+            provider = provider,
+            responseLengthProfile = ResponseLengthProfile.NORMAL,
+            narratorEnabled = true,
+            npcBankEnabledInitially = true
+        )
+        listOf(
+            NpcDossier(
+                npcId = "npc-keeper",
+                chatId = harness.chatId,
+                displayName = "Keeper",
+                aliases = emptyList(),
+                role = "Gate keeper",
+                appearance = "Rain-dark coat",
+                personality = "Practical",
+                relationshipToPersona = "",
+                personaRelationships = emptyMap(),
+                characterKnowledge = emptyMap(),
+                goals = "Close the eastern road",
+                secrets = "",
+                authorNotes = "",
+                keepInScene = true,
+                isManualBase = true,
+                createdAt = 1,
+                updatedAt = 1
+            ),
+            NpcDossier(
+                npcId = "npc-ashford",
+                chatId = harness.chatId,
+                displayName = "Lady Ashford",
+                aliases = emptyList(),
+                role = "Traveler",
+                appearance = "Green cloak",
+                personality = "Impatient",
+                relationshipToPersona = "",
+                personaRelationships = emptyMap(),
+                characterKnowledge = emptyMap(),
+                goals = "Reach the eastern road",
+                secrets = "",
+                authorNotes = "",
+                keepInScene = true,
+                isManualBase = true,
+                createdAt = 2,
+                updatedAt = 2
+            )
+        ).forEach { harness.npcRepository.saveManual(it) }
+
+        repeat(6) { turn ->
+            harness.viewModel.onDraftChanged("Player turn ${turn + 1}")
+            harness.viewModel.sendMessage()
+            withTimeout(15_000) {
+                harness.viewModel.uiState.first { state ->
+                    state is ChatUiState.Success &&
+                        !state.isGenerating &&
+                        state.messages.count { it.speakerType == SpeakerType.CHARACTER } == turn + 1
+                }
+            }
+        }
+
+        assertEquals(6, provider.requests.size)
+        val persisted = harness.messageRepository.getMessagesForChat(harness.chatId).first()
+            .filter { it.speakerType == SpeakerType.CHARACTER }
+        assertEquals(6, persisted.size)
+        val persistedNpcNames = persisted.flatMap { message ->
+            StoryResponseCodec.decode(message.content)?.segments.orEmpty()
+                .filter { it.type == StorySegmentType.NPC }
+                .mapNotNull { it.speakerName }
+        }.toSet()
+        assertTrue(persistedNpcNames.containsAll(setOf("Keeper", "Lady Ashford")))
+        val recoveredTranscript = requireNotNull(StoryResponseCodec.decode(persisted[2].content))
+        assertEquals(
+            listOf(StorySegmentType.NARRATION, StorySegmentType.CHARACTER, StorySegmentType.NPC),
+            recoveredTranscript.segments.map { it.type }
+        )
+        assertTrue(recoveredTranscript.segments.none { it.content.contains("Character (Rowan):") })
+        val ordinary = requireNotNull(StoryResponseCodec.decode(persisted[3].content))
+        assertEquals(StorySegmentType.CHARACTER, ordinary.segments.single().type)
+        assertEquals("An ordinary reply without narration or a speaker label.", ordinary.segments.single().content)
+        assertEquals(
+            listOf(StorySegmentType.CHARACTER, StorySegmentType.NARRATION),
+            requireNotNull(StoryResponseCodec.decode(persisted[5].content)).segments.map { it.type }
+        )
+
+        provider.requests.drop(1).forEach { request ->
+            val assistantHistory = request.filter { it.role == Role.ASSISTANT }
+            assertTrue(assistantHistory.isNotEmpty())
+            assistantHistory.forEach { message ->
+                assertTrue(message.content.startsWith(StoryOutputParser.START_MARKER))
+                assertTrue(message.content.endsWith(StoryOutputParser.END_MARKER))
+                assertFalse(message.content.contains("Character (Rowan):"))
+                assertFalse(message.content.contains("NPC (Keeper):"))
+                assertFalse(message.content.contains("Narrator:"))
+            }
+        }
+    }
+
+    @Test
     fun finalStoryParserFailureRetainsSanitizedGeneratedTextAsPartial() = runBlocking {
         val raw = """
             <|elsewhere_story_v1|>
@@ -822,9 +957,11 @@ class ChatDetailGenerationTest {
         )
         assertEquals(1, story.segments.count { it.content == "The room stills." })
         val continuationPrompt = provider.requests.last().joinToString("\n") { it.content }
-        assertTrue(continuationPrompt.contains("Narrator: The room stills."))
-        assertTrue(continuationPrompt.contains("Character (Rowan): \"Wait here.\""))
-        assertFalse(continuationPrompt.contains("elsewhere-story-v1"))
+        assertTrue(continuationPrompt.contains(StoryOutputParser.START_MARKER))
+        assertTrue(continuationPrompt.contains("The room stills."))
+        assertTrue(continuationPrompt.contains("\"Wait here.\""))
+        assertFalse(continuationPrompt.contains("Character (Rowan):"))
+        assertFalse(continuationPrompt.contains("Narrator: The room stills."))
     }
 
     @Test

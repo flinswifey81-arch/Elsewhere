@@ -96,6 +96,50 @@ object StoryResponseCodec {
         }
         ?: content.removePrefix(PREFIX)
 
+    /**
+     * Replays assistant history in the same format requested for the next ensemble response.
+     * Plain transcript labels are intentionally avoided because models tend to imitate them and
+     * eventually replace the structured response contract with a visible screenplay transcript.
+     */
+    fun promptStructuredHistory(
+        content: String,
+        primaryCharacter: StorySpeakerIdentity,
+        knownNpcs: List<StorySpeakerIdentity> = emptyList()
+    ): String {
+        val stored = decode(content)
+        val normalized = when {
+            stored == null -> StoryOutputParser().parse(content, primaryCharacter, knownNpcs).response
+            stored.segments.size == 1 && stored.segments.single().type == StorySegmentType.CHARACTER -> {
+                val original = stored.segments.single()
+                val recovered = StoryOutputParser().parse(original.content, primaryCharacter, knownNpcs).response
+                if (
+                    recovered.segments.size != 1 ||
+                    recovered.segments.single().type != StorySegmentType.CHARACTER ||
+                    recovered.segments.single().content != original.content
+                ) recovered else stored
+            }
+            else -> stored
+        }
+        return buildString {
+            appendLine(StoryOutputParser.START_MARKER)
+            normalized.segments.filter { it.content.isNotBlank() }.forEach { segment ->
+                val header = when (segment.type) {
+                    StorySegmentType.NARRATION -> mapOf("type" to "narration")
+                    StorySegmentType.CHARACTER -> mapOf("type" to "character")
+                    StorySegmentType.NPC -> mapOf(
+                        "type" to "npc",
+                        "speaker_id" to segment.speakerId,
+                        "speaker_name" to segment.speakerName
+                    )
+                }
+                append(StoryOutputParser.SEGMENT_MARKER)
+                appendLine(adapter.toJson(header))
+                appendLine(segment.content.trim())
+            }
+            append(StoryOutputParser.END_MARKER)
+        }
+    }
+
     fun readableTranscript(response: StoryResponse): String = response.segments
         .joinToString("\n\n") { segment ->
             when (segment.type) {
@@ -223,7 +267,10 @@ open class StoryOutputParser {
         flush()
 
         if (final && sawStructure && (!sawStart || !sawEnd)) malformed = true
-        val normalized = StoryResponseCodec.mergeAdjacent(segments)
+        val transcriptSegments = if (!sawStructure) {
+            parseTranscriptSegments(output, primaryCharacter, knownNpcs)
+        } else null
+        val normalized = StoryResponseCodec.mergeAdjacent(transcriptSegments ?: segments)
         val fallback = if (normalized.isEmpty()) {
             val prose = output.lineSequence()
                 .map(::sanitizeControlSyntax)
@@ -264,19 +311,13 @@ open class StoryOutputParser {
                 primaryCharacter.name
             )
             "npc" -> {
-                val suppliedId = header.speaker_id?.trim()?.takeIf { it.length in 1..MAX_ID_CHARS }
-                val suppliedName = header.speaker_name?.trim()?.takeIf { it.length in 1..MAX_NAME_CHARS }
-                val known = knownNpcs.firstOrNull { it.id == suppliedId }
-                    ?: knownNpcs.firstOrNull { knownNpc ->
-                        suppliedName != null && knownNpc.name.equals(suppliedName, ignoreCase = true)
-                    }
-                val name = known?.name ?: suppliedName ?: "Supporting character"
-                val id = known?.id ?: suppliedId ?: stableNpcId(name)
-                if (id == primaryCharacter.id || name.equals(primaryCharacter.name, ignoreCase = true)) {
-                    StorySegment(StorySegmentType.CHARACTER, content, primaryCharacter.id, primaryCharacter.name)
-                } else {
-                    StorySegment(StorySegmentType.NPC, content, id, name)
-                }
+                resolveNpcSegment(
+                    content = content,
+                    suppliedId = header.speaker_id,
+                    suppliedName = header.speaker_name,
+                    primaryCharacter = primaryCharacter,
+                    knownNpcs = knownNpcs
+                )
             }
             else -> StorySegment(
                 StorySegmentType.CHARACTER,
@@ -284,6 +325,147 @@ open class StoryOutputParser {
                 primaryCharacter.id,
                 primaryCharacter.name
             )
+        }
+    }
+
+    private fun parseTranscriptSegments(
+        output: String,
+        primaryCharacter: StorySpeakerIdentity,
+        knownNpcs: List<StorySpeakerIdentity>
+    ): List<StorySegment>? {
+        val lines = output.lines()
+        val firstContentIndex = lines.indexOfFirst { it.isNotBlank() }
+        if (firstContentIndex < 0) return null
+        val firstHeader = transcriptHeader(lines[firstContentIndex], primaryCharacter, knownNpcs) ?: return null
+        val recovered = mutableListOf<StorySegment>()
+        val body = mutableListOf<String>()
+        var current = firstHeader
+        var sawStrongLabel = firstHeader.strong
+        var labelCount = 1
+
+        fun flush() {
+            val content = body.joinToString("\n").trim()
+            body.clear()
+            if (content.isBlank()) return
+            recovered += when (current.type) {
+                StorySegmentType.NARRATION -> StorySegment(StorySegmentType.NARRATION, content)
+                StorySegmentType.CHARACTER -> StorySegment(
+                    StorySegmentType.CHARACTER,
+                    content,
+                    primaryCharacter.id,
+                    primaryCharacter.name
+                )
+                StorySegmentType.NPC -> resolveNpcSegment(
+                    content = content,
+                    suppliedId = current.speaker?.id,
+                    suppliedName = current.speaker?.name,
+                    primaryCharacter = primaryCharacter,
+                    knownNpcs = knownNpcs
+                )
+            }
+        }
+
+        firstHeader.inlineContent.takeIf(String::isNotBlank)?.let(body::add)
+        lines.drop(firstContentIndex + 1).forEach { line ->
+            val header = transcriptHeader(line, primaryCharacter, knownNpcs)
+            if (header == null) {
+                body += line
+            } else {
+                flush()
+                current = header
+                sawStrongLabel = sawStrongLabel || header.strong
+                labelCount += 1
+                header.inlineContent.takeIf(String::isNotBlank)?.let(body::add)
+            }
+        }
+        flush()
+
+        // A lone bare name at the start of ordinary prose is ambiguous. Typed labels are strong
+        // enough on their own; bare known-speaker labels require a real multi-segment transcript.
+        if (!sawStrongLabel && labelCount < 2) return null
+        return recovered.takeIf { it.isNotEmpty() }
+    }
+
+    private fun transcriptHeader(
+        line: String,
+        primaryCharacter: StorySpeakerIdentity,
+        knownNpcs: List<StorySpeakerIdentity>
+    ): TranscriptHeader? {
+        NARRATOR_TRANSCRIPT_PATTERN.matchEntire(line)?.let { match ->
+            return TranscriptHeader(
+                type = StorySegmentType.NARRATION,
+                inlineContent = match.groupValues[1],
+                strong = true
+            )
+        }
+        CHARACTER_TRANSCRIPT_PATTERN.matchEntire(line)?.let { match ->
+            val suppliedName = match.groupValues[1].trim()
+            if (suppliedName.isNotEmpty() && !suppliedName.equals(primaryCharacter.name, ignoreCase = true)) {
+                return null
+            }
+            return TranscriptHeader(
+                type = StorySegmentType.CHARACTER,
+                speaker = primaryCharacter,
+                inlineContent = match.groupValues[2],
+                strong = true
+            )
+        }
+        NPC_TRANSCRIPT_PATTERN.matchEntire(line)?.let { match ->
+            val suppliedName = match.groupValues[1].trim().takeIf { it.length in 1..MAX_NAME_CHARS }
+                ?: return null
+            val known = knownNpcs.firstOrNull { it.name.equals(suppliedName, ignoreCase = true) }
+            return TranscriptHeader(
+                type = StorySegmentType.NPC,
+                speaker = known ?: StorySpeakerIdentity(stableNpcId(suppliedName), suppliedName),
+                inlineContent = match.groupValues[2],
+                strong = true
+            )
+        }
+        val primaryPattern = Regex(
+            "^\\s*${Regex.escape(primaryCharacter.name)}\\s*:\\s*(.*)$",
+            RegexOption.IGNORE_CASE
+        )
+        primaryPattern.matchEntire(line)?.let { match ->
+            return TranscriptHeader(
+                type = StorySegmentType.CHARACTER,
+                speaker = primaryCharacter,
+                inlineContent = match.groupValues[1],
+                strong = false
+            )
+        }
+        knownNpcs.forEach { npc ->
+            val pattern = Regex("^\\s*${Regex.escape(npc.name)}\\s*:\\s*(.*)$", RegexOption.IGNORE_CASE)
+            pattern.matchEntire(line)?.let { match ->
+                return TranscriptHeader(
+                    type = StorySegmentType.NPC,
+                    speaker = npc,
+                    inlineContent = match.groupValues[1],
+                    strong = false
+                )
+            }
+        }
+        return null
+    }
+
+    private fun resolveNpcSegment(
+        content: String,
+        suppliedId: String?,
+        suppliedName: String?,
+        primaryCharacter: StorySpeakerIdentity,
+        knownNpcs: List<StorySpeakerIdentity>
+    ): StorySegment {
+        val safeId = suppliedId?.trim()?.takeIf { it.length in 1..MAX_ID_CHARS }
+        val safeName = suppliedName?.trim()?.takeIf { it.length in 1..MAX_NAME_CHARS }
+        val known = knownNpcs.firstOrNull { it.id == safeId }
+            ?: knownNpcs.firstOrNull { knownNpc ->
+                safeName != null && knownNpc.name.equals(safeName, ignoreCase = true)
+            }
+        val name = known?.name ?: safeName ?: "Supporting character"
+        val id = known?.id ?: safeId ?: stableNpcId(name)
+        return if (id == primaryCharacter.id || name.equals(primaryCharacter.name, ignoreCase = true)) {
+            StorySegment(StorySegmentType.CHARACTER, content, primaryCharacter.id, primaryCharacter.name)
+        } else {
+            StorySegment(StorySegmentType.NPC, content, id, name)
         }
     }
 
@@ -347,6 +529,18 @@ open class StoryOutputParser {
         private const val MAX_NAME_CHARS = 120
         private val HEADER_OPTIONS = JsonReader.Options.of("type", "speaker_id", "speaker_name")
         private val SEGMENT_HEADER_PATTERN = Regex("<\\|segment\\|>\\s*\\{[^}\\r\\n]*\\}")
+        private val NARRATOR_TRANSCRIPT_PATTERN = Regex(
+            "^\\s*Narrator\\s*:\\s*(.*)$",
+            RegexOption.IGNORE_CASE
+        )
+        private val CHARACTER_TRANSCRIPT_PATTERN = Regex(
+            "^\\s*Character(?:\\s*\\(([^)\\r\\n]{1,120})\\))?\\s*:\\s*(.*)$",
+            RegexOption.IGNORE_CASE
+        )
+        private val NPC_TRANSCRIPT_PATTERN = Regex(
+            "^\\s*NPC\\s*\\(([^)\\r\\n]{1,120})\\)\\s*:\\s*(.*)$",
+            RegexOption.IGNORE_CASE
+        )
 
         private fun looksLikeControlFragment(line: String): Boolean =
             line.startsWith("<|elsewhere_") ||
@@ -382,6 +576,14 @@ open class StoryOutputParser {
             A supporting NPC's dialogue and actions, only when contextually relevant.
             $END_MARKER
             Segments may alternate in any natural order and each type may appear more than once. Omit unneeded NPC or narration segments. Put only metadata on a segment-header line and put story prose on following lines. Use Markdown italics for actions inside Character or NPC dialogue segments when appropriate. Never emit a Persona segment and never write dialogue, thoughts, feelings, decisions, or significant actions for the user's Persona. If an NPC Bank update contract is also present, append its terminal metadata block only after $END_MARKER. Do not mention or explain this contract.
+            Follow this contract independently on every response, even if an earlier assistant response used another format. Never substitute visible Narrator:, Character (Name):, or NPC (Name): transcript labels for the markers above.
         """.trimIndent()
     }
+
+    private data class TranscriptHeader(
+        val type: StorySegmentType,
+        val speaker: StorySpeakerIdentity? = null,
+        val inlineContent: String,
+        val strong: Boolean
+    )
 }
