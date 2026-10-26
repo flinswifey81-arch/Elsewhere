@@ -517,10 +517,11 @@ class BackupRepositoryTest {
     }
 
     @Test
-    fun testAppBackupPolicyAcceptsProductionArchivesWithoutWeakeningProductionValidation() {
-        val productionId = "com.aistudio.elsewhere.abwzy"
+    fun releaseAndSandboxBackupPoliciesAcceptOnlyTheirMigrationSources() {
+        val legacyId = "com.aistudio.elsewhere.abwzy"
+        val productionId = "$legacyId.v15"
         val testingId = "$productionId.test"
-        val productionArchive = BackupArchiveIO(moshi, setOf(productionId))
+        val productionArchive = BackupArchiveIO(moshi, setOf(productionId, legacyId))
         val testingArchive = BackupArchiveIO(moshi, setOf(testingId, productionId))
         val manifest = BackupManifest(
             formatVersion = BackupArchiveIO.FORMAT_VERSION,
@@ -537,6 +538,13 @@ class BackupRepositoryTest {
 
         testingArchive.validateManifest(manifest)
         productionArchive.validateManifest(manifest)
+
+        val legacyManifest = manifest.copy(applicationId = legacyId)
+        productionArchive.validateManifest(legacyManifest)
+        assertTrue(
+            runCatching { testingArchive.validateManifest(legacyManifest) }
+                .exceptionOrNull() is BackupValidationException
+        )
 
         val testingManifest = manifest.copy(applicationId = testingId)
         testingArchive.validateManifest(testingManifest)

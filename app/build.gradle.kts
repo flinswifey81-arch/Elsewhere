@@ -5,7 +5,8 @@ plugins {
   alias(libs.plugins.roborazzi)
 }
 
-val productionApplicationId = "com.aistudio.elsewhere.abwzy"
+val legacyApplicationId = "com.aistudio.elsewhere.abwzy"
+val productionApplicationId = "com.aistudio.elsewhere.abwzy.v15"
 val testSigningValues = mapOf(
   "path" to System.getenv("ELSEWHERE_TEST_KEYSTORE_PATH"),
   "storePassword" to System.getenv("ELSEWHERE_TEST_STORE_PASSWORD"),
@@ -23,10 +24,14 @@ android {
     minSdk = 33
     targetSdk = 36
     versionCode = 1
-    versionName = "1.0"
+    versionName = "1.5"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-    buildConfigField("String", "BACKUP_IMPORT_SOURCE_APPLICATION_ID", "\"\"")
+    buildConfigField(
+      "String",
+      "BACKUP_IMPORT_SOURCE_APPLICATION_ID",
+      "\"$legacyApplicationId\""
+    )
   }
 
   signingConfigs {

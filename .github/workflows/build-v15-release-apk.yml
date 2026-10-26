@@ -1,0 +1,108 @@
+name: Build Signed Elsewhere v1.5 APK
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-release-apk:
+    name: Build and verify signed v1.5 APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out selected branch
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools
+
+      - name: Install required Android SDK packages
+        run: sdkmanager "platforms;android-36.1" "build-tools;36.0.0"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: true
+
+      - name: Restore v1.5 release signing key
+        env:
+          V15_KEYSTORE_BASE64: ${{ secrets.ELSEWHERE_V15_KEYSTORE_BASE64 }}
+          V15_STORE_PASSWORD: ${{ secrets.ELSEWHERE_V15_STORE_PASSWORD }}
+          V15_KEY_PASSWORD: ${{ secrets.ELSEWHERE_V15_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for value in V15_KEYSTORE_BASE64 V15_STORE_PASSWORD V15_KEY_PASSWORD; do
+            if [ -z "${!value}" ]; then
+              echo "Missing required v1.5 signing secret: $value" >&2
+              exit 1
+            fi
+          done
+          umask 077
+          printf '%s' "$V15_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/elsewhere-v15-upload.jks"
+
+      - name: Build signed release APK
+        env:
+          KEYSTORE_PATH: ${{ runner.temp }}/elsewhere-v15-upload.jks
+          STORE_PASSWORD: ${{ secrets.ELSEWHERE_V15_STORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.ELSEWHERE_V15_KEY_PASSWORD }}
+        run: bash ./gradlew :app:assembleRelease --no-daemon --no-configuration-cache
+
+      - name: Verify package and signing certificate
+        env:
+          KEYSTORE_PATH: ${{ runner.temp }}/elsewhere-v15-upload.jks
+          STORE_PASSWORD: ${{ secrets.ELSEWHERE_V15_STORE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          apk_path="app/build/outputs/apk/release/app-release.apk"
+          build_tools="$ANDROID_HOME/build-tools/36.0.0"
+          expected_package="com.aistudio.elsewhere.abwzy.v15"
+
+          actual_package="$($build_tools/aapt dump badging "$apk_path" | sed -n "s/^package: name='\([^']*\)'.*/\1/p")"
+          if [ "$actual_package" != "$expected_package" ]; then
+            echo "Unexpected APK package: $actual_package" >&2
+            exit 1
+          fi
+
+          expected_certificate="$(keytool -exportcert -keystore "$KEYSTORE_PATH" -storepass:env STORE_PASSWORD -alias upload | openssl dgst -sha256 -r | awk '{print $1}')"
+          signer_report="$($build_tools/apksigner verify --verbose --print-certs "$apk_path")"
+          actual_certificate="$(printf '%s\n' "$signer_report" | awk -F': ' '/Signer #1 certificate SHA-256 digest:/ {print $2; exit}')"
+          if [ -z "$actual_certificate" ] || [ "$actual_certificate" != "$expected_certificate" ]; then
+            echo "The APK signing certificate does not match the upload key." >&2
+            exit 1
+          fi
+
+          {
+            echo "Package: $actual_package"
+            echo "Version: 1.5 (1)"
+            echo "Signer certificate SHA-256: $actual_certificate"
+          } | tee "$RUNNER_TEMP/elsewhere-v15-verification.txt"
+
+      - name: Remove temporary signing key
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/elsewhere-v15-upload.jks" ]; then
+            shred --remove "$RUNNER_TEMP/elsewhere-v15-upload.jks" 2>/dev/null || rm -f "$RUNNER_TEMP/elsewhere-v15-upload.jks"
+          fi
+
+      - name: Upload verified release APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Elsewhere-v1.5-Release-APK
+          path: |
+            app/build/outputs/apk/release/app-release.apk
+            ${{ runner.temp }}/elsewhere-v15-verification.txt
+          if-no-files-found: error
+          retention-days: 30
