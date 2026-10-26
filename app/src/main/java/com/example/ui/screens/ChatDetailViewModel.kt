@@ -1232,7 +1232,12 @@ class ChatDetailViewModel(
                 observerCharacterId = fullCharacter.characterId,
                 activePersonaId = fullPersona.personaId,
                 isGroup = summary.chat.chatType == ChatType.GROUP,
-                asOfOrderIndex = (history + currentMessage).maxOfOrNull { it.orderIndex }
+                asOfOrderIndex = (history + currentMessage).maxOfOrNull { it.orderIndex },
+                limit = if (ensembleNarrationEnabled) {
+                    NpcRepository.SOLO_ENSEMBLE_NPC_CONTEXT_LIMIT
+                } else {
+                    NpcRepository.DEFAULT_NPC_CONTEXT_LIMIT
+                }
             )
         } else null
 
