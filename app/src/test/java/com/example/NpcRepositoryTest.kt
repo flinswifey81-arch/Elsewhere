@@ -102,6 +102,34 @@ class NpcRepositoryTest {
     }
 
     @Test
+    fun expandedSoloEnsembleContextIncludesAllFiveNpcProfiles() = runBlocking {
+        (1..5).forEach { index ->
+            repository.saveManual(
+                dossier().copy(
+                    npcId = "ensemble-npc-$index",
+                    displayName = "Partner $index",
+                    personality = "Distinct personality $index"
+                )
+            )
+        }
+
+        val ordinaryContext = repository.relevantContext("chat", emptyList()).orEmpty()
+        val ensembleContext = repository.relevantContext(
+            chatId = "chat",
+            recentMessages = emptyList(),
+            limit = NpcRepository.SOLO_ENSEMBLE_NPC_CONTEXT_LIMIT
+        ).orEmpty()
+
+        val npcMarker = Regex("\\[NPC id=")
+        assertEquals(NpcRepository.DEFAULT_NPC_CONTEXT_LIMIT, npcMarker.findAll(ordinaryContext).count())
+        assertEquals(5, npcMarker.findAll(ensembleContext).count())
+        (1..5).forEach { index ->
+            assertTrue("Partner $index should have a dossier in the ensemble prompt", ensembleContext.contains("Name: Partner $index"))
+            assertTrue(ensembleContext.contains("Distinct personality $index"))
+        }
+    }
+
+    @Test
     fun manualEditBecomesNewBaseAndClearsAutomaticOverlay() = runBlocking {
         database.messageDao().insertMessage(
             MessageEntity(
