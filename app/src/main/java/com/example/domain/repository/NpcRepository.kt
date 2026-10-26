@@ -62,6 +62,12 @@ class NpcRepository(
     private val moshi: Moshi,
     private val dataCoordinator: AppDataMaintenanceCoordinator = AppDataMaintenanceCoordinator.Global
 ) {
+    companion object {
+        // Solo Ensemble Narration may need more supporting dossiers than ordinary chats.
+        const val DEFAULT_NPC_CONTEXT_LIMIT = 3
+        const val SOLO_ENSEMBLE_NPC_CONTEXT_LIMIT = 8
+    }
+
     private val dao get() = database.npcDao()
     private val messageDao get() = database.messageDao()
     private val aliasesType = Types.newParameterizedType(List::class.java, String::class.java)
@@ -412,7 +418,7 @@ class NpcRepository(
         activePersonaId: String? = null,
         isGroup: Boolean = false,
         asOfOrderIndex: Long? = null,
-        limit: Int = 3
+        limit: Int = DEFAULT_NPC_CONTEXT_LIMIT
     ): String? =
         withContext(Dispatchers.IO) {
             val bases = dao.getDossiers(chatId)

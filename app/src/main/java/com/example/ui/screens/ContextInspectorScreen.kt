@@ -13,6 +13,7 @@ import androidx.compose.ui.unit.dp
 import com.example.di.AppContainer
 import com.example.data.model.ChatType
 import com.example.domain.compiler.ContextCompilerV1
+import com.example.domain.repository.NpcRepository
 import com.example.domain.memory.ContextResetPolicy
 import com.example.domain.provider.RoleplayMessage
 import com.example.ui.components.elsewhereCardBorder
@@ -109,6 +110,7 @@ fun ContextInspectorScreen(
                         com.example.domain.story.StorySpeakerIdentity(dossier.npcId, dossier.displayName)
                     }
                 } else emptyList()
+                val ensembleNarrationEnabled = summary.chat.chatType == ChatType.SOLO && settings.narratorEnabled
                 val supportingCast = if (npcBankEnabled) {
                     appContainer.npcRepository?.relevantContext(
                         chatId = chatId,
@@ -116,7 +118,12 @@ fun ContextInspectorScreen(
                         observerCharacterId = character.characterId,
                         activePersonaId = persona.personaId,
                         isGroup = summary.chat.chatType == ChatType.GROUP,
-                        asOfOrderIndex = history.maxOfOrNull { it.orderIndex }
+                        asOfOrderIndex = history.maxOfOrNull { it.orderIndex },
+                        limit = if (ensembleNarrationEnabled) {
+                            NpcRepository.SOLO_ENSEMBLE_NPC_CONTEXT_LIMIT
+                        } else {
+                            NpcRepository.DEFAULT_NPC_CONTEXT_LIMIT
+                        }
                     )
                 } else null
                 val activeLore = appContainer.lorebookRepository?.resolveActiveLore(
