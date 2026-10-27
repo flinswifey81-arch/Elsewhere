@@ -38,9 +38,14 @@ class ContextCompilerV1 {
         narratorEnabled: Boolean = false,
         narratorInstructions: String = "",
         ensembleNarrationEnabled: Boolean = narratorEnabled && groupParticipantNames.isEmpty(),
-        knownNpcSpeakers: List<StorySpeakerIdentity> = emptyList()
+        knownNpcSpeakers: List<StorySpeakerIdentity> = emptyList(),
+        coLeadNpcNames: List<String> = emptyList()
     ): List<RoleplayMessage> {
         val messages = mutableListOf<RoleplayMessage>()
+        // Co-leads are available only in Solo Ensemble Narration, never in Group speaker isolation.
+        val activeCoLeads = if (ensembleNarrationEnabled && groupParticipantNames.isEmpty()) {
+            coLeadNpcNames.map(String::trim).filter(String::isNotBlank).distinct()
+        } else emptyList()
         fun resolveMacros(source: String): String = IdentityMacroResolver.resolve(
             source = source,
             characterDisplayName = character.displayName,
@@ -64,7 +69,15 @@ class ContextCompilerV1 {
             append("Maintain your character's identity, voice, behavior, and established relationship state. ")
             append("Respect previously established conversation events. ")
             if (ensembleNarrationEnabled) {
-                append("The primary Character remains the emotional and narrative center. Portray supporting NPCs only when their participation follows naturally from the scene. ")
+                if (activeCoLeads.isNotEmpty()) {
+                    append("The selected Character and these NPC co-leads (${activeCoLeads.joinToString(", ")}) have equal emotional and narrative importance. ")
+                    append("Each has an independent perspective, feelings, desires, initiative, and voice. ")
+                    append("When present and relevant, give the co-leads meaningful dialogue, actions, and opportunities to initiate interactions. ")
+                    append("Balance attention across scenes and turns naturally, not by demanding identical word counts or forcing every co-lead to speak every turn. ")
+                    append("Other NPCs remain supporting cast, participating only as the scene warrants. ")
+                } else {
+                    append("The primary Character remains the emotional and narrative center. Portray supporting NPCs only when their participation follows naturally from the scene. ")
+                }
             } else {
                 append("Do not speak as unrelated characters unless explicitly required by scene context. ")
                 append("Begin directly with the character's response content. Do not prefix the response with the character name or any speaker label. ")
@@ -75,7 +88,7 @@ class ContextCompilerV1 {
             if (narratorEnabled) {
                 append("--- NARRATOR GUIDANCE ---\n")
                 if (ensembleNarrationEnabled) {
-                    append("Create one flowing literary exchange in this single response. Alternate narration, the primary Character, and contextually relevant supporting NPCs as the scene requires. Narration may convey atmosphere, pauses, transitions, consequences, and subtle emotional tension, but should not interrupt every line or overexplain the scene. Let quiet conversation, action, and existing tension develop at the Persona's pace. Keep each speaker's knowledge, motivations, and voice distinct. Never write dialogue, actions, thoughts, feelings, decisions, or internal state for the user's Persona. Storyteller-only continuity may guide narration, but it does not become knowledge held by a Character unless visible history or explicitly speaker-scoped knowledge establishes it.\n")
+                    append("Create one flowing literary exchange in this single response. Alternate narration, the primary Character, and contextually relevant NPCs as the scene requires. Narration may convey atmosphere, pauses, transitions, consequences, and subtle emotional tension, but should not interrupt every line or overexplain the scene. Let quiet conversation, action, and existing tension develop at the Persona's pace. Keep each speaker's knowledge, motivations, and voice distinct. Never write dialogue, actions, thoughts, feelings, decisions, or internal state for the user's Persona. Storyteller-only continuity may guide narration, but it does not become knowledge held by a Character unless visible history or explicitly speaker-scoped knowledge establishes it.\n")
                 } else {
                     append("This is guidance for the same normal response, not an independent AI, speaker turn, or second model call. You may include scene, world, atmosphere, consequences, and supporting-cast narration alongside the selected Character's response. Never write dialogue, actions, thoughts, feelings, or decisions for the user's Persona. Preserve the selected Character's identity and voice. In a group, respond only as the selected Character and do not portray another AI Character's dialogue, actions, thoughts, or decisions. Storyteller-only continuity may guide narration, but it does not become knowledge held by any Character unless visible history or that Character's explicitly scoped knowledge establishes it.\n")
                 }
