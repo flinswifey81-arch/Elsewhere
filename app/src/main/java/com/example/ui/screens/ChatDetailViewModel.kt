@@ -1220,10 +1220,16 @@ class ChatDetailViewModel(
         val npcBankEnabled = activeCoopRoom == null && npcRepository?.getSettings(chatId)?.isEnabled == true
         val ensembleNarrationEnabled = summary.chat.chatType == ChatType.SOLO &&
             settings.narratorEnabled && activeCoopRoom == null
-        val knownNpcSpeakers = if (npcBankEnabled) {
-            npcRepository?.getProjectedDossiers(chatId).orEmpty().map { dossier ->
-                StorySpeakerIdentity(dossier.npcId, dossier.displayName)
-            }
+        val projectedNpcDossiers = if (npcBankEnabled) {
+            npcRepository?.getProjectedDossiers(chatId).orEmpty()
+        } else emptyList()
+        val knownNpcSpeakers = projectedNpcDossiers.map { dossier ->
+            StorySpeakerIdentity(dossier.npcId, dossier.displayName)
+        }
+        val coLeadNpcNames = if (ensembleNarrationEnabled && settings.coLeadEnsembleEnabled) {
+            projectedNpcDossiers.filter { it.keepInScene }
+                .take(NpcRepository.SOLO_ENSEMBLE_NPC_CONTEXT_LIMIT)
+                .map { it.displayName }
         } else emptyList()
         val supportingCast = if (npcBankEnabled) {
             npcRepository?.relevantContext(
@@ -1286,7 +1292,8 @@ class ChatDetailViewModel(
                 narratorEnabled = settings.narratorEnabled,
                 narratorInstructions = settings.narratorInstructions,
                 ensembleNarrationEnabled = ensembleNarrationEnabled,
-                knownNpcSpeakers = knownNpcSpeakers
+                knownNpcSpeakers = knownNpcSpeakers,
+                coLeadNpcNames = coLeadNpcNames
             )
         }
 

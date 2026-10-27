@@ -132,6 +132,10 @@ class ChatSettingsViewModel(
         updateSettings { it.copy(narratorEnabled = enabled) }
     }
 
+    fun onCoLeadEnsembleChanged(enabled: Boolean) {
+        updateSettings { it.copy(coLeadEnsembleEnabled = enabled) }
+    }
+
     fun onNarratorInstructionsChanged(instructions: String) {
         if (instructions.length > 4000) {
             _uiState.update { it.copy(error = "Narrator instructions cannot exceed 4,000 characters.") }

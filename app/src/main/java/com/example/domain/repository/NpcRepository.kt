@@ -62,12 +62,6 @@ class NpcRepository(
     private val moshi: Moshi,
     private val dataCoordinator: AppDataMaintenanceCoordinator = AppDataMaintenanceCoordinator.Global
 ) {
-    companion object {
-        // Solo Ensemble Narration may need more supporting dossiers than ordinary chats.
-        const val DEFAULT_NPC_CONTEXT_LIMIT = 3
-        const val SOLO_ENSEMBLE_NPC_CONTEXT_LIMIT = 8
-    }
-
     private val dao get() = database.npcDao()
     private val messageDao get() = database.messageDao()
     private val aliasesType = Types.newParameterizedType(List::class.java, String::class.java)
@@ -714,6 +708,10 @@ class NpcRepository(
     }
 
     companion object {
+        // Solo Ensemble Narration can include more relevant NPC dossiers than ordinary chats.
+        const val DEFAULT_NPC_CONTEXT_LIMIT = 3
+        const val SOLO_ENSEMBLE_NPC_CONTEXT_LIMIT = 8
+
         const val FIELD_DISPLAY_NAME = "display_name"
         const val FIELD_ALIASES = "aliases"
         const val FIELD_ROLE = "role"

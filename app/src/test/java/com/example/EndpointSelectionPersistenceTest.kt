@@ -134,6 +134,7 @@ class EndpointSelectionPersistenceTest {
         val defaults = ChatSettingsEntity(chatId = "narrator-chat")
         chatRepository.insertChatSettings(defaults)
         assertFalse(chatRepository.getChatSettings("narrator-chat")!!.narratorEnabled)
+        assertFalse(chatRepository.getChatSettings("narrator-chat")!!.coLeadEnsembleEnabled)
 
         val viewModel = viewModels.create(ChatSettingsViewModel::class.java) {
             ChatSettingsViewModel("narrator-chat", chatRepository, EndpointProvider)
@@ -141,18 +142,21 @@ class EndpointSelectionPersistenceTest {
         withTimeout(5_000) { viewModel.uiState.first { !it.isLoading } }
         viewModel.onNarratorInstructionsChanged("Use restrained atmospheric narration.")
         viewModel.onNarratorEnabledChanged(true)
+        viewModel.onCoLeadEnsembleChanged(true)
 
         val saved = withTimeout(5_000) {
             chatRepository.getChatSettingsFlow("narrator-chat").first {
-                it?.narratorEnabled == true && it.narratorInstructions.contains("atmospheric")
+                it?.narratorEnabled == true && it.coLeadEnsembleEnabled && it.narratorInstructions.contains("atmospheric")
             }
         }!!
         assertTrue(saved.narratorEnabled)
+        assertTrue(saved.coLeadEnsembleEnabled)
         viewModel.onNarratorEnabledChanged(false)
         val disabled = withTimeout(5_000) {
             chatRepository.getChatSettingsFlow("narrator-chat").first { it?.narratorEnabled == false && it.narratorInstructions.isNotBlank() }
         }!!
         assertEquals("Use restrained atmospheric narration.", disabled.narratorInstructions)
+        assertTrue(disabled.coLeadEnsembleEnabled) // Turning Narrator off retains this per-chat preference.
     }
 
     private object EndpointProvider : ModelProvider {
