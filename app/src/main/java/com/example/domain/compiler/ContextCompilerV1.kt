@@ -44,7 +44,7 @@ class ContextCompilerV1 {
         val messages = mutableListOf<RoleplayMessage>()
         // Co-leads are available only in Solo Ensemble Narration, never in Group speaker isolation.
         val activeCoLeads = if (ensembleNarrationEnabled && groupParticipantNames.isEmpty()) {
-            coLeadNpcNames.map(String::trim).filter(String::isNotBlank).distinct()
+            coLeadNpcNames.map { it.trim() }.filter { it.isNotBlank() }.distinct()
         } else emptyList()
         fun resolveMacros(source: String): String = IdentityMacroResolver.resolve(
             source = source,
