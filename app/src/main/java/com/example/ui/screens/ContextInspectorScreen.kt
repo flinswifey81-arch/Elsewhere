@@ -105,12 +105,18 @@ fun ContextInspectorScreen(
             } else if (character != null && persona != null && history.isNotEmpty()) {
                 val currentMessage = history.last()
                 val priorHistory = history.dropLast(1)
-                val knownNpcSpeakers = if (npcBankEnabled) {
-                    appContainer.npcRepository?.getProjectedDossiers(chatId).orEmpty().map { dossier ->
-                        com.example.domain.story.StorySpeakerIdentity(dossier.npcId, dossier.displayName)
-                    }
+                val projectedNpcDossiers = if (npcBankEnabled) {
+                    appContainer.npcRepository?.getProjectedDossiers(chatId).orEmpty()
                 } else emptyList()
+                val knownNpcSpeakers = projectedNpcDossiers.map { dossier ->
+                    com.example.domain.story.StorySpeakerIdentity(dossier.npcId, dossier.displayName)
+                }
                 val ensembleNarrationEnabled = summary.chat.chatType == ChatType.SOLO && settings.narratorEnabled
+                val coLeadNpcNames = if (ensembleNarrationEnabled && settings.coLeadEnsembleEnabled) {
+                    projectedNpcDossiers.filter { it.keepInScene }
+                        .take(NpcRepository.SOLO_ENSEMBLE_NPC_CONTEXT_LIMIT)
+                        .map { it.displayName }
+                } else emptyList()
                 val supportingCast = if (npcBankEnabled) {
                     appContainer.npcRepository?.relevantContext(
                         chatId = chatId,
@@ -178,7 +184,8 @@ fun ContextInspectorScreen(
                         npcBankEnabled = npcBankEnabled,
                         narratorEnabled = settings.narratorEnabled,
                         narratorInstructions = settings.narratorInstructions,
-                        knownNpcSpeakers = knownNpcSpeakers
+                        knownNpcSpeakers = knownNpcSpeakers,
+                        coLeadNpcNames = coLeadNpcNames
                     )
                 }
             }
