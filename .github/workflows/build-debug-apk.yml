@@ -2,6 +2,9 @@ name: Build Temporary Elsewhere Test APK
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - feature/solo-ensemble-co-leads
 
 permissions:
   contents: read
@@ -35,6 +38,22 @@ jobs:
 
       - name: Build temporary sandbox APK
         run: bash ./gradlew :app:assembleSandbox --no-daemon
+
+      - name: Verify native libraries are compressed for device installation
+        run: |
+          python3 - <<'PY'
+          from zipfile import ZipFile, ZIP_DEFLATED
+          apk = "app/build/outputs/apk/sandbox/app-sandbox.apk"
+          with ZipFile(apk) as archive:
+              libraries = [item for item in archive.infolist()
+                           if item.filename.startswith("lib/") and item.filename.endswith(".so")]
+              assert libraries, "Expected native libraries to verify."
+              incompatible = [item.filename for item in libraries
+                              if item.compress_type != ZIP_DEFLATED]
+              if incompatible:
+                  raise SystemExit("Uncompressed native libs remain: " + ", ".join(incompatible))
+              print(f"Verified {len(libraries)} native libraries packaged compressed.")
+          PY
 
       - name: Upload temporary test APK
         uses: actions/upload-artifact@v4
