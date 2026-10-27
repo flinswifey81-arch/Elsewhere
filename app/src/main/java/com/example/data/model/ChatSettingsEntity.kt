@@ -22,6 +22,7 @@ data class ChatSettingsEntity(
     val draftMessage: String? = null,
     @ColumnInfo(defaultValue = "0") val useGlobalEngineDefaults: Boolean = false,
     @ColumnInfo(defaultValue = "0") val narratorEnabled: Boolean = false,
+    @ColumnInfo(defaultValue = "0") val coLeadEnsembleEnabled: Boolean = false,
     @ColumnInfo(defaultValue = "''") val narratorInstructions: String = ""
 )
 
