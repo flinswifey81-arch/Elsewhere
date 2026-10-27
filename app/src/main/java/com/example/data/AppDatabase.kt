@@ -7,7 +7,7 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.example.data.model.*
 
-const val APP_DATABASE_VERSION = 10
+const val APP_DATABASE_VERSION = 11
 
 @Database(
     entities = [
@@ -59,6 +59,12 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun backupDao(): BackupDao
 
     companion object {
+        val MIGRATION_10_11 = object : Migration(10, 11) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE chat_settings ADD COLUMN coLeadEnsembleEnabled INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         val MIGRATION_9_10 = object : Migration(9, 10) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE chat_settings ADD COLUMN useGlobalEngineDefaults INTEGER NOT NULL DEFAULT 0")
