@@ -24,6 +24,16 @@ Editing an ensemble response presents a readable transcript. Saving that edit in
 
 Narration is italic standalone prose without an avatar or bubble. Primary Character segments retain the Character name and artwork. NPC segments show their resolved name and a generated fallback avatar because NPC Bank dossiers do not currently store profile artwork. Character and NPC segment bodies continue to use the existing Markdown renderer, including italic actions.
 
+## Optional co-lead focus (Solo only)
+
+Character-chat **Chat Settings → Narrator → Co-Leads (Solo Ensemble)** is off by default. With Narrator enabled and the NPC Bank enabled, marking an NPC **Keep in scene** designates that NPC as a co-lead when this setting is on. The compiler gives those pinned NPCs and the selected Character comparable emotional and narrative weight without imposing equal word counts or requiring each participant to speak every turn. Unpinned NPCs remain supporting cast.
+
+This is a single normal provider response with the existing segment presentation, not independent model calls. For longer exchanges with two or more active co-leads, consider the Long response-length profile (which applies to the complete exchange).
+
+With no pinned NPCs (or when the bank is disabled), ordinary primary-Character focus remains in force. Turning Narrator off retains the co-lead preference but does not activate co-leads. Group speaker isolation and Scenario Mode are unchanged. Segmentation and actual character participation remain model-dependent.
+
+The per-chat co-lead switch is persisted with chat settings. Database version 11 uses `MIGRATION_10_11` to add it as disabled for existing chats.
+
 ## Limits
 
 - Segment quality still depends on model instruction-following. The fallback protects the text and interface when formatting is malformed, but it cannot infer missing speaker boundaries reliably.
