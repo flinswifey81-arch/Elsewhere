@@ -380,6 +380,7 @@ private fun BackupRestoreSettingsCard(repository: BackupRepository) {
     var pendingExportPassphrase by remember { mutableStateOf<String?>(null) }
     var pendingRestoreUri by remember { mutableStateOf<Uri?>(null) }
     var restorePassphrase by remember { mutableStateOf("") }
+    var restoreValidationError by remember { mutableStateOf<String?>(null) }
     var showRestorePassphrase by remember { mutableStateOf(false) }
     var restoreInspection by remember { mutableStateOf<BackupInspection?>(null) }
     var restoreConfirmation by remember { mutableStateOf("") }
@@ -415,6 +416,7 @@ private fun BackupRestoreSettingsCard(repository: BackupRepository) {
         if (uri != null) {
             pendingRestoreUri = uri
             restorePassphrase = ""
+            restoreValidationError = null
             showRestorePassphrase = true
         }
     }
@@ -514,50 +516,77 @@ private fun BackupRestoreSettingsCard(repository: BackupRepository) {
     if (showRestorePassphrase) {
         AlertDialog(
             onDismissRequest = {
-                showRestorePassphrase = false
-                restorePassphrase = ""
-                pendingRestoreUri = null
+                if (!isWorking) {
+                    showRestorePassphrase = false
+                    restorePassphrase = ""
+                    restoreValidationError = null
+                    pendingRestoreUri = null
+                }
             },
             title = { Text("Open encrypted backup") },
             text = {
-                OutlinedTextField(
-                    value = restorePassphrase,
-                    onValueChange = { restorePassphrase = it },
-                    label = { Text("Backup passphrase") },
-                    visualTransformation = PasswordVisualTransformation(),
-                    singleLine = true
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = restorePassphrase,
+                        onValueChange = {
+                            restorePassphrase = it
+                            restoreValidationError = null
+                        },
+                        label = { Text("Backup passphrase") },
+                        visualTransformation = PasswordVisualTransformation(),
+                        singleLine = true,
+                        enabled = !isWorking,
+                        isError = restoreValidationError != null,
+                        modifier = Modifier.testTag("restore_passphrase_input")
+                    )
+                    restoreValidationError?.let { message ->
+                        Text(
+                            message,
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.testTag("restore_validation_error")
+                        )
+                    }
+                    if (isWorking) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                }
             },
             confirmButton = {
                 TextButton(
                     enabled = restorePassphrase.length >= 10 && !isWorking,
                     onClick = {
                         val uri = pendingRestoreUri ?: return@TextButton
-                        showRestorePassphrase = false
+                        val attempt = restorePassphrase.toCharArray()
                         scope.launch {
                             isWorking = true
+                            restoreValidationError = null
                             statusMessage = null
-                            runCatching {
-                                context.contentResolver.openInputStream(uri)?.use { input ->
-                                    repository.inspectEncryptedForRestore(input, restorePassphrase.toCharArray())
+                            try {
+                                val inspection = context.contentResolver.openInputStream(uri)?.use { input ->
+                                    repository.inspectEncryptedForRestore(input, attempt)
                                 } ?: error("The selected backup could not be opened.")
-                            }.onSuccess { restoreInspection = it }
-                                .onFailure {
-                                    statusMessage = it.message ?: "Backup could not be validated."
-                                    pendingRestoreUri = null
-                                    restorePassphrase = ""
-                                }
-                            isWorking = false
+                                restoreInspection = inspection
+                                showRestorePassphrase = false
+                            } catch (error: Exception) {
+                                restoreValidationError = error.message ?: "Backup could not be validated."
+                                restorePassphrase = ""
+                            } finally {
+                                attempt.fill('\u0000')
+                                isWorking = false
+                            }
                         }
                     }
                 ) { Text("Validate") }
             },
             dismissButton = {
-                TextButton(onClick = {
-                    showRestorePassphrase = false
-                    restorePassphrase = ""
-                    pendingRestoreUri = null
-                }) { Text("Cancel") }
+                TextButton(
+                    enabled = !isWorking,
+                    onClick = {
+                        showRestorePassphrase = false
+                        restorePassphrase = ""
+                        restoreValidationError = null
+                        pendingRestoreUri = null
+                    }
+                ) { Text("Cancel") }
             }
         )
     }
