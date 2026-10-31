@@ -92,6 +92,11 @@ class ChatRepository(
     fun getChatSettingsFlow(chatId: String): Flow<ChatSettingsEntity?> =
         chatDao.getChatSettingsFlow(chatId)
 
+    /** Only a successfully saved new Persona reply should consume rebalance guidance. */
+    suspend fun consumeCoLeadRebalanceTurn(chatId: String) = dataCoordinator.withMutation {
+        withContext(Dispatchers.IO) { chatDao.consumeCoLeadRebalanceTurn(chatId) }
+    }
+
     suspend fun getEngineDefaults(): EngineDefaultsEntity = withContext(Dispatchers.IO) {
         chatDao.getEngineDefaults() ?: EngineDefaultsEntity()
     }
