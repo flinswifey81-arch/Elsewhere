@@ -132,7 +132,7 @@ class AppDatabaseMigrationTest {
     }
 
     @Test
-    fun migrationFrom3To11ValidatesAgainstRoomAndPreservesExistingChatData() = runBlocking {
+    fun migrationFrom3To12ValidatesAgainstRoomAndPreservesExistingChatData() = runBlocking {
         val helper = FrameworkSQLiteOpenHelperFactory().create(
             SupportSQLiteOpenHelper.Configuration.builder(context)
                 .name(databaseName)
@@ -170,12 +170,13 @@ class AppDatabaseMigrationTest {
                 AppDatabase.MIGRATION_7_8,
                 AppDatabase.MIGRATION_8_9,
                 AppDatabase.MIGRATION_9_10,
-                AppDatabase.MIGRATION_10_11
+                AppDatabase.MIGRATION_10_11,
+                AppDatabase.MIGRATION_11_12
             )
             .allowMainThreadQueries()
             .build()
         try {
-            // Opening through Room executes every migration through 11 and validates the resulting schema.
+            // Opening through Room executes every migration through 12 and validates the resulting schema.
             migrated.openHelper.writableDatabase
             assertEquals("Keep Me", migrated.chatDao().getChatById("chat-keep")?.displayName)
             assertEquals("Preserve this", migrated.messageDao().getMessagesForChatOnce("chat-keep").single().content)
@@ -193,6 +194,33 @@ class AppDatabaseMigrationTest {
             assertTrue(migrated.chatDao().getChatById("chat-keep")?.contextResetOrderIndex == null)
         } finally {
             migrated.close()
+        }
+    }
+
+    @Test
+    fun migrationFrom11To12PreservesGuidanceAndStartsRebalanceInactive() {
+        val helper = FrameworkSQLiteOpenHelperFactory().create(
+            SupportSQLiteOpenHelper.Configuration.builder(context).name(databaseName)
+                .callback(object : SupportSQLiteOpenHelper.Callback(11) {
+                    override fun onCreate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                        db.execSQL("CREATE TABLE chat_settings (chatId TEXT NOT NULL PRIMARY KEY, coLeadEnsembleEnabled INTEGER NOT NULL DEFAULT 0, narratorEnabled INTEGER NOT NULL DEFAULT 0)")
+                    }
+                    override fun onUpgrade(db: androidx.sqlite.db.SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+                }).build()
+        )
+        try {
+            helper.writableDatabase.apply {
+                execSQL("INSERT INTO chat_settings (chatId, coLeadEnsembleEnabled, narratorEnabled) VALUES ('chat-keep', 1, 1)")
+                AppDatabase.MIGRATION_11_12.migrate(this)
+                query("SELECT coLeadEnsembleEnabled, narratorEnabled, coLeadRebalanceTurnsRemaining FROM chat_settings WHERE chatId = 'chat-keep'").use { cursor ->
+                    assertTrue(cursor.moveToFirst())
+                    assertEquals(1, cursor.getInt(0))
+                    assertEquals(1, cursor.getInt(1))
+                    assertEquals(0, cursor.getInt(2))
+                }
+            }
+        } finally {
+            helper.close()
         }
     }
 
