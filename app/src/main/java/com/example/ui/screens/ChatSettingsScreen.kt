@@ -46,7 +46,12 @@ fun ChatSettingsScreen(
     val uiState by viewModel.uiState.collectAsState()
     val scrollState = rememberScrollState()
     var scenarioMode by remember(chatId) { mutableStateOf(false) }
-    LaunchedEffect(chatId) { scenarioMode = chatRepository.getChatSummaryById(chatId)?.chat?.chatType == com.example.data.model.ChatType.SCENARIO }
+    var soloMode by remember(chatId) { mutableStateOf(false) }
+    LaunchedEffect(chatId) {
+        val chatType = chatRepository.getChatSummaryById(chatId)?.chat?.chatType
+        scenarioMode = chatType == com.example.data.model.ChatType.SCENARIO
+        soloMode = chatType == com.example.data.model.ChatType.SOLO
+    }
 
     Scaffold(
         topBar = {
@@ -104,6 +109,42 @@ fun ChatSettingsScreen(
                         "Formats one normal model response as an integrated scene with standalone narration and optional supporting NPC segments. This uses no extra model request. Turning it off keeps these instructions and the NPC Bank intact.",
                         style = MaterialTheme.typography.bodySmall
                     )
+                    if (soloMode) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Co-Leads (Solo Ensemble)", style = MaterialTheme.typography.titleSmall)
+                                Text(
+                                    "Give NPCs pinned with Keep in scene comparable narrative importance to the selected Character. Balance naturally across turns, not by strict word counts. Requires Narrator and an enabled NPC Bank; no extra model calls.",
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            }
+                            Switch(
+                                checked = uiState.settings?.coLeadEnsembleEnabled == true,
+                                enabled = uiState.settings?.narratorEnabled == true,
+                                onCheckedChange = viewModel::onCoLeadEnsembleChanged
+                            )
+                        }
+                        if (uiState.settings?.coLeadEnsembleEnabled == true) {
+                            OutlinedButton(
+                                onClick = viewModel::onCoLeadRebalanceRequested,
+                                enabled = uiState.settings?.narratorEnabled == true,
+                                modifier = Modifier.fillMaxWidth().testTag("rebalance_existing_chat")
+                            ) { Text("Rebalance Existing Chat") }
+                            val remaining = uiState.settings?.coLeadRebalanceTurnsRemaining ?: 0
+                            Text(
+                                if (remaining > 0) {
+                                    "Gentle rebalance active for the next $remaining completed new replies."
+                                } else {
+                                    "One-time guidance to restore overlooked pinned co-leads across four future replies. Keeps history and Persona choices intact; no forced 50/50 turns."
+                                },
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                    }
                     var narratorInstructions by remember(uiState.settings?.chatId) {
                         mutableStateOf(uiState.settings?.narratorInstructions.orEmpty())
                     }

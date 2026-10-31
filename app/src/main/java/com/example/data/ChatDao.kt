@@ -202,6 +202,9 @@ interface ChatDao {
     @Query("SELECT * FROM chat_settings WHERE chatId = :chatId")
     fun getChatSettingsFlow(chatId: String): Flow<com.example.data.model.ChatSettingsEntity?>
 
+    @Query("UPDATE chat_settings SET coLeadRebalanceTurnsRemaining = coLeadRebalanceTurnsRemaining - 1 WHERE chatId = :chatId AND coLeadRebalanceTurnsRemaining > 0 AND coLeadEnsembleEnabled = 1 AND narratorEnabled = 1")
+    suspend fun consumeCoLeadRebalanceTurn(chatId: String): Int
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertEngineDefaults(defaults: com.example.data.model.EngineDefaultsEntity)
 

@@ -412,7 +412,7 @@ class NpcRepository(
         activePersonaId: String? = null,
         isGroup: Boolean = false,
         asOfOrderIndex: Long? = null,
-        limit: Int = 3
+        limit: Int = DEFAULT_NPC_CONTEXT_LIMIT
     ): String? =
         withContext(Dispatchers.IO) {
             val bases = dao.getDossiers(chatId)
@@ -708,6 +708,10 @@ class NpcRepository(
     }
 
     companion object {
+        // Solo Ensemble Narration can include more relevant NPC dossiers than ordinary chats.
+        const val DEFAULT_NPC_CONTEXT_LIMIT = 3
+        const val SOLO_ENSEMBLE_NPC_CONTEXT_LIMIT = 8
+
         const val FIELD_DISPLAY_NAME = "display_name"
         const val FIELD_ALIASES = "aliases"
         const val FIELD_ROLE = "role"

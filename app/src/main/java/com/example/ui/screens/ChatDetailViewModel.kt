@@ -88,7 +88,8 @@ private data class PreparedGeneration(
     val npcBankEnabled: Boolean = false,
     val activePersonaId: String? = null,
     val ensembleNarrationEnabled: Boolean = false,
-    val knownNpcSpeakers: List<StorySpeakerIdentity> = emptyList()
+    val knownNpcSpeakers: List<StorySpeakerIdentity> = emptyList(),
+    val coLeadRebalanceActive: Boolean = false
 )
 
 private data class PendingPartialGeneration(
@@ -100,6 +101,7 @@ private data class PendingPartialGeneration(
     val npcBankEnabled: Boolean,
     val activePersonaId: String?,
     val dataRevision: AppDataRevision,
+    val coLeadRebalanceActive: Boolean = false,
     val metadata: GenerationMetadataEntity? = null,
     val attemptedMessage: MessageEntity? = null,
     val publishedMessageId: String? = null,
@@ -961,7 +963,8 @@ class ChatDetailViewModel(
             continuationTarget = continuationTarget,
             npcBankEnabled = prepared.npcBankEnabled,
             activePersonaId = prepared.activePersonaId,
-            dataRevision = dataRevision
+            dataRevision = dataRevision,
+            coLeadRebalanceActive = prepared.coLeadRebalanceActive
         )
         
         generationJob = viewModelScope.launch {
@@ -1062,6 +1065,7 @@ class ChatDetailViewModel(
                         npcUpdates = parsed.updates,
                         npcWarning = formatWarning,
                         activePersonaId = prepared.activePersonaId,
+                        coLeadRebalanceActive = prepared.coLeadRebalanceActive,
                         dataRevision = dataRevision
                     )
                     if (saved) pendingPartialGeneration = null
@@ -1220,11 +1224,18 @@ class ChatDetailViewModel(
         val npcBankEnabled = activeCoopRoom == null && npcRepository?.getSettings(chatId)?.isEnabled == true
         val ensembleNarrationEnabled = summary.chat.chatType == ChatType.SOLO &&
             settings.narratorEnabled && activeCoopRoom == null
-        val knownNpcSpeakers = if (npcBankEnabled) {
-            npcRepository?.getProjectedDossiers(chatId).orEmpty().map { dossier ->
-                StorySpeakerIdentity(dossier.npcId, dossier.displayName)
-            }
+        val projectedNpcDossiers = if (npcBankEnabled) {
+            npcRepository?.getProjectedDossiers(chatId).orEmpty()
         } else emptyList()
+        val knownNpcSpeakers = projectedNpcDossiers.map { dossier ->
+            StorySpeakerIdentity(dossier.npcId, dossier.displayName)
+        }
+        val coLeadNpcNames = if (ensembleNarrationEnabled && settings.coLeadEnsembleEnabled) {
+            projectedNpcDossiers.filter { it.keepInScene }
+                .take(NpcRepository.SOLO_ENSEMBLE_NPC_CONTEXT_LIMIT)
+                .map { it.displayName }
+        } else emptyList()
+        val coLeadRebalanceActive = settings.coLeadRebalanceTurnsRemaining > 0 && coLeadNpcNames.isNotEmpty()
         val supportingCast = if (npcBankEnabled) {
             npcRepository?.relevantContext(
                 chatId = chatId,
@@ -1232,7 +1243,12 @@ class ChatDetailViewModel(
                 observerCharacterId = fullCharacter.characterId,
                 activePersonaId = fullPersona.personaId,
                 isGroup = summary.chat.chatType == ChatType.GROUP,
-                asOfOrderIndex = (history + currentMessage).maxOfOrNull { it.orderIndex }
+                asOfOrderIndex = (history + currentMessage).maxOfOrNull { it.orderIndex },
+                limit = if (ensembleNarrationEnabled) {
+                    NpcRepository.SOLO_ENSEMBLE_NPC_CONTEXT_LIMIT
+                } else {
+                    NpcRepository.DEFAULT_NPC_CONTEXT_LIMIT
+                }
             )
         } else null
 
@@ -1281,7 +1297,9 @@ class ChatDetailViewModel(
                 narratorEnabled = settings.narratorEnabled,
                 narratorInstructions = settings.narratorInstructions,
                 ensembleNarrationEnabled = ensembleNarrationEnabled,
-                knownNpcSpeakers = knownNpcSpeakers
+                knownNpcSpeakers = knownNpcSpeakers,
+                coLeadNpcNames = coLeadNpcNames,
+                coLeadRebalanceActive = coLeadRebalanceActive
             )
         }
 
@@ -1331,7 +1349,8 @@ class ChatDetailViewModel(
             npcBankEnabled = npcBankEnabled,
             activePersonaId = fullPersona.personaId,
             ensembleNarrationEnabled = ensembleNarrationEnabled,
-            knownNpcSpeakers = knownNpcSpeakers
+            knownNpcSpeakers = knownNpcSpeakers,
+            coLeadRebalanceActive = coLeadRebalanceActive
         )
     }
 
@@ -1436,6 +1455,7 @@ class ChatDetailViewModel(
         npcUpdates: List<com.example.domain.npc.NpcStructuredUpdate> = emptyList(),
         npcWarning: String? = null,
         activePersonaId: String? = null,
+        coLeadRebalanceActive: Boolean = false,
         dataRevision: AppDataRevision,
         retainPartialOnCoopFailure: Boolean = false
     ): Boolean {
@@ -1688,6 +1708,20 @@ class ChatDetailViewModel(
             )
         }
         
+        // Only successfully saved NEW Persona replies count. Continue, Regenerate,
+        // failed provider calls, and partial attempts do not use up rebalance guidance.
+        if (coLeadRebalanceActive && !retainPartialOnCoopFailure && !isCoopGeneration &&
+            syncError == null && completionError == null && continuationTarget == null && variantGroupId == null &&
+            sourceMessage?.speakerType == SpeakerType.PERSONA
+        ) {
+            try {
+                chatRepository.consumeCoLeadRebalanceTurn(chatId)
+            } catch (cancellation: kotlinx.coroutines.CancellationException) {
+                throw cancellation
+            } catch (_: Exception) {
+                // The reply is already saved. Never lose it over a counter update.
+            }
+        }
         refreshChatTimestamp(dataRevision)
         return syncError == null && completionError == null
     }
@@ -1832,6 +1866,7 @@ class ChatDetailViewModel(
                     continuationTarget = pending.continuationTarget,
                     npcUpdates = emptyList(),
                     activePersonaId = pending.activePersonaId,
+                    coLeadRebalanceActive = pending.coLeadRebalanceActive,
                     dataRevision = pending.dataRevision,
                     retainPartialOnCoopFailure = true
                 )

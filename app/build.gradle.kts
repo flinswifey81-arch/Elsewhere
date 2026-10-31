@@ -92,6 +92,11 @@ androidComponents {
   beforeVariants(selector().withBuildType("sandbox")) { variantBuilder ->
     (variantBuilder as com.android.build.api.variant.HasUnitTestBuilder).enableUnitTest = true
   }
+  onVariants(selector().withBuildType("sandbox")) { variant ->
+    // 4 KB-aligned, uncompressed .so entries can be rejected by 16 KB page-size devices.
+    // Compress/extract sandbox native libraries; leave production APK packaging unchanged.
+    variant.packaging.jniLibs.useLegacyPackaging.set(true)
+  }
 }
 
 // Some unused dependencies are commented out below instead of being removed.
