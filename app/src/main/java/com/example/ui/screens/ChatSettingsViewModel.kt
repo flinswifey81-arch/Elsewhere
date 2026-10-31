@@ -136,6 +136,12 @@ class ChatSettingsViewModel(
         updateSettings { it.copy(coLeadEnsembleEnabled = enabled) }
     }
 
+    fun onCoLeadRebalanceRequested() {
+        val settings = _uiState.value.storedSettings ?: return
+        if (!settings.narratorEnabled || !settings.coLeadEnsembleEnabled) return
+        updateSettings { it.copy(coLeadRebalanceTurnsRemaining = 4) }
+    }
+
     fun onNarratorInstructionsChanged(instructions: String) {
         if (instructions.length > 4000) {
             _uiState.update { it.copy(error = "Narrator instructions cannot exceed 4,000 characters.") }

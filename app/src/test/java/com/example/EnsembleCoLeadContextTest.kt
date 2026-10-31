@@ -57,7 +57,8 @@ class EnsembleCoLeadContextTest {
     private fun systemPrompt(
         narratorEnabled: Boolean,
         coLeads: List<String> = emptyList(),
-        groupNames: List<String> = emptyList()
+        groupNames: List<String> = emptyList(),
+        rebalance: Boolean = false
     ): String = ContextCompilerV1().compileSoloContext(
         character = character,
         persona = persona,
@@ -69,7 +70,8 @@ class EnsembleCoLeadContextTest {
         customHardMax = null,
         narratorEnabled = narratorEnabled,
         groupParticipantNames = groupNames,
-        coLeadNpcNames = coLeads
+        coLeadNpcNames = coLeads,
+        coLeadRebalanceActive = rebalance
     ).first().content
 
     @Test
@@ -87,6 +89,15 @@ class EnsembleCoLeadContextTest {
         assertTrue(prompt.contains("not by demanding identical word counts"))
         assertFalse(prompt.contains("primary Character remains the emotional and narrative center"))
         assertTrue(prompt.contains("Never write dialogue, actions, thoughts, feelings, decisions, or internal state for the user's Persona"))
+    }
+
+    @Test
+    fun temporaryRebalanceDoesNotRewriteHistoryOrApplyWithoutActiveCoLeads() {
+        val active = systemPrompt(true, listOf("Mara"), rebalance = true)
+        assertTrue(active.contains("TEMPORARY ESTABLISHED-CHAT REBALANCE"))
+        assertTrue(active.contains("do not retcon, force equal dialogue"))
+        assertFalse(systemPrompt(true, rebalance = true).contains("TEMPORARY ESTABLISHED-CHAT REBALANCE"))
+        assertFalse(systemPrompt(false, listOf("Mara"), rebalance = true).contains("TEMPORARY ESTABLISHED-CHAT REBALANCE"))
     }
 
     @Test
