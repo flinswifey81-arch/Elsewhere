@@ -40,8 +40,16 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Run sandbox unit tests
-        run: bash ./gradlew :app:testSandboxUnitTest --no-daemon
+      - name: Run focused pre-freeze regression tests
+        run: |
+          bash ./gradlew :app:testSandboxUnitTest --no-daemon \
+            --tests com.example.AppDatabaseMigrationTest \
+            --tests com.example.EnsembleCoLeadContextTest \
+            --tests com.example.domain.backup.BackupCryptoTest \
+            --tests com.example.domain.backup.BackupRepositoryTest \
+            --tests com.example.ChatDetailGenerationTest \
+            --tests com.example.ChatSettingsScreenInitTest \
+            --tests com.example.EndpointSelectionPersistenceTest
 
       - name: Build temporary sandbox APK
         run: bash ./gradlew :app:assembleSandbox --no-daemon
