@@ -9,7 +9,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Person
@@ -27,6 +26,7 @@ import com.example.domain.repository.CharacterRepository
 import com.example.domain.repository.ProfileImageKind
 import com.example.domain.repository.ProfileImageRepository
 import com.example.domain.repository.ProfileDeletionResult
+import com.example.ui.components.ProfileLibraryActions
 import com.example.ui.components.ElsewhereEmptyState
 import com.example.ui.components.elsewhereCardBorder
 import com.example.ui.components.elsewhereDestructiveButtonColors
@@ -275,28 +275,14 @@ fun CharactersScreen(
             )
         },
         floatingActionButton = {
-            Column(
-                horizontalAlignment = Alignment.End,
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                ExtendedFloatingActionButton(
-                    onClick = {
-                        editingCharacter = null
-                        showEditor = true
-                    },
-                    icon = { Icon(Icons.Default.Add, contentDescription = null) },
-                    text = { Text("New Character") },
-                    modifier = Modifier.testTag("new_character_fab")
-                )
-                ExtendedFloatingActionButton(
-                    onClick = { showImportOptions = true },
-                    icon = { Icon(Icons.Default.Add, contentDescription = null) },
-                    text = { Text("Import JSON") },
-                    containerColor = MaterialTheme.colorScheme.primaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                    modifier = Modifier.testTag("import_character_fab")
-                )
-            }
+            ProfileLibraryActions(
+                profileType = "Character",
+                onNew = {
+                    editingCharacter = null
+                    showEditor = true
+                },
+                onImport = { showImportOptions = true }
+            )
         },
         modifier = modifier.testTag("characters_screen"),
         containerColor = MaterialTheme.colorScheme.background
@@ -333,8 +319,8 @@ fun CharactersScreen(
             }
         } else {
             LazyColumn(
-                modifier = Modifier.fillMaxSize().padding(padding),
-                contentPadding = PaddingValues(16.dp),
+                modifier = Modifier.fillMaxSize().padding(padding).testTag("character_list"),
+                contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 96.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 items(characters) { character ->

@@ -9,7 +9,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Face
@@ -27,6 +26,7 @@ import com.example.domain.repository.PersonaRepository
 import com.example.domain.repository.ProfileImageKind
 import com.example.domain.repository.ProfileImageRepository
 import com.example.domain.repository.ProfileDeletionResult
+import com.example.ui.components.ProfileLibraryActions
 import com.example.ui.components.ElsewhereEmptyState
 import com.example.ui.components.elsewhereCardBorder
 import com.example.ui.components.elsewhereDestructiveButtonColors
@@ -274,28 +274,14 @@ fun PersonasScreen(
             )
         },
         floatingActionButton = {
-            Column(
-                horizontalAlignment = Alignment.End,
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                ExtendedFloatingActionButton(
-                    onClick = {
-                        editingPersona = null
-                        showEditor = true
-                    },
-                    icon = { Icon(Icons.Default.Add, contentDescription = null) },
-                    text = { Text("New Persona") },
-                    modifier = Modifier.testTag("new_persona_fab")
-                )
-                ExtendedFloatingActionButton(
-                    onClick = { showImportOptions = true },
-                    icon = { Icon(Icons.Default.Add, contentDescription = null) },
-                    text = { Text("Import JSON") },
-                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                    modifier = Modifier.testTag("import_persona_fab")
-                )
-            }
+            ProfileLibraryActions(
+                profileType = "Persona",
+                onNew = {
+                    editingPersona = null
+                    showEditor = true
+                },
+                onImport = { showImportOptions = true }
+            )
         },
         modifier = modifier.testTag("personas_screen"),
         containerColor = MaterialTheme.colorScheme.background
@@ -338,8 +324,8 @@ fun PersonasScreen(
             }
         } else {
             LazyColumn(
-                modifier = Modifier.fillMaxSize().padding(padding),
-                contentPadding = PaddingValues(16.dp),
+                modifier = Modifier.fillMaxSize().padding(padding).testTag("persona_list"),
+                contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 96.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 items(personas) { persona ->
