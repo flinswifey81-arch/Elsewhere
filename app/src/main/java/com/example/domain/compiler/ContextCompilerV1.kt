@@ -39,7 +39,8 @@ class ContextCompilerV1 {
         narratorInstructions: String = "",
         ensembleNarrationEnabled: Boolean = narratorEnabled && groupParticipantNames.isEmpty(),
         knownNpcSpeakers: List<StorySpeakerIdentity> = emptyList(),
-        coLeadNpcNames: List<String> = emptyList()
+        coLeadNpcNames: List<String> = emptyList(),
+        coLeadRebalanceActive: Boolean = false
     ): List<RoleplayMessage> {
         val messages = mutableListOf<RoleplayMessage>()
         // Co-leads are available only in Solo Ensemble Narration, never in Group speaker isolation.
@@ -75,6 +76,12 @@ class ContextCompilerV1 {
                     append("When present and relevant, give the co-leads meaningful dialogue, actions, and opportunities to initiate interactions. ")
                     append("Balance attention across scenes and turns naturally, not by demanding identical word counts or forcing every co-lead to speak every turn. ")
                     append("Other NPCs remain supporting cast, participating only as the scene warrants. ")
+                    if (coLeadRebalanceActive) {
+                        append("TEMPORARY ESTABLISHED-CHAT REBALANCE: Existing replies may have underrepresented one or more co-leads. ")
+                        append("Over the next few new turns, give overlooked co-leads substantive agency, individual reactions, and chances to initiate or shape the scene when present and relevant. ")
+                        append("Maintain continuity with what has already happened; do not retcon, force equal dialogue, summon absent characters, or take control of the user's Persona. ")
+                        append("Do not mention this guidance in the story. ")
+                    }
                 } else {
                     append("The primary Character remains the emotional and narrative center. Portray supporting NPCs only when their participation follows naturally from the scene. ")
                 }
