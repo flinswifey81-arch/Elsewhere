@@ -128,6 +128,22 @@ fun ChatSettingsScreen(
                                 onCheckedChange = viewModel::onCoLeadEnsembleChanged
                             )
                         }
+                        if (uiState.settings?.coLeadEnsembleEnabled == true) {
+                            OutlinedButton(
+                                onClick = viewModel::onCoLeadRebalanceRequested,
+                                enabled = uiState.settings?.narratorEnabled == true,
+                                modifier = Modifier.fillMaxWidth().testTag("rebalance_existing_chat")
+                            ) { Text("Rebalance Existing Chat") }
+                            val remaining = uiState.settings?.coLeadRebalanceTurnsRemaining ?: 0
+                            Text(
+                                if (remaining > 0) {
+                                    "Gentle rebalance active for the next $remaining completed new replies."
+                                } else {
+                                    "One-time guidance to restore overlooked pinned co-leads across four future replies. Keeps history and Persona choices intact; no forced 50/50 turns."
+                                },
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
                     }
                     var narratorInstructions by remember(uiState.settings?.chatId) {
                         mutableStateOf(uiState.settings?.narratorInstructions.orEmpty())
