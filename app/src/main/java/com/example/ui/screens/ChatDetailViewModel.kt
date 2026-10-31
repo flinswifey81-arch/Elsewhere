@@ -1293,7 +1293,8 @@ class ChatDetailViewModel(
                 narratorInstructions = settings.narratorInstructions,
                 ensembleNarrationEnabled = ensembleNarrationEnabled,
                 knownNpcSpeakers = knownNpcSpeakers,
-                coLeadNpcNames = coLeadNpcNames
+                coLeadNpcNames = coLeadNpcNames,
+                coLeadRebalanceActive = settings.coLeadRebalanceTurnsRemaining > 0 && coLeadNpcNames.isNotEmpty()
             )
         }
 
@@ -1700,6 +1701,20 @@ class ChatDetailViewModel(
             )
         }
         
+        // Only successfully saved NEW Persona replies count. Continue, Regenerate,
+        // failed provider calls, and partial attempts do not use up rebalance guidance.
+        if (!isCoopGeneration && syncError == null && completionError == null &&
+            continuationTarget == null && variantGroupId == null &&
+            sourceMessage?.speakerType == SpeakerType.PERSONA
+        ) {
+            try {
+                chatRepository.consumeCoLeadRebalanceTurn(chatId)
+            } catch (cancellation: kotlinx.coroutines.CancellationException) {
+                throw cancellation
+            } catch (_: Exception) {
+                // The reply is already saved. Never lose it over a counter update.
+            }
+        }
         refreshChatTimestamp(dataRevision)
         return syncError == null && completionError == null
     }
