@@ -30,6 +30,22 @@ class BackupCryptoTest {
     }
 
     @Test
+    fun wrongPasswordFailsClearlyAndCorrectRetryCanStillReadSameFile() {
+        val plaintext = "recover my chats and characters".toByteArray()
+        val encrypted = ByteArrayOutputStream()
+        BackupCrypto.encrypt(ByteArrayInputStream(plaintext), encrypted, "correct-long-passphrase".toCharArray())
+        val bytes = encrypted.toByteArray()
+        val failed = runCatching {
+            BackupCrypto.decrypt(ByteArrayInputStream(bytes), ByteArrayOutputStream(), "incorrect-long-passphrase".toCharArray())
+        }.exceptionOrNull()
+        assertTrue(failed is BackupValidationException)
+        assertTrue(failed?.message.orEmpty().contains("passphrase is incorrect or the backup is corrupted"))
+        val retried = ByteArrayOutputStream()
+        BackupCrypto.decrypt(ByteArrayInputStream(bytes), retried, "correct-long-passphrase".toCharArray())
+        assertArrayEquals(plaintext, retried.toByteArray())
+    }
+
+    @Test
     fun shortPassphrasesAreRejected() {
         val failure = runCatching {
             BackupCrypto.encrypt(
