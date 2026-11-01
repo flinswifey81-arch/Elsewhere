@@ -144,6 +144,22 @@ class BackupRepositoryTest {
     }
 
     @Test
+    fun olderBackupsWithoutWorldCollectionsStillDecode() {
+        val json = BackupArchiveIO(moshi, BuildConfig.APPLICATION_ID).payloadToJson(completePayload())
+        val oldJson = listOf("worlds", "worldMemberships", "worldCast", "worldContinuityEvents")
+            .fold(json) { current, field ->
+                current.replace(Regex(",\\s*\"" + field + "\"\\s*:\\s*\\[\\]"), "")
+            }
+        assertNotEquals(json, oldJson)
+        val decoded = requireNotNull(moshi.adapter(BackupPayload::class.java).fromJson(oldJson))
+        assertTrue(decoded.worlds.isEmpty())
+        assertTrue(decoded.worldMemberships.isEmpty())
+        assertTrue(decoded.worldCast.isEmpty())
+        assertTrue(decoded.worldContinuityEvents.isEmpty())
+        assertEquals(completePayload().chats, decoded.chats)
+    }
+
+    @Test
     fun payloadFromBeforeScenarioModeDefaultsScenarioCollectionsToEmpty() {
         val currentJson = BackupArchiveIO(moshi, BuildConfig.APPLICATION_ID)
             .payloadToJson(completePayload())
