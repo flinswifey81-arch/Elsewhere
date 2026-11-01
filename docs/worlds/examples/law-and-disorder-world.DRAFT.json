@@ -1,0 +1,101 @@
+{
+  "format": "elsewhere_world_definition",
+  "schema_version": 1,
+  "world": {
+    "world_id": "law-and-disorder-mondstadt",
+    "title": "Law & Disorder: Mondstadt",
+    "description": "A modern, 2026 Earth-adjacent Teyvat police procedural, workplace comedy and Omegaverse romance.",
+    "setting_summary": "Mondstadt City in a modern Teyvat with no magic. Omegaverse biology and modern civic institutions are part of daily life.",
+    "world_rules": "The police force is the Knights of Favonius. The setting supports standalone episodes and a persistent romance; neither requires the other to advance in every session.",
+    "genre_tags": [
+      "procedural",
+      "workplace-comedy",
+      "romantic-comedy",
+      "omegaverse"
+    ],
+    "default_lorebook_ids": []
+  },
+  "resources": {
+    "lorebooks": [],
+    "world_cast": [
+      {
+        "world_character_id": "lad-varka",
+        "name": "Varka",
+        "aliases": [],
+        "profile": {
+          "identity": "Police Commissioner and Alpha; Flins's established mate."
+        }
+      },
+      {
+        "world_character_id": "lad-flins",
+        "name": "Flins",
+        "aliases": [],
+        "profile": {
+          "identity": "District Attorney and Alpha; Varka's established mate."
+        }
+      },
+      {
+        "world_character_id": "lad-piper-grace",
+        "name": "Piper Grace",
+        "aliases": [],
+        "profile": {
+          "identity": "Omega, newly arrived in Mondstadt City; enjoys being pampered in her personal life."
+        }
+      },
+      {
+        "world_character_id": "lad-jean",
+        "name": "Jean Gunnhildr",
+        "aliases": [],
+        "profile": {
+          "identity": "Chief of Police."
+        }
+      },
+      {
+        "world_character_id": "lad-venti",
+        "name": "Venti",
+        "aliases": [],
+        "profile": {
+          "identity": "Mayor of Mondstadt, accessible to residents and frequently involved in local civic problems."
+        }
+      },
+      {
+        "world_character_id": "lad-sucrose",
+        "name": "Sucrose",
+        "aliases": [],
+        "profile": {
+          "identity": "Morgue worker; sweet, shy, cheerful and deeply respectful of the dead, whom she talks to."
+        }
+      },
+      {
+        "world_character_id": "lad-barbara",
+        "name": "Barbara",
+        "aliases": [],
+        "profile": {
+          "identity": "EMT."
+        }
+      },
+      {
+        "world_character_id": "lad-lohen",
+        "name": "Lohen",
+        "aliases": [],
+        "profile": {
+          "identity": "Brilliant eccentric detective, reliably solves cases with unconventional methods."
+        }
+      }
+    ],
+    "characters": [],
+    "personas": [],
+    "scenarios": []
+  },
+  "links": {
+    "cast_roles": [],
+    "relationships": [
+      {
+        "from_world_character_id": "lad-varka",
+        "to_world_character_id": "lad-flins",
+        "description": "Established mated Alpha couple."
+      }
+    ]
+  },
+  "continuity": []
+}
