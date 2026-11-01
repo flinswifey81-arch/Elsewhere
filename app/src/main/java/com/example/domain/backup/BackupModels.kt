@@ -73,7 +73,11 @@ data class BackupPayload(
     val scenarioSessions: List<ScenarioSessionEntity> = emptyList(),
     val engineDefaults: List<EngineDefaultsEntity> = emptyList(),
     val npcLibraryBanks: List<NpcLibraryBankEntity> = emptyList(),
-    val npcLibraryEntries: List<NpcLibraryEntryEntity> = emptyList()
+    val npcLibraryEntries: List<NpcLibraryEntryEntity> = emptyList(),
+    val worlds: List<WorldEntity> = emptyList(),
+    val worldMemberships: List<WorldMembershipEntity> = emptyList(),
+    val worldCast: List<WorldCastEntity> = emptyList(),
+    val worldContinuityEvents: List<WorldContinuityEventEntity> = emptyList()
 )
 
 data class BackupPreview(
