@@ -150,13 +150,21 @@ class ChatLorebooksScreenTest {
             composeRule.onAllNodesWithTag("manual_lore_ui-entry").fetchSemanticsNodes().isNotEmpty()
         }
         composeRule.onNodeWithText("Edit Chat Current").assertExists()
+        // Data refresh can render the expanded entry before the preceding attachment
+        // write has released its in-flight UI lock. Wait until interaction is available.
+        composeRule.waitUntil(10_000) {
+            runCatching {
+                composeRule.onNodeWithTag("manual_lore_ui-entry").assertIsEnabled()
+            }.isSuccess
+        }
         composeRule.onNodeWithTag("manual_lore_ui-entry").performClick()
-        composeRule.waitUntil(5_000) {
+        composeRule.waitUntil(10_000) {
             runBlocking {
                 repository.getChatLorebookStates("ui-chat")
                     .single { it.lorebook.lorebookId == "ui-book" }
                     .overlays["ui-entry"]?.manualActive == true
             }
         }
+        composeRule.onNodeWithTag("manual_lore_ui-entry").assertIsOn()
     }
 }
