@@ -80,6 +80,24 @@ class BackupRepositoryTest {
     }
 
     @Test
+    fun staleWorldChatLinkDoesNotBlockEncryptedBackup() = runBlocking {
+        val source = environment()
+        val chat = ChatEntity(chatId = "removed-world-chat", displayName = "Disposable", chatType = ChatType.SOLO)
+        source.database.chatDao().insertChat(chat)
+        val worlds = com.example.domain.repository.WorldRepository(source.database)
+        val world = worlds.createWorld("Persistent World")
+        worlds.attach(world.worldId, WorldResourceType.CHAT, chat.chatId)
+        source.database.chatDao().deleteChat(chat)
+
+        val backup = ByteArrayOutputStream()
+        source.repository.exportEncrypted(backup, PASSPHRASE.toCharArray())
+        val target = environment()
+        target.repository.restoreEncrypted(ByteArrayInputStream(backup.toByteArray()), PASSPHRASE.toCharArray())
+        assertEquals("Persistent World", target.database.worldDao().getWorlds().single().title)
+        assertTrue(target.database.worldDao().getAllMemberships().isEmpty())
+    }
+
+    @Test
     fun encryptedBackupRestoresWorldMembershipCastAndAcceptedContinuity() = runBlocking {
         val source = environment()
         val chat = ChatEntity(chatId = "world-chat", displayName = "World main story", chatType = ChatType.SOLO)
