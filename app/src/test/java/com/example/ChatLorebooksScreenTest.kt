@@ -98,13 +98,28 @@ class ChatLorebooksScreenTest {
                 )
             }
         }
+        // Confirm the seeded database is readable before testing Compose initial load.
+        assertEquals(21, runBlocking { repository.getChatLorebookStates("scroll-chat").size })
         composeRule.setContent {
             MaterialTheme {
                 ChatLorebooksScreen(chatId = "scroll-chat", repository = repository, onNavigateBack = {})
             }
         }
-        composeRule.waitUntil(15_000) {
-            composeRule.onAllNodesWithTag("chat_lorebooks_list").fetchSemanticsNodes().isNotEmpty()
+        try {
+            composeRule.waitUntil(15_000) {
+                composeRule.onAllNodesWithTag("chat_lorebooks_list").fetchSemanticsNodes().isNotEmpty()
+            }
+        } catch (timeout: ComposeTimeoutException) {
+            val loading = composeRule.onAllNodesWithTag("chat_lorebooks_loading").fetchSemanticsNodes().isNotEmpty()
+            val empty = composeRule.onAllNodesWithTag("chat_lorebooks_empty").fetchSemanticsNodes().isNotEmpty()
+            val error = composeRule.onAllNodesWithTag("chat_lorebooks_error").fetchSemanticsNodes().isNotEmpty()
+            val savedBooks = runBlocking { repository.getChatLorebookStates("scroll-chat").size }
+            throw AssertionError(
+                "21-book list never appeared. loading=$loading, empty=$empty, " +
+                    "errorDialog=$error, repositoryBooks=$savedBooks. " +
+                    "Compose semantics:\n${composeRule.onRoot(useUnmergedTree = true).printToString()}",
+                timeout
+            )
         }
         composeRule.onNodeWithTag("chat_lorebooks_list").performScrollToIndex(19)
         composeRule.onNodeWithTag("attach_lorebook_row-18").performClick()

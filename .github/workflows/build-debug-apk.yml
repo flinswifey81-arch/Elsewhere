@@ -53,6 +53,22 @@ jobs:
             --tests com.example.LorebookRepositoryTest \
             --tests com.example.ChatLorebooksScreenTest
 
+      - name: Print test failure details
+        if: failure()
+        run: |
+          python3 - <<'PY'
+          import glob
+          import xml.etree.ElementTree as ET
+
+          for path in glob.glob("app/build/test-results/testSandboxUnitTest/TEST-*.xml"):
+              root = ET.parse(path).getroot()
+              for case in root.iter("testcase"):
+                  for failure in (*case.findall("failure"), *case.findall("error")):
+                      print(f"FAIL: {case.get('classname')}.{case.get('name')}")
+                      print(failure.get("message", ""))
+                      print((failure.text or "")[:5000])
+          PY
+
       - name: Build temporary sandbox APK
         run: bash ./gradlew :app:assembleSandbox --no-daemon
 

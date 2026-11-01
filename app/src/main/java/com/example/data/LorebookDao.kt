@@ -29,6 +29,11 @@ interface LorebookDao {
     @Query("SELECT * FROM lorebook_entries WHERE lorebookId = :lorebookId ORDER BY priority DESC, title COLLATE NOCASE, entryId")
     suspend fun getEntries(lorebookId: String): List<LorebookEntryEntity>
 
+    // Read the library entries in one query for the chat attachment screen.
+    // Grouping by lorebookId preserves the same per-book priority/title/id order.
+    @Query("SELECT * FROM lorebook_entries ORDER BY priority DESC, title COLLATE NOCASE, entryId")
+    suspend fun getAllEntries(): List<LorebookEntryEntity>
+
     @Query("SELECT * FROM lorebook_entries WHERE entryId = :entryId")
     suspend fun getEntry(entryId: String): LorebookEntryEntity?
 

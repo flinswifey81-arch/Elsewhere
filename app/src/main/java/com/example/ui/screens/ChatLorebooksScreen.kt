@@ -108,6 +108,7 @@ fun ChatLorebooksScreen(
     errorMessage?.let { message ->
         AlertDialog(
             onDismissRequest = { errorMessage = null },
+            modifier = Modifier.testTag("chat_lorebooks_error"),
             title = { Text("Lorebook Error") },
             text = { Text(message) },
             confirmButton = { TextButton(onClick = { errorMessage = null }) { Text("OK") } }
@@ -130,8 +131,8 @@ fun ChatLorebooksScreen(
         containerColor = MaterialTheme.colorScheme.background
     ) { padding ->
         when {
-            loading -> Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
-            states.isEmpty() -> Box(Modifier.fillMaxSize().padding(padding).padding(32.dp), contentAlignment = Alignment.Center) {
+            loading -> Box(Modifier.fillMaxSize().padding(padding).testTag("chat_lorebooks_loading"), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+            states.isEmpty() -> Box(Modifier.fillMaxSize().padding(padding).padding(32.dp).testTag("chat_lorebooks_empty"), contentAlignment = Alignment.Center) {
                 ElsewhereEmptyState(
                     icon = Icons.Default.MenuBook,
                     title = "No Lorebooks in your library.",
