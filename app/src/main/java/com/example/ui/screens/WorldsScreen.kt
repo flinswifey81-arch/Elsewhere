@@ -284,7 +284,7 @@ internal fun WorldDetailsDialog(
         title = { Text(if (isNew) "Create World" else "Edit World") },
         text = {
             Column(Modifier.heightIn(max = 450.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                WorldField("World title", value.title, { onChange(value.copy(title = it)) }, true)
+                WorldField("World title", value.title, true) { onChange(value.copy(title = it)) }
                 WorldField("Description", value.description) { onChange(value.copy(description = it)) }
                 WorldField("Setting and overview", value.settingSummary) { onChange(value.copy(settingSummary = it)) }
                 WorldField("World rules", value.worldRules) { onChange(value.copy(worldRules = it)) }
@@ -307,7 +307,7 @@ internal fun WorldCastDialog(
         title = { Text(if (isNew) "New World Character" else "Edit World Character") },
         text = {
             Column(Modifier.heightIn(max = 470.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                WorldField("Name", value.name, { onChange(value.copy(name = it)) }, true)
+                WorldField("Name", value.name, true) { onChange(value.copy(name = it)) }
                 WorldField("Role", value.role) { onChange(value.copy(role = it)) }
                 WorldField("Identity", value.identity) { onChange(value.copy(identity = it)) }
                 WorldField("Appearance", value.appearance) { onChange(value.copy(appearance = it)) }
@@ -335,7 +335,7 @@ internal fun WorldEventDialog(
         title = { Text(if (isNew) "Draft Continuity Event" else "Edit Draft Event") },
         text = {
             Column(Modifier.heightIn(max = 380.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                WorldField("Event title", value.title, { onChange(value.copy(title = it)) }, true)
+                WorldField("Event title", value.title, true) { onChange(value.copy(title = it)) }
                 WorldField("What happened", value.facts) { onChange(value.copy(facts = it)) }
                 Text("Save as draft. Accept as Canon separately after reviewing.", style = MaterialTheme.typography.bodySmall)
             }
@@ -347,7 +347,7 @@ internal fun WorldEventDialog(
 }
 
 @Composable
-private fun WorldField(label: String, value: String, onChange: (String) -> Unit, single: Boolean = false) {
+private fun WorldField(label: String, value: String, single: Boolean = false, onChange: (String) -> Unit) {
     OutlinedTextField(value, onChange, label = { Text(label) }, modifier = Modifier.fillMaxWidth(),
         singleLine = single, maxLines = if (single) 1 else 8, colors = elsewhereTextFieldColors())
 }
