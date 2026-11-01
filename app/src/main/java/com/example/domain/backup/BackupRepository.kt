@@ -208,7 +208,7 @@ class BackupRepository internal constructor(
                 npcLibraryBanks = backupDao.getNpcLibraryBanks(),
                 npcLibraryEntries = backupDao.getNpcLibraryEntries(),
                 worlds = database.worldDao().getWorlds(),
-                worldMemberships = database.worldDao().getAllMemberships(),
+                worldMemberships = database.worldDao().getExportableMemberships(),
                 worldCast = database.worldDao().getAllCast(),
                 worldContinuityEvents = database.worldDao().getAllEvents(),
                 appearance = appearance.toBackup()
@@ -623,7 +623,7 @@ class BackupRepository internal constructor(
         val worldIds = unique("World", payload.worlds.map { it.worldId })
         val worldCastIds = unique("World cast member", payload.worldCast.map { it.worldCharacterId })
         unique("World continuity event", payload.worldContinuityEvents.map { it.eventId })
-        uniqueComposite("World membership", payload.worldMemberships.map { "${it.worldId}\\u0000${it.resourceType}\\u0000${it.resourceId}" })
+        uniqueComposite("World membership", payload.worldMemberships.map { "${it.worldId}\u0000${it.resourceType}\u0000${it.resourceId}" })
         val scenarioIds = unique("scenario", payload.scenarios.map { it.scenarioId })
         unique("scenario session", payload.scenarioSessions.map { it.chatId })
         (payload.scenarios.map { it.definitionJson } + payload.scenarioSessions.map { it.definitionJson }).forEach {
@@ -713,8 +713,7 @@ class BackupRepository internal constructor(
         requireRefs(payload.npcLibraryEntries, "NPC library entry") { it.bankId in npcLibraryBankIds }
         requireRefs(payload.worldCast, "World cast member") { it.worldId in worldIds && it.name.isNotBlank() }
         requireRefs(payload.worldContinuityEvents, "World continuity event") {
-            it.worldId in worldIds && it.status in setOf("DRAFT", "ACCEPTED", "NONCANON") &&
-                (it.sourceChatId == null || it.sourceChatId in chatIds)
+            it.worldId in worldIds && it.status in setOf("DRAFT", "ACCEPTED", "NONCANON")
         }
         requireRefs(payload.worldMemberships, "World membership") { membership ->
             if (membership.worldId !in worldIds || membership.resourceId.isBlank()) false else when (membership.resourceType) {
