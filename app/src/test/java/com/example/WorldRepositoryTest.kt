@@ -60,6 +60,35 @@ class WorldRepositoryTest {
     }
 
     @Test
+    fun completeCastProfileAndEditableDraftPreserveWorldBoundaries() = runBlocking {
+        val world = worlds.createWorld("Mondstadt")
+        val alternate = worlds.createWorld("Another AU")
+        val record = com.example.data.model.WorldCastEntity(
+            worldId = world.worldId, name = "  Sucrose  ", role = "Morgue Technician",
+            identity = "Kind forensic specialist", voice = "Gentle"
+        )
+        val saved = worlds.createCastMember(record)
+        assertEquals("Sucrose", saved.name)
+        assertEquals("Gentle", worlds.getCast(world.worldId).single().voice)
+        assertTrue(worlds.getCast(alternate.worldId).isEmpty())
+        assertTrue(runCatching {
+            worlds.createCastMember(record.copy(worldId = "missing-world", worldCharacterId = "other"))
+        }.isFailure)
+
+        val event = worlds.draftEvent(world.worldId, "Hearing", "Venti attended.")
+        worlds.updateDraftEvent(event.copy(facts = "Venti listened to residents."))
+        assertEquals("Venti listened to residents.", worlds.getEvents(world.worldId).single().facts)
+        assertTrue(runCatching {
+            worlds.updateDraftEvent(event.copy(worldId = alternate.worldId))
+        }.isFailure)
+        worlds.acceptEvent(world.worldId, event.eventId)
+        assertTrue(runCatching {
+            worlds.updateDraftEvent(event.copy(facts = "A retroactive rewrite."))
+        }.isFailure)
+        assertEquals("Venti listened to residents.", worlds.getEvents(world.worldId).single().facts)
+    }
+
+    @Test
     fun castAndContinuityStayScopedToTheirWorld() = runBlocking {
         val first = worlds.createWorld("Mondstadt")
         val second = worlds.createWorld("Another Teyvat AU")
