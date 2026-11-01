@@ -71,6 +71,17 @@ class WorldRepository(
             }
         }
 
+    /** Create a complete reviewed profile in one transaction, not a placeholder followed by an update. */
+    suspend fun createCastMember(member: WorldCastEntity): WorldCastEntity = coordinator.withMutation {
+        require(member.name.isNotBlank() && member.name.length <= 300) { "Give the World character a name." }
+        database.withTransaction {
+            requireWorld(member.worldId)
+            val created = member.copy(name = member.name.trim())
+            dao.insertCastMember(created)
+            created
+        }
+    }
+
     suspend fun updateCastMember(member: WorldCastEntity) = coordinator.withMutation {
         require(member.name.isNotBlank()) { "Give the World character a name." }
         database.withTransaction {
@@ -89,6 +100,19 @@ class WorldRepository(
                     .also { dao.insertEvent(it) }
             }
         }
+
+    /** Edits are permitted only while a continuity event is still a draft. */
+    suspend fun updateDraftEvent(event: WorldContinuityEventEntity) = coordinator.withMutation {
+        require(event.title.isNotBlank() && event.facts.isNotBlank()) { "An event needs a title and facts." }
+        database.withTransaction {
+            val existing = requireNotNull(dao.getEvent(event.eventId)) { "Continuity event not found." }
+            require(existing.worldId == event.worldId) { "An event cannot move Worlds." }
+            require(existing.status == "DRAFT" && event.status == "DRAFT") {
+                "Accepted continuity cannot be rewritten as a draft."
+            }
+            require(dao.updateEvent(event.copy(updatedAt = System.currentTimeMillis())) == 1)
+        }
+    }
 
     /** Only an explicit user action should invoke this operation. */
     suspend fun acceptEvent(worldId: String, eventId: String) = coordinator.withMutation {
