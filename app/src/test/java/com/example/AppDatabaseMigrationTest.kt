@@ -200,6 +200,37 @@ class AppDatabaseMigrationTest {
     }
 
     @Test
+    fun migrationFrom12To13AddsEmptyWorldTablesWithoutChangingExistingChats() {
+        val helper = FrameworkSQLiteOpenHelperFactory().create(
+            SupportSQLiteOpenHelper.Configuration.builder(context).name(databaseName)
+                .callback(object : SupportSQLiteOpenHelper.Callback(12) {
+                    override fun onCreate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                        db.execSQL("CREATE TABLE chats (chatId TEXT NOT NULL PRIMARY KEY, displayName TEXT NOT NULL)")
+                    }
+                    override fun onUpgrade(db: androidx.sqlite.db.SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+                }).build()
+        )
+        try {
+            helper.writableDatabase.apply {
+                execSQL("INSERT INTO chats (chatId, displayName) VALUES ('existing', 'Preserve')")
+                AppDatabase.MIGRATION_12_13.migrate(this)
+                query("SELECT displayName FROM chats WHERE chatId = 'existing'").use { cursor ->
+                    assertTrue(cursor.moveToFirst())
+                    assertEquals("Preserve", cursor.getString(0))
+                }
+                query("SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('worlds', 'world_memberships', 'world_cast', 'world_continuity_events')").use { cursor ->
+                    assertEquals(4, cursor.count)
+                }
+                query("SELECT name FROM sqlite_master WHERE type = 'index' AND name IN ('index_world_memberships_worldId', 'index_world_cast_worldId', 'index_world_continuity_events_worldId')").use { cursor ->
+                    assertEquals(3, cursor.count)
+                }
+            }
+        } finally {
+            helper.close()
+        }
+    }
+
+    @Test
     fun migrationFrom11To12PreservesGuidanceAndStartsRebalanceInactive() {
         val helper = FrameworkSQLiteOpenHelperFactory().create(
             SupportSQLiteOpenHelper.Configuration.builder(context).name(databaseName)
