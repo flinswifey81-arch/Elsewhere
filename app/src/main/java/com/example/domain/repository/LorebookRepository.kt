@@ -294,6 +294,16 @@ class LorebookRepository(
         }
     }
 
+    suspend fun attachAllLorebooks(chatId: String): Int =
+        dataCoordinator.withMutation {
+            withContext(Dispatchers.IO) { lorebookDao.attachAllAvailableLorebooks(chatId) }
+        }
+
+    suspend fun enableAllAttachedLorebooks(chatId: String): Int =
+        dataCoordinator.withMutation {
+            withContext(Dispatchers.IO) { lorebookDao.enableAllAttachedLorebooks(chatId) }
+        }
+
     suspend fun attachLorebook(chatId: String, lorebookId: String) =
         dataCoordinator.withMutation {
             withContext(Dispatchers.IO) {
