@@ -157,7 +157,7 @@ class ChatLorebooksScreenTest {
                 composeRule.onNodeWithTag("manual_lore_ui-entry").assertIsEnabled()
             }.isSuccess
         }
-        composeRule.onNodeWithTag("manual_lore_ui-entry").performClick()
+        composeRule.onNodeWithTag("manual_lore_ui-entry").performScrollTo().assertIsDisplayed().performClick()
         composeRule.waitUntil(10_000) {
             runBlocking {
                 repository.getChatLorebookStates("ui-chat")
