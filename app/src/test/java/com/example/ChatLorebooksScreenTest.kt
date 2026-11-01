@@ -47,6 +47,74 @@ class ChatLorebooksScreenTest {
     }
 
     @Test
+    fun bulkAttachAndEnableButtonsChangeOnlyChatAttachments() {
+        runBlocking {
+            for (index in 0..3) {
+                repository.saveDefinition(
+                    LorebookEntity(lorebookId = "bulk-$index", name = "Bulk $index"),
+                    emptyList()
+                )
+            }
+            repository.attachLorebook("bulk-chat", "bulk-0")
+            repository.setAttachmentEnabled("bulk-chat", "bulk-0", false)
+        }
+
+        composeRule.setContent {
+            MaterialTheme {
+                ChatLorebooksScreen(chatId = "bulk-chat", repository = repository, onNavigateBack = {})
+            }
+        }
+        composeRule.waitUntil(15_000) {
+            composeRule.onAllNodesWithTag("attach_all_lorebooks").fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithTag("attach_all_lorebooks").performClick()
+        composeRule.waitUntil(10_000) {
+            runBlocking {
+                repository.getChatLorebookStates("bulk-chat").count { it.attachment != null } == 4
+            }
+        }
+        composeRule.onNodeWithTag("enable_all_lorebooks").performClick()
+        composeRule.waitUntil(10_000) {
+            runBlocking {
+                repository.getChatLorebookStates("bulk-chat").all { it.attachment?.isEnabled == true }
+            }
+        }
+        // Other chats are not affected.
+        assertEquals(0, runBlocking {
+            repository.getChatLorebookStates("another-chat").count { it.attachment != null }
+        })
+    }
+
+    @Test
+    fun attachingNearBottomDoesNotRecreateListOrJumpToTop() {
+        runBlocking {
+            repeat(21) { index ->
+                repository.saveDefinition(
+                    LorebookEntity(lorebookId = "row-${index.toString().padStart(2, '0')}", name = "Row ${index.toString().padStart(2, '0')}"),
+                    emptyList()
+                )
+            }
+        }
+        composeRule.setContent {
+            MaterialTheme {
+                ChatLorebooksScreen(chatId = "scroll-chat", repository = repository, onNavigateBack = {})
+            }
+        }
+        composeRule.waitUntil(15_000) {
+            composeRule.onAllNodesWithTag("chat_lorebooks_list").fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithTag("chat_lorebooks_list").performScrollToIndex(19)
+        composeRule.onNodeWithTag("attach_lorebook_row-18").performClick()
+        composeRule.waitUntil(10_000) {
+            runBlocking {
+                repository.getChatLorebookStates("scroll-chat").single { it.lorebook.lorebookId == "row-18" }.attachment != null
+            }
+        }
+        composeRule.onNodeWithTag("chat_lorebooks_list").assertExists()
+        composeRule.onNodeWithTag("lorebook_card_row-18").assertIsDisplayed()
+    }
+
+    @Test
     fun chatScreenAttachesBookAndPersistsManualActivation() {
         val book = LorebookEntity(lorebookId = "ui-book", name = "UI Book")
         runBlocking {
@@ -74,6 +142,9 @@ class ChatLorebooksScreenTest {
         }
         composeRule.onNodeWithTag("chat_lorebooks_list").performScrollToIndex(1)
         composeRule.onNodeWithTag("attach_lorebook_ui-book").performClick()
+        // Attached books remain collapsed until the player explicitly expands one.
+        composeRule.onNodeWithTag("manual_lore_ui-entry").assertDoesNotExist()
+        composeRule.onNodeWithTag("expand_lorebook_ui-book").performClick()
         composeRule.waitUntil(5_000) {
             composeRule.onAllNodesWithTag("manual_lore_ui-entry").fetchSemanticsNodes().isNotEmpty()
         }
