@@ -14,6 +14,7 @@ import com.example.ui.screens.ChatLorebooksScreen
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import kotlinx.coroutines.runBlocking
+import org.junit.Assert.assertEquals
 import org.junit.After
 import org.junit.Before
 import org.junit.Rule
