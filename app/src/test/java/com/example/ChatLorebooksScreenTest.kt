@@ -165,6 +165,10 @@ class ChatLorebooksScreenTest {
                     .overlays["ui-entry"]?.manualActive == true
             }
         }
-        composeRule.onNodeWithTag("manual_lore_ui-entry").assertIsOn()
+        composeRule.waitUntil(10_000) {
+            runCatching {
+                composeRule.onNodeWithTag("manual_lore_ui-entry").assertIsOn()
+            }.isSuccess
+        }
     }
 }
