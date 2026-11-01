@@ -29,6 +29,11 @@ interface LorebookDao {
     @Query("SELECT * FROM lorebook_entries WHERE lorebookId = :lorebookId ORDER BY priority DESC, title COLLATE NOCASE, entryId")
     suspend fun getEntries(lorebookId: String): List<LorebookEntryEntity>
 
+    // Read the library entries in one query for the chat attachment screen.
+    // Grouping by lorebookId preserves the same per-book priority/title/id order.
+    @Query("SELECT * FROM lorebook_entries ORDER BY priority DESC, title COLLATE NOCASE, entryId")
+    suspend fun getAllEntries(): List<LorebookEntryEntity>
+
     @Query("SELECT * FROM lorebook_entries WHERE entryId = :entryId")
     suspend fun getEntry(entryId: String): LorebookEntryEntity?
 
@@ -115,6 +120,33 @@ interface LorebookDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertAttachment(attachment: ChatLorebookAttachmentEntity)
+
+    /** Adds missing books without modifying existing attachment state or entry overlays. */
+    @Transaction
+    suspend fun attachAllAvailableLorebooks(chatId: String): Int {
+        val existing = getAttachments(chatId)
+        val attachedIds = existing.mapTo(mutableSetOf()) { it.lorebookId }
+        var nextPosition = (existing.maxOfOrNull { it.sortPosition } ?: -1) + 1
+        val missing = getLorebooksOnce().filterNot { it.lorebookId in attachedIds }
+        missing.forEach { book ->
+            upsertAttachment(
+                ChatLorebookAttachmentEntity(
+                    chatId = chatId,
+                    lorebookId = book.lorebookId,
+                    sortPosition = nextPosition++
+                )
+            )
+        }
+        return missing.size
+    }
+
+    /** Enables every attached book for this chat without changing global library flags. */
+    @Transaction
+    suspend fun enableAllAttachedLorebooks(chatId: String): Int {
+        val disabled = getAttachments(chatId).filterNot { it.isEnabled }
+        disabled.forEach { attachment -> upsertAttachment(attachment.copy(isEnabled = true)) }
+        return disabled.size
+    }
 
     @Query("DELETE FROM chat_lorebook_attachments WHERE chatId = :chatId AND lorebookId = :lorebookId")
     suspend fun detachLorebook(chatId: String, lorebookId: String)

@@ -283,8 +283,9 @@ class LorebookRepository(
         val books = lorebookDao.getLorebooksOnce()
         val attachments = lorebookDao.getAttachments(chatId).associateBy { it.lorebookId }
         val overlays = lorebookDao.getOverlays(chatId).associateBy { it.entryId }
+        val entriesByBook = lorebookDao.getAllEntries().groupBy { it.lorebookId }
         books.map { book ->
-            val entries = lorebookDao.getEntries(book.lorebookId)
+            val entries = entriesByBook[book.lorebookId].orEmpty()
             ChatLorebookState(
                 lorebook = book,
                 entries = entries,
@@ -293,6 +294,16 @@ class LorebookRepository(
             )
         }
     }
+
+    suspend fun attachAllLorebooks(chatId: String): Int =
+        dataCoordinator.withMutation {
+            withContext(Dispatchers.IO) { lorebookDao.attachAllAvailableLorebooks(chatId) }
+        }
+
+    suspend fun enableAllAttachedLorebooks(chatId: String): Int =
+        dataCoordinator.withMutation {
+            withContext(Dispatchers.IO) { lorebookDao.enableAllAttachedLorebooks(chatId) }
+        }
 
     suspend fun attachLorebook(chatId: String, lorebookId: String) =
         dataCoordinator.withMutation {

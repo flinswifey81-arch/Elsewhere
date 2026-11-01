@@ -56,6 +56,38 @@ class LorebookRepositoryTest {
     }
 
     @Test
+    fun bulkOperationsAreIdempotentAndPreserveAttachmentAndOverlayState() = runBlocking {
+        val first = LorebookEntity(lorebookId = "bulk-a", name = "A")
+        val second = LorebookEntity(lorebookId = "bulk-b", name = "B", enabled = false)
+        val third = LorebookEntity(lorebookId = "bulk-c", name = "C")
+        for (book in listOf(first, second, third)) {
+            repository.saveDefinition(
+                book,
+                listOf(LorebookEntryEntity(entryId = "entry-${book.lorebookId}", lorebookId = book.lorebookId, title = "Notes", activationMode = "manual"))
+            )
+        }
+        repository.attachLorebook("chat-bulk", first.lorebookId)
+        repository.setAttachmentEnabled("chat-bulk", first.lorebookId, false)
+        repository.setManualActive("chat-bulk", "entry-bulk-a", true)
+        repository.setChatCurrentOverride("chat-bulk", "entry-bulk-a", "private chat notes")
+
+        assertEquals(2, repository.attachAllLorebooks("chat-bulk"))
+        assertEquals(0, repository.attachAllLorebooks("chat-bulk"))
+        val beforeEnable = repository.getChatLorebookStates("chat-bulk")
+        assertEquals(3, beforeEnable.count { it.attachment != null })
+        assertFalse(beforeEnable.single { it.lorebook.lorebookId == "bulk-a" }.attachment!!.isEnabled)
+        assertTrue(beforeEnable.single { it.lorebook.lorebookId == "bulk-a" }.overlays.getValue("entry-bulk-a").manualActive)
+
+        assertEquals(1, repository.enableAllAttachedLorebooks("chat-bulk"))
+        assertEquals(0, repository.enableAllAttachedLorebooks("chat-bulk"))
+        val afterEnable = repository.getChatLorebookStates("chat-bulk")
+        assertTrue(afterEnable.all { it.attachment?.isEnabled == true })
+        assertFalse(afterEnable.single { it.lorebook.lorebookId == "bulk-b" }.lorebook.enabled)
+        assertEquals("private chat notes", afterEnable.single { it.lorebook.lorebookId == "bulk-a" }.overlays.getValue("entry-bulk-a").currentContent)
+        assertTrue(repository.getChatLorebookStates("other-chat").all { it.attachment == null })
+    }
+
+    @Test
     fun jsonRoundTripPreservesCanonCurrentMetadataAndArbitraryPriority() = runBlocking {
         repository.importJson(completeJson(), LorebookImportMode.REJECT_DUPLICATE)
         val exported = repository.exportJson("book-1")

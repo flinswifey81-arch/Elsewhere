@@ -77,6 +77,7 @@ class LorebookUiTest {
     @Test
     fun manualEditorExposesAllLoreEntryControls() {
         composeRule.setContent { MaterialTheme { LorebooksScreen(repository) } }
+        composeRule.onNodeWithTag("lorebook_actions").performClick()
         composeRule.onNodeWithTag("new_lorebook_fab").performClick()
         composeRule.onNodeWithTag("lorebook_editor").assertExists()
         composeRule.onNodeWithText("Lorebook name").assertExists()
@@ -108,6 +109,7 @@ class LorebookUiTest {
     @Test
     fun storyIdPersistsAndSaveValidationErrorsRemainVisibleInEditor() {
         composeRule.setContent { MaterialTheme { LorebooksScreen(repository) } }
+        composeRule.onNodeWithTag("lorebook_actions").performClick()
         composeRule.onNodeWithTag("new_lorebook_fab").performClick()
         composeRule.onNodeWithTag("lorebook_name").performTextReplacement("Story-bound Book")
         composeRule.onNodeWithTag("lorebook_story_id").performTextInput("story-evermere")
@@ -120,6 +122,7 @@ class LorebookUiTest {
         composeRule.onNodeWithText("Lorebook saved.").assertExists()
         composeRule.onNodeWithText("OK").performClick()
 
+        composeRule.onNodeWithTag("lorebook_actions").performClick()
         composeRule.onNodeWithTag("new_lorebook_fab").performClick()
         composeRule.onNodeWithTag("lorebook_name").performTextReplacement("X".repeat(201))
         composeRule.onNodeWithTag("save_lorebook").performClick()
@@ -139,6 +142,7 @@ class LorebookUiTest {
         assertNotNull(json)
 
         composeRule.setContent { MaterialTheme { LorebooksScreen(repository) } }
+        composeRule.onNodeWithTag("lorebook_actions").performClick()
         composeRule.onNodeWithTag("import_lorebook_fab").performClick()
         composeRule.onNodeWithText("Paste JSON").performClick()
         composeRule.onNode(hasSetTextAction()).performTextInput(json!!)

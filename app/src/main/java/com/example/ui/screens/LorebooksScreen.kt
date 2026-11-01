@@ -30,6 +30,7 @@ import com.example.domain.repository.LorebookImportMode
 import com.example.domain.repository.LorebookImportPreview
 import com.example.domain.repository.LorebookRepository
 import com.example.domain.repository.LorebookValidationException
+import com.example.ui.components.ProfileLibraryActions
 import com.example.ui.components.ElsewhereEmptyState
 import com.example.ui.components.elsewhereCardBorder
 import com.example.ui.components.elsewhereDestructiveButtonColors
@@ -362,22 +363,11 @@ fun LorebooksScreen(
             )
         },
         floatingActionButton = {
-            Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                ExtendedFloatingActionButton(
-                    onClick = { editingDefinition = repository.newLorebook() },
-                    icon = { Icon(Icons.Default.Add, contentDescription = null) },
-                    text = { Text("New Lorebook") },
-                    modifier = Modifier.testTag("new_lorebook_fab")
-                )
-                ExtendedFloatingActionButton(
-                    onClick = { showImportOptions = true },
-                    icon = { Icon(Icons.Default.Add, contentDescription = null) },
-                    text = { Text("Import JSON") },
-                    containerColor = MaterialTheme.colorScheme.primaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                    modifier = Modifier.testTag("import_lorebook_fab")
-                )
-            }
+            ProfileLibraryActions(
+                profileType = "Lorebook",
+                onNew = { editingDefinition = repository.newLorebook() },
+                onImport = { showImportOptions = true }
+            )
         },
         modifier = modifier.testTag("lorebooks_screen"),
         containerColor = MaterialTheme.colorScheme.background
