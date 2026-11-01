@@ -80,6 +80,31 @@ class BackupRepositoryTest {
     }
 
     @Test
+    fun encryptedBackupRestoresWorldMembershipCastAndAcceptedContinuity() = runBlocking {
+        val source = environment()
+        val chat = ChatEntity(chatId = "world-chat", displayName = "World main story", chatType = ChatType.SOLO)
+        source.database.chatDao().insertChat(chat)
+        val worlds = com.example.domain.repository.WorldRepository(source.database)
+        val world = worlds.createWorld("Law & Disorder: Mondstadt")
+        worlds.attach(world.worldId, WorldResourceType.CHAT, chat.chatId)
+        worlds.createCastMember(world.worldId, "Varka", "Police Commissioner")
+        val event = worlds.draftEvent(world.worldId, "Meeting", "Piper meets her Alphas.")
+        worlds.acceptEvent(world.worldId, event.eventId)
+
+        val encrypted = ByteArrayOutputStream()
+        source.repository.exportEncrypted(encrypted, PASSPHRASE.toCharArray())
+        val target = environment()
+        target.repository.restoreEncrypted(ByteArrayInputStream(encrypted.toByteArray()), PASSPHRASE.toCharArray())
+
+        assertEquals(source.database.worldDao().getWorlds(), target.database.worldDao().getWorlds())
+        assertEquals(source.database.worldDao().getAllMemberships(), target.database.worldDao().getAllMemberships())
+        assertEquals(source.database.worldDao().getAllCast(), target.database.worldDao().getAllCast())
+        assertEquals(source.database.worldDao().getAllEvents(), target.database.worldDao().getAllEvents())
+        assertEquals("ACCEPTED", target.database.worldDao().getAllEvents().single().status)
+        assertEquals("World main story", target.database.chatDao().getChatById(chat.chatId)?.displayName)
+    }
+
+    @Test
     fun scenarioBackupRestoresDefinitionsSnapshotsNarratorMemoryAndArtwork() = runBlocking {
         val source = environment()
         source.database.personaDao().insertPersona(completePayload().personas.first())
