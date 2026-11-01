@@ -207,6 +207,10 @@ class BackupRepository internal constructor(
                 engineDefaults = backupDao.getEngineDefaults(),
                 npcLibraryBanks = backupDao.getNpcLibraryBanks(),
                 npcLibraryEntries = backupDao.getNpcLibraryEntries(),
+                worlds = database.worldDao().getWorlds(),
+                worldMemberships = database.worldDao().getAllMemberships(),
+                worldCast = database.worldDao().getAllCast(),
+                worldContinuityEvents = database.worldDao().getAllEvents(),
                 appearance = appearance.toBackup()
             )
         }
@@ -453,6 +457,9 @@ class BackupRepository internal constructor(
     }
 
     private suspend fun replaceDatabaseContents(payload: BackupPayload) {
+        // FK cascade removes only World-owned membership/cast/event records.
+        // All source Characters, Lorebooks, Scenarios and chats remain separate.
+        database.worldDao().clearWorlds()
         database.scenarioDao().clearSessions()
         database.scenarioDao().clearScenarios()
         backupDao.deleteGenerationMetadata()
@@ -524,6 +531,10 @@ class BackupRepository internal constructor(
         if (payload.engineDefaults.isNotEmpty()) backupDao.insertEngineDefaults(payload.engineDefaults)
         if (payload.npcLibraryBanks.isNotEmpty()) backupDao.insertNpcLibraryBanks(payload.npcLibraryBanks)
         if (payload.npcLibraryEntries.isNotEmpty()) backupDao.insertNpcLibraryEntries(payload.npcLibraryEntries)
+        if (payload.worlds.isNotEmpty()) database.worldDao().insertWorlds(payload.worlds)
+        if (payload.worldMemberships.isNotEmpty()) database.worldDao().insertMemberships(payload.worldMemberships)
+        if (payload.worldCast.isNotEmpty()) database.worldDao().insertCast(payload.worldCast)
+        if (payload.worldContinuityEvents.isNotEmpty()) database.worldDao().insertEvents(payload.worldContinuityEvents)
     }
 
     private fun prepareProfileImages(validated: ValidatedBackup, stageRoot: File) {
@@ -594,7 +605,11 @@ class BackupRepository internal constructor(
             payload.npcDossierUpdates.size,
             payload.engineDefaults.size,
             payload.npcLibraryBanks.size,
-            payload.npcLibraryEntries.size
+            payload.npcLibraryEntries.size,
+            payload.worlds.size,
+            payload.worldMemberships.size,
+            payload.worldCast.size,
+            payload.worldContinuityEvents.size
         ).sumOf(Int::toLong)
         if (entityCount > MAX_TOTAL_ENTITY_RECORDS || payload.messages.size > MAX_MESSAGE_RECORDS) {
             throw BackupValidationException("Backup contains too many data records.")
@@ -605,6 +620,10 @@ class BackupRepository internal constructor(
             }
             return values.toSet()
         }
+        val worldIds = unique("World", payload.worlds.map { it.worldId })
+        val worldCastIds = unique("World cast member", payload.worldCast.map { it.worldCharacterId })
+        unique("World continuity event", payload.worldContinuityEvents.map { it.eventId })
+        uniqueComposite("World membership", payload.worldMemberships.map { "${it.worldId}\\u0000${it.resourceType}\\u0000${it.resourceId}" })
         val scenarioIds = unique("scenario", payload.scenarios.map { it.scenarioId })
         unique("scenario session", payload.scenarioSessions.map { it.chatId })
         (payload.scenarios.map { it.definitionJson } + payload.scenarioSessions.map { it.definitionJson }).forEach {
@@ -692,6 +711,22 @@ class BackupRepository internal constructor(
             it.chatId in chatIds && it.npcId in npcIds && it.sourceMessageId in messageIds
         }
         requireRefs(payload.npcLibraryEntries, "NPC library entry") { it.bankId in npcLibraryBankIds }
+        requireRefs(payload.worldCast, "World cast member") { it.worldId in worldIds && it.name.isNotBlank() }
+        requireRefs(payload.worldContinuityEvents, "World continuity event") {
+            it.worldId in worldIds && it.status in setOf("DRAFT", "ACCEPTED", "NONCANON") &&
+                (it.sourceChatId == null || it.sourceChatId in chatIds)
+        }
+        requireRefs(payload.worldMemberships, "World membership") { membership ->
+            if (membership.worldId !in worldIds || membership.resourceId.isBlank()) false else when (membership.resourceType) {
+                "LOREBOOK" -> membership.resourceId in lorebookIds
+                "CHARACTER" -> membership.resourceId in characterIds
+                "PERSONA" -> membership.resourceId in personaIds
+                "SCENARIO" -> membership.resourceId in scenarioIds
+                "CHAT" -> membership.resourceId in chatIds
+                "NPC_LIBRARY_BANK" -> membership.resourceId in npcLibraryBankIds
+                else -> false
+            }
+        }
 
         val binaryAttachmentIds = manifest.files.filter { it.kind == BackupFileKind.MESSAGE_ATTACHMENT }
             .map { it.ownerId }
