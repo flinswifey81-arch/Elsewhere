@@ -45,6 +45,7 @@ jobs:
           bash ./gradlew :app:testSandboxUnitTest --no-daemon \
             --tests com.example.AppDatabaseMigrationTest \
             --tests com.example.WorldRepositoryTest \
+            --tests com.example.WorldDefinitionCodecTest \
             --tests com.example.WorldsScreenTest \
             --tests com.example.EnsembleCoLeadContextTest \
             --tests com.example.domain.backup.BackupCryptoTest \
