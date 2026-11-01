@@ -49,7 +49,9 @@ jobs:
             --tests com.example.domain.backup.BackupRepositoryTest \
             --tests com.example.ChatDetailGenerationTest \
             --tests com.example.ChatSettingsScreenInitTest \
-            --tests com.example.EndpointSelectionPersistenceTest
+            --tests com.example.EndpointSelectionPersistenceTest \
+            --tests com.example.LorebookRepositoryTest \
+            --tests com.example.ChatLorebooksScreenTest
 
       - name: Build temporary sandbox APK
         run: bash ./gradlew :app:assembleSandbox --no-daemon
