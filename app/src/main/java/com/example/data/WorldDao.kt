@@ -34,6 +34,22 @@ interface WorldDao {
     @Query("SELECT * FROM world_memberships ORDER BY worldId, resourceType, resourceId")
     suspend fun getAllMemberships(): List<WorldMembershipEntity>
 
+    /**
+     * A source record can be deleted independently of its World membership.
+     * Do not let a stale reference poison a complete encrypted backup.
+     */
+    @Query("""
+        SELECT m.* FROM world_memberships m WHERE
+            (m.resourceType = 'CHAT' AND EXISTS(SELECT 1 FROM chats c WHERE c.chatId = m.resourceId)) OR
+            (m.resourceType = 'SCENARIO' AND EXISTS(SELECT 1 FROM scenarios s WHERE s.scenarioId = m.resourceId)) OR
+            (m.resourceType = 'CHARACTER' AND EXISTS(SELECT 1 FROM characters c WHERE c.characterId = m.resourceId)) OR
+            (m.resourceType = 'PERSONA' AND EXISTS(SELECT 1 FROM personas p WHERE p.personaId = m.resourceId)) OR
+            (m.resourceType = 'LOREBOOK' AND EXISTS(SELECT 1 FROM lorebooks l WHERE l.lorebookId = m.resourceId)) OR
+            (m.resourceType = 'NPC_LIBRARY_BANK' AND EXISTS(SELECT 1 FROM npc_library_banks n WHERE n.bankId = m.resourceId))
+        ORDER BY m.worldId, m.resourceType, m.resourceId
+    """)
+    suspend fun getExportableMemberships(): List<WorldMembershipEntity>
+
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insertMembership(member: WorldMembershipEntity)
 
