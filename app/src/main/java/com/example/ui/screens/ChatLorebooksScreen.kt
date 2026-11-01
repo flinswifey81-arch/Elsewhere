@@ -267,12 +267,11 @@ fun ChatLorebooksScreen(
                                                         Switch(
                                                             checked = overlay?.manualActive == true,
                                                             onCheckedChange = { active ->
-                                                                scope.launch {
-                                                                    runCatching { repository.setManualActive(chatId, entry.entryId, active) }
-                                                                        .onFailure { errorMessage = it.message ?: "Unable to update manual activation." }
-                                                                    refresh()
+                                                                applyChange("Unable to update manual activation.") {
+                                                                    repository.setManualActive(chatId, entry.entryId, active)
                                                                 }
                                                             },
+                                                            enabled = !updating,
                                                             modifier = Modifier.testTag("manual_lore_${entry.entryId}")
                                                         )
                                                     }

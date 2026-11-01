@@ -2,6 +2,8 @@ package com.example
 
 import android.content.Context
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.room.Room
@@ -165,10 +167,25 @@ class ChatLorebooksScreenTest {
                     .overlays["ui-entry"]?.manualActive == true
             }
         }
-        composeRule.waitUntil(10_000) {
-            runCatching {
-                composeRule.onNodeWithTag("manual_lore_ui-entry").assertIsOn()
-            }.isSuccess
+        // Check that Compose renders the saved state, not merely that Room persisted it.
+        // On failure expose the UI toggle semantics instead of swallowing assertions.
+        try {
+            composeRule.waitUntil(10_000) {
+                composeRule.onAllNodesWithTag("manual_lore_ui-entry")
+                    .fetchSemanticsNodes()
+                    .any { node ->
+                        node.config.getOrNull(SemanticsProperties.ToggleableState) == ToggleableState.On
+                    }
+            }
+        } catch (timeout: ComposeTimeoutException) {
+            val nodes = composeRule.onAllNodesWithTag("manual_lore_ui-entry").fetchSemanticsNodes()
+            val displayedStates = nodes.map { it.config.getOrNull(SemanticsProperties.ToggleableState) }
+            throw AssertionError(
+                "Manual activation saved in Room, but UI switch did not show On. " +
+                    "Found ${nodes.size} switch node(s), with toggle states: $displayedStates.",
+                timeout
+            )
         }
+        composeRule.onNodeWithTag("manual_lore_ui-entry").assertIsOn()
     }
 }
