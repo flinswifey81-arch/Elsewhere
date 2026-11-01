@@ -132,7 +132,7 @@ class AppDatabaseMigrationTest {
     }
 
     @Test
-    fun migrationFrom3To12ValidatesAgainstRoomAndPreservesExistingChatData() = runBlocking {
+    fun migrationFrom3To13ValidatesAgainstRoomAndPreservesExistingChatData() = runBlocking {
         val helper = FrameworkSQLiteOpenHelperFactory().create(
             SupportSQLiteOpenHelper.Configuration.builder(context)
                 .name(databaseName)
@@ -171,12 +171,13 @@ class AppDatabaseMigrationTest {
                 AppDatabase.MIGRATION_8_9,
                 AppDatabase.MIGRATION_9_10,
                 AppDatabase.MIGRATION_10_11,
-                AppDatabase.MIGRATION_11_12
+                AppDatabase.MIGRATION_11_12,
+                AppDatabase.MIGRATION_12_13
             )
             .allowMainThreadQueries()
             .build()
         try {
-            // Opening through Room executes every migration through 12 and validates the resulting schema.
+            // Opening through Room executes every migration through 13 and validates the resulting schema.
             migrated.openHelper.writableDatabase
             assertEquals("Keep Me", migrated.chatDao().getChatById("chat-keep")?.displayName)
             assertEquals("Preserve this", migrated.messageDao().getMessagesForChatOnce("chat-keep").single().content)
@@ -191,6 +192,7 @@ class AppDatabaseMigrationTest {
             assertTrue(migrated.messageAttachmentDao().getForChat("chat-keep").isEmpty())
             assertTrue(migrated.npcDao().getDossiers("chat-keep").isEmpty())
             assertTrue(migrated.npcDao().getLibraryBanks().isEmpty())
+            assertTrue(migrated.worldDao().getWorlds().isEmpty())
             assertTrue(migrated.chatDao().getChatById("chat-keep")?.contextResetOrderIndex == null)
         } finally {
             migrated.close()
