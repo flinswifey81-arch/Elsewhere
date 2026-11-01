@@ -7,7 +7,7 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.example.data.model.*
 
-const val APP_DATABASE_VERSION = 12
+const val APP_DATABASE_VERSION = 13
 
 @Database(
     entities = [
@@ -39,7 +39,11 @@ const val APP_DATABASE_VERSION = 12
         ScenarioSessionEntity::class,
         EngineDefaultsEntity::class,
         NpcLibraryBankEntity::class,
-        NpcLibraryEntryEntity::class
+        NpcLibraryEntryEntity::class,
+        WorldEntity::class,
+        WorldMembershipEntity::class,
+        WorldCastEntity::class,
+        WorldContinuityEventEntity::class
     ],
     version = APP_DATABASE_VERSION,
     exportSchema = false
@@ -57,8 +61,22 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun npcDao(): NpcDao
     abstract fun scenarioDao(): ScenarioDao
     abstract fun backupDao(): BackupDao
+    abstract fun worldDao(): WorldDao
 
     companion object {
+        val MIGRATION_12_13 = object : Migration(12, 13) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Additive schema. Legacy chats and all user content remain untouched.
+                db.execSQL("CREATE TABLE IF NOT EXISTS worlds (worldId TEXT NOT NULL PRIMARY KEY, title TEXT NOT NULL, description TEXT NOT NULL, settingSummary TEXT NOT NULL, worldRules TEXT NOT NULL, genreTagsJson TEXT NOT NULL, createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL)")
+                db.execSQL("CREATE TABLE IF NOT EXISTS world_memberships (worldId TEXT NOT NULL, resourceType TEXT NOT NULL, resourceId TEXT NOT NULL, createdAt INTEGER NOT NULL, PRIMARY KEY(worldId, resourceType, resourceId), FOREIGN KEY(worldId) REFERENCES worlds(worldId) ON UPDATE NO ACTION ON DELETE CASCADE)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_world_memberships_worldId ON world_memberships(worldId)")
+                db.execSQL("CREATE TABLE IF NOT EXISTS world_cast (worldCharacterId TEXT NOT NULL PRIMARY KEY, worldId TEXT NOT NULL, name TEXT NOT NULL, aliasesJson TEXT NOT NULL, identity TEXT NOT NULL, appearance TEXT NOT NULL, personality TEXT NOT NULL, voice TEXT NOT NULL, backstory TEXT NOT NULL, motivations TEXT NOT NULL, knowledgeLimits TEXT NOT NULL, role TEXT NOT NULL, provenanceKind TEXT NOT NULL, provenanceId TEXT, lockedFieldsJson TEXT NOT NULL, createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL, FOREIGN KEY(worldId) REFERENCES worlds(worldId) ON UPDATE NO ACTION ON DELETE CASCADE)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_world_cast_worldId ON world_cast(worldId)")
+                db.execSQL("CREATE TABLE IF NOT EXISTS world_continuity_events (eventId TEXT NOT NULL PRIMARY KEY, worldId TEXT NOT NULL, title TEXT NOT NULL, facts TEXT NOT NULL, status TEXT NOT NULL, sourceChatId TEXT, relatedCastIdsJson TEXT NOT NULL, createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL, FOREIGN KEY(worldId) REFERENCES worlds(worldId) ON UPDATE NO ACTION ON DELETE CASCADE)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_world_continuity_events_worldId ON world_continuity_events(worldId)")
+            }
+        }
+
         val MIGRATION_11_12 = object : Migration(11, 12) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE chat_settings ADD COLUMN coLeadRebalanceTurnsRemaining INTEGER NOT NULL DEFAULT 0")
