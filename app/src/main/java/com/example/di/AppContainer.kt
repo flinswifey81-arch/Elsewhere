@@ -27,6 +27,7 @@ import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 
 interface AppContainer {
     val scenarioRepository: com.example.domain.repository.ScenarioRepository? get() = null
+    val worldRepository: com.example.domain.repository.WorldRepository? get() = null
     val modelProvider: com.example.domain.provider.ModelProvider
     val characterRepository: CharacterRepository
     val personaRepository: PersonaRepository
@@ -73,12 +74,14 @@ class DefaultAppContainer(private val context: Context) : AppContainer {
                 AppDatabase.MIGRATION_8_9,
                 AppDatabase.MIGRATION_9_10,
                 AppDatabase.MIGRATION_10_11,
-                AppDatabase.MIGRATION_11_12
+                AppDatabase.MIGRATION_11_12,
+                AppDatabase.MIGRATION_12_13
             )
             .build()
     }
 
     override val scenarioRepository by lazy { com.example.domain.repository.ScenarioRepository(database, dataCoordinator) }
+    override val worldRepository by lazy { com.example.domain.repository.WorldRepository(database, dataCoordinator) }
 
     override val characterRepository: CharacterRepository by lazy {
         CharacterRepository(database.characterDao(), moshi, profileImageRepository, dataCoordinator)
