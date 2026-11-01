@@ -174,12 +174,15 @@ class ChatLorebooksScreenTest {
                 composeRule.onAllNodesWithTag("manual_lore_ui-entry")
                     .fetchSemanticsNodes()
                     .any { node ->
-                        node.config.getOrNull(SemanticsProperties.ToggleableState) == ToggleableState.On
+                        runCatching { node.config[SemanticsProperties.ToggleableState] }.getOrNull() == ToggleableState.On
                     }
             }
         } catch (timeout: ComposeTimeoutException) {
             val nodes = composeRule.onAllNodesWithTag("manual_lore_ui-entry").fetchSemanticsNodes()
-            val displayedStates = nodes.map { it.config.getOrNull(SemanticsProperties.ToggleableState) }
+            val displayedStates = nodes.map { node ->
+                runCatching { node.config[SemanticsProperties.ToggleableState] }.getOrNull()?.toString()
+                    ?: "ToggleableState missing"
+            }
             throw AssertionError(
                 "Manual activation saved in Room, but UI switch did not show On. " +
                     "Found ${nodes.size} switch node(s), with toggle states: $displayedStates.",
