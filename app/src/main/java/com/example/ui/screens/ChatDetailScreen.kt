@@ -30,8 +30,11 @@ import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -607,6 +610,7 @@ internal fun GroupCharacterControls(
         it.character.characterId == selectedCharacterId
     }
     var showManageCharacters by remember { mutableStateOf(false) }
+    var controlsExpanded by rememberSaveable { mutableStateOf(false) }
 
     Surface(
         color = MaterialTheme.colorScheme.surface,
@@ -614,46 +618,81 @@ internal fun GroupCharacterControls(
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            Text(
-                text = "Next Character",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Row(
-                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            TextButton(
+                onClick = { controlsExpanded = !controlsExpanded },
+                modifier = Modifier.fillMaxWidth().testTag("group_controls_toggle")
             ) {
-                activeCharacters.forEach { groupCharacter ->
-                    FilterChip(
-                        selected = groupCharacter.character.characterId == selectedCharacterId,
-                        onClick = { onSelectCharacter(groupCharacter.character.characterId) },
-                        enabled = !isGenerating,
-                        label = { Text(groupCharacter.character.displayName) }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Group controls", style = MaterialTheme.typography.labelLarge)
+                        Text(
+                            text = if (isGenerating) {
+                                "Generating ${selectedCharacter?.character?.displayName ?: "reply"}…"
+                            } else {
+                                "Next: ${selectedCharacter?.character?.displayName ?: "Select character"} · ${activeCharacters.size} active"
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1
+                        )
+                    }
+                    Icon(
+                        if (controlsExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                        contentDescription = if (controlsExpanded) "Collapse group controls" else "Expand group controls"
                     )
                 }
             }
-            Button(
-                onClick = { onGenerate(selectedCharacterId) },
-                enabled = selectedCharacter != null && canGenerate && !isGenerating,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(
-                    if (isGenerating) {
-                        "Generating ${selectedCharacter?.character?.displayName ?: "reply"}…"
-                    } else {
-                        "Generate ${selectedCharacter?.character?.displayName ?: "Character"} Reply"
+            if (controlsExpanded) {
+                Column(
+                    modifier = Modifier.fillMaxWidth().testTag("group_controls_content"),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        text = "Next Character",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        activeCharacters.forEach { groupCharacter ->
+                            FilterChip(
+                                selected = groupCharacter.character.characterId == selectedCharacterId,
+                                onClick = { onSelectCharacter(groupCharacter.character.characterId) },
+                                enabled = !isGenerating,
+                                label = { Text(groupCharacter.character.displayName) }
+                            )
+                        }
                     }
-                )
-            }
-            TextButton(
-                onClick = { showManageCharacters = true },
-                enabled = !isGenerating,
-                modifier = Modifier.align(Alignment.End)
-            ) {
-                Text("Manage Characters")
+                    Button(
+                        onClick = { onGenerate(selectedCharacterId) },
+                        enabled = selectedCharacter != null && canGenerate && !isGenerating,
+                        modifier = Modifier.fillMaxWidth().testTag("group_controls_generate")
+                    ) {
+                        Text(
+                            if (isGenerating) {
+                                "Generating ${selectedCharacter?.character?.displayName ?: "reply"}…"
+                            } else {
+                                "Generate ${selectedCharacter?.character?.displayName ?: "Character"} Reply"
+                            }
+                        )
+                    }
+                    TextButton(
+                        onClick = { showManageCharacters = true },
+                        enabled = !isGenerating,
+                        modifier = Modifier.align(Alignment.End)
+                    ) {
+                        Text("Manage Characters")
+                    }
+                }
             }
         }
     }
