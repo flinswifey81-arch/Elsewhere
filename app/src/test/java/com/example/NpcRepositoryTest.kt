@@ -312,6 +312,35 @@ class NpcRepositoryTest {
     }
 
     @Test
+    fun unnamedSupportingCharacterDoesNotCreateGenericNpc() = runBlocking {
+        val message = generatedMessage(
+            StorySegment(StorySegmentType.NPC, "A stranger speaks.", "story-npc:unknown", "Supporting character")
+        )
+        repository.persistGeneratedMessageAtomically(message, null, false, emptyList(), null)
+        assertTrue(repository.getProjectedDossiers("chat").isEmpty())
+    }
+
+    @Test
+    fun ambiguousAliasCannotCaptureAnotherNpcsDialogueOrCreateDuplicate() = runBlocking {
+        repository.saveManual(dossier().copy(
+            npcId = "mara", displayName = "Mara", aliases = listOf("The Guide")
+        ))
+        repository.saveManual(dossier().copy(
+            npcId = "rhea", displayName = "Rhea", aliases = listOf("The Guide")
+        ))
+        val message = generatedMessage(
+            StorySegment(StorySegmentType.NPC, "I can help.", "story-npc:placeholder", "The Guide")
+        )
+        // An ambiguous speaker cannot claim either existing ID and should not
+        // create a third NPC with a duplicate alias.
+        repository.persistGeneratedMessageAtomically(message, null, false, emptyList(), null)
+        assertEquals(2, repository.getProjectedDossiers("chat").size)
+        val stored = requireNotNull(database.messageDao().getMessageById(message.messageId))
+        assertEquals("story-npc:placeholder",
+            StoryResponseCodec.decode(stored.content)?.segments?.single()?.speakerId)
+    }
+
+    @Test
     fun mentioningSomeoneInOrdinaryProseDoesNotCreateNpc() = runBlocking {
         val message = MessageEntity(
             messageId = "plain", chatId = "chat", speakerType = SpeakerType.CHARACTER,

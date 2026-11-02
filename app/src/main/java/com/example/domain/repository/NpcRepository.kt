@@ -320,11 +320,16 @@ class NpcRepository(
         val projected = project(dao.getDossiers(message.chatId), dao.getUpdates(message.chatId))
         return story.segments.asSequence()
             .filter { it.type == StorySegmentType.NPC && !it.content.isBlank() }
-            .mapNotNull { it.speakerName?.trim()?.takeIf { name -> name.isNotEmpty() && name.length <= 120 }?.let { name -> name to it.speakerId } }
+            .mapNotNull {
+                it.speakerName?.trim()?.takeIf { name ->
+                    name.isNotEmpty() && name.length <= 120 &&
+                        !name.equals("Supporting character", ignoreCase = true)
+                }?.let { name -> name to it.speakerId }
+            }
             .distinctBy { (name, _) -> name.lowercase(Locale.ROOT) }
             .filterNot { (name, speakerId) ->
                 projected.any { it.npcId == speakerId } ||
-                    findByName(projected, name) != null ||
+                    projected.any { matchesNameOrAlias(it, name) } ||
                     metadataUpdates.any { update ->
                         update.displayName?.equals(name, ignoreCase = true) == true ||
                             update.aliases?.any { it.equals(name, ignoreCase = true) } == true
@@ -383,6 +388,13 @@ class NpcRepository(
                 var npcId = change.npcId
                 val existingBase = npcId?.let { id -> bases.firstOrNull { it.npcId == id } }
                 val matchedProjection = change.displayName?.let { name -> findByName(projected, name) }
+                // If aliases collide, refuse to guess which NPC the model meant.
+                // The calling layer can retain the story without applying unsafe metadata.
+                if (change.npcId == null && matchedProjection == null &&
+                    change.displayName?.let { name -> projected.any { matchesNameOrAlias(it, name) } } == true
+                ) {
+                    throw IllegalArgumentException("Ambiguous NPC name; edit the Bank to disambiguate.")
+                }
                 if (npcId != null && existingBase == null && matchedProjection == null) {
                     val foreign = dao.getDossier(npcId)
                     require(foreign == null) { "NPC identity belongs to another chat." }
@@ -747,6 +759,13 @@ class NpcRepository(
 
     private fun parseStringMap(json: String): Map<String, String> =
         runCatching { stringMapAdapter.fromJson(json).orEmpty() }.getOrDefault(emptyMap())
+
+    private fun matchesNameOrAlias(dossier: NpcDossier, name: String): Boolean {
+        val normalized = name.trim().lowercase(Locale.ROOT)
+        return normalized.isNotEmpty() &&
+            (dossier.displayName.trim().lowercase(Locale.ROOT) == normalized ||
+                dossier.aliases.any { it.trim().lowercase(Locale.ROOT) == normalized })
+    }
 
     private fun findByName(dossiers: List<NpcDossier>, name: String): NpcDossier? {
         val normalized = name.trim().lowercase(Locale.ROOT)
