@@ -66,7 +66,7 @@ fun WorldsScreen(repository: WorldRepository) {
             scope.launch {
                 runCatching {
                     context.contentResolver.openOutputStream(uri)?.bufferedWriter()?.use { it.write(json) }
-                        ?: error("Unable to open the selected export location.")
+                        ?: throw IllegalStateException("Unable to open the selected export location.")
                 }.onSuccess { notice = "World definition saved. Chats, episodes, images and draft events are NOT in this JSON." }
                     .onFailure { error = it.message ?: "Unable to save World JSON." }
             }
@@ -79,7 +79,7 @@ fun WorldsScreen(repository: WorldRepository) {
             runCatching {
                 // Bounded read to avoid loading giant or malicious content into the editor.
                 val input = context.contentResolver.openInputStream(uri)
-                    ?: error("Unable to open the selected file.")
+                    ?: throw IllegalStateException("Unable to open the selected file.")
                 input.bufferedReader().use { reader ->
                     val content = StringBuilder()
                     val block = CharArray(8192)
