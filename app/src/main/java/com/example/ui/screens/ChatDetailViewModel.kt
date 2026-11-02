@@ -1160,7 +1160,8 @@ class ChatDetailViewModel(
                 memory.sourceMessageId == null || (history + current).any { it.messageId == memory.sourceMessageId }
             },
             lore = lorebookRepository?.resolveActiveLore(chatId, history, current, AutomaticMemoryManager.DEFAULT_RECENT_MESSAGE_LIMIT).orEmpty(),
-            continuation = continuation
+            continuation = continuation,
+            worldContext = scenarioRepository?.worldContextForChat(chatId)
         ).map { if (it.sourceMessageId == source?.messageId && images.isNotEmpty()) it.copy(images = images) else it }
         return PreparedGeneration(ResponseSpeaker("narrator:$chatId", "Narrator", SpeakerType.NARRATOR), messages,
             GenerationOptions(modelId = modelId, routing = ModelRouting.fromSettings(settings.providerRoutingMode, settings.providerEndpoint),
@@ -1934,16 +1935,33 @@ class ChatDetailViewModel(
             }
             return
         }
-        val lastMessage = state.messages.lastOrNull()
-        if (lastMessage != null && !ContextResetPolicy.includes(lastMessage, chatSummary?.chat?.contextResetOrderIndex)) {
-            updateSuccessState {
-                it.copy(generationError = "Retry is unavailable because the last message is before the Wack context boundary.")
-            }
-            return
-        }
-        if (lastMessage?.speakerType == SpeakerType.PERSONA) {
-            viewModelScope.launch {
-                startGeneration(lastMessage)
+        // A fast provider failure may be reported before Room's Flow has emitted the
+        // saved Persona turn to the UI. Read persisted history (as Scenario retry does)
+        // instead of relying on state.messages, otherwise Retry silently does nothing.
+        generationStartInProgress = true
+        val revision = dataCoordinator.captureRevision()
+        viewModelScope.launch {
+            try {
+                val primaryMessages = messageRepository.getMessagesForChatOnce(chatId)
+                    .filter { it.isPrimaryVariant }
+                val lastMessage = primaryMessages.lastOrNull() ?: return@launch
+                val boundary = chatSummary?.chat?.contextResetOrderIndex
+                if (!ContextResetPolicy.includes(lastMessage, boundary)) {
+                    updateSuccessState {
+                        it.copy(generationError = "Retry is unavailable because the last message is before the Wack context boundary.")
+                    }
+                    return@launch
+                }
+                if (lastMessage.speakerType != SpeakerType.PERSONA) return@launch
+                val history = ContextResetPolicy.eligiblePrimaryMessages(primaryMessages, boundary)
+                val current = history.lastOrNull() ?: return@launch
+                startGenerationInternal(current, history.dropLast(1), dataRevision = revision)
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                updateSuccessState { it.copy(generationError = "Unable to retry response: ${error.message}") }
+            } finally {
+                generationStartInProgress = false
             }
         }
     }

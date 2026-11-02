@@ -99,6 +99,16 @@ androidComponents {
   }
 }
 
+// Robolectric/Compose tests build large Android text/layout graphs. Give their
+// isolated workers enough heap and periodically restart the worker so an entire
+// suite cannot accumulate stale ShadowTrace/layout objects until it OOMs.
+// This does not skip or soften any tests.
+tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
+  maxHeapSize = "1536m"
+  maxParallelForks = 1
+  forkEvery = 24
+}
+
 // Some unused dependencies are commented out below instead of being removed.
 // This makes it easy to add them back in the future if needed.
 dependencies {

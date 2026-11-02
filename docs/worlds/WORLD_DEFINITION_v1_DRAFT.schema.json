@@ -1,0 +1,457 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/elsewhere/world-definition-v1-draft.schema.json",
+  "title": "Elsewhere World Definition v1 (DESIGN DRAFT; NOT SUPPORTED BY APP)",
+  "description": "Provisional specification for a self-contained portable World definition only. Does not contain playthrough histories or assets. Subject to revision before implementation.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "schema_version",
+    "world",
+    "resources",
+    "links",
+    "continuity"
+  ],
+  "properties": {
+    "format": {
+      "const": "elsewhere_world_definition"
+    },
+    "schema_version": {
+      "const": 1
+    },
+    "world": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "world_id",
+        "title",
+        "setting_summary"
+      ],
+      "properties": {
+        "world_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "pattern": "^[A-Za-z0-9._:-]+$"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 200000
+        },
+        "setting_summary": {
+          "type": "string",
+          "maxLength": 200000
+        },
+        "world_rules": {
+          "type": "string",
+          "maxLength": 200000
+        },
+        "genre_tags": {
+          "type": "array",
+          "maxItems": 1000,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300
+          }
+        },
+        "default_lorebook_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "pattern": "^[A-Za-z0-9._:-]+$"
+          }
+        }
+      }
+    },
+    "resources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "lorebooks",
+        "world_cast",
+        "characters",
+        "personas",
+        "scenarios"
+      ],
+      "properties": {
+        "lorebooks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "minProperties": 1,
+            "description": "Source artifact. MUST also pass its own existing Elsewhere importer/model validator."
+          },
+          "description": "Embed existing elsewhere_lorebook v1 objects, revalidated with the existing strict Lorebook parser."
+        },
+        "world_cast": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "world_character_id",
+              "name",
+              "profile"
+            ],
+            "properties": {
+              "world_character_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200,
+                "pattern": "^[A-Za-z0-9._:-]+$"
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 300
+              },
+              "aliases": {
+                "type": "array",
+                "maxItems": 1000,
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 300
+                }
+              },
+              "profile": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "identity": {
+                    "type": "string",
+                    "maxLength": 200000
+                  },
+                  "appearance": {
+                    "type": "string",
+                    "maxLength": 200000
+                  },
+                  "personality": {
+                    "type": "string",
+                    "maxLength": 200000
+                  },
+                  "voice": {
+                    "type": "string",
+                    "maxLength": 200000
+                  },
+                  "backstory": {
+                    "type": "string",
+                    "maxLength": 200000
+                  },
+                  "motivations": {
+                    "type": "string",
+                    "maxLength": 200000
+                  },
+                  "knowledge_limits": {
+                    "type": "string",
+                    "maxLength": 200000
+                  },
+                  "role": {
+                    "type": "string",
+                    "maxLength": 200000
+                  }
+                }
+              },
+              "provenance": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "source_kind": {
+                    "enum": [
+                      "manual",
+                      "chat_npc",
+                      "scenario_npc",
+                      "character",
+                      "persona",
+                      "import"
+                    ]
+                  },
+                  "source_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200,
+                    "pattern": "^[A-Za-z0-9._:-]+$"
+                  }
+                }
+              },
+              "locked_fields": {
+                "type": "array",
+                "uniqueItems": true,
+                "items": {
+                  "enum": [
+                    "identity",
+                    "appearance",
+                    "personality",
+                    "voice",
+                    "backstory",
+                    "knowledge_limits"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "characters": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "minProperties": 1,
+            "description": "Source artifact. MUST also pass its own existing Elsewhere importer/model validator."
+          },
+          "description": "Embed existing Elsewhere Character exports, revalidated with Character importer."
+        },
+        "personas": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "minProperties": 1,
+            "description": "Source artifact. MUST also pass its own existing Elsewhere importer/model validator."
+          },
+          "description": "Embed existing Elsewhere Persona exports, revalidated with Persona importer."
+        },
+        "scenarios": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "scenario_id",
+              "definition"
+            ],
+            "properties": {
+              "scenario_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200,
+                "pattern": "^[A-Za-z0-9._:-]+$"
+              },
+              "definition": {
+                "type": "object",
+                "required": [
+                  "title",
+                  "premise"
+                ],
+                "properties": {
+                  "experience": {
+                    "enum": [
+                      "QUICK_SCENE",
+                      "SANDBOX"
+                    ]
+                  },
+                  "title": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 300
+                  },
+                  "premise": {
+                    "type": "string",
+                    "maxLength": 200000
+                  },
+                  "displayTitle": {
+                    "type": "string",
+                    "maxLength": 200000
+                  },
+                  "publicDescription": {
+                    "type": "string",
+                    "maxLength": 200000
+                  },
+                  "setting": {
+                    "type": "string",
+                    "maxLength": 200000
+                  },
+                  "narrationStyle": {
+                    "type": "string",
+                    "maxLength": 200000
+                  },
+                  "openingSituation": {
+                    "type": "string",
+                    "maxLength": 200000
+                  },
+                  "openingMessage": {
+                    "type": "string",
+                    "maxLength": 200000
+                  },
+                  "npcs": {
+                    "type": "array",
+                    "items": {
+                      "type": "object"
+                    }
+                  },
+                  "locations": {
+                    "type": "string",
+                    "maxLength": 200000
+                  },
+                  "factions": {
+                    "type": "string",
+                    "maxLength": 200000
+                  },
+                  "worldRules": {
+                    "type": "string",
+                    "maxLength": 200000
+                  },
+                  "instructions": {
+                    "type": "string",
+                    "maxLength": 200000
+                  },
+                  "categories": {
+                    "type": "string",
+                    "maxLength": 200000
+                  },
+                  "tags": {
+                    "type": "string",
+                    "maxLength": 200000
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "links": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cast_roles",
+        "relationships"
+      ],
+      "properties": {
+        "cast_roles": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "world_character_id",
+              "role_type",
+              "resource_id"
+            ],
+            "properties": {
+              "world_character_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200,
+                "pattern": "^[A-Za-z0-9._:-]+$"
+              },
+              "role_type": {
+                "enum": [
+                  "CHARACTER",
+                  "PERSONA",
+                  "SCENARIO_NPC",
+                  "NPC_LIBRARY"
+                ]
+              },
+              "resource_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200,
+                "pattern": "^[A-Za-z0-9._:-]+$"
+              },
+              "scenario_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200,
+                "pattern": "^[A-Za-z0-9._:-]+$"
+              }
+            }
+          }
+        },
+        "relationships": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "from_world_character_id",
+              "to_world_character_id",
+              "description"
+            ],
+            "properties": {
+              "from_world_character_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200,
+                "pattern": "^[A-Za-z0-9._:-]+$"
+              },
+              "to_world_character_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200,
+                "pattern": "^[A-Za-z0-9._:-]+$"
+              },
+              "description": {
+                "type": "string",
+                "maxLength": 200000
+              },
+              "knowledge_limit": {
+                "type": "string",
+                "maxLength": 200000
+              }
+            }
+          }
+        }
+      }
+    },
+    "continuity": {
+      "type": "array",
+      "description": "Approved baseline facts only. Never includes chat messages or unapproved draft events.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "event_id",
+          "title",
+          "facts",
+          "status"
+        ],
+        "properties": {
+          "event_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "pattern": "^[A-Za-z0-9._:-]+$"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300
+          },
+          "facts": {
+            "type": "string",
+            "maxLength": 200000
+          },
+          "status": {
+            "const": "ACCEPTED"
+          },
+          "source_chat_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "pattern": "^[A-Za-z0-9._:-]+$"
+          },
+          "related_world_character_ids": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200,
+              "pattern": "^[A-Za-z0-9._:-]+$"
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -17,12 +17,14 @@ class ScenarioContextCompiler {
         memories: List<RoleplayMemoryEntity> = emptyList(),
         lore: List<ActiveLoreEntry> = emptyList(),
         continuation: Boolean = false,
-        recentMessageLimit: Int = 24
+        recentMessageLimit: Int = 24,
+        worldContext: String? = null
     ): List<RoleplayMessage> {
         val instructions = buildString {
             appendLine("You are the collaborative narrator of an open-ended roleplay scenario. Portray the world and multiple distinct NPCs in ONE response, with clear names for NPC dialogue when helpful. Introduce new characters naturally when appropriate. Keep their voices, motivations, relationships and knowledge distinct. Hidden information is not automatically known to every NPC.")
             appendLine("React to player decisions with believable consequences and consistent setting details. Advance events naturally without railroading, forced endings, predetermined outcomes or interrupting a scene the player is enjoying. Allow quiet conversation, exploration, romance, investigation and combat at the player's chosen pace.")
             fun section(name: String, value: String?) { if (!value.isNullOrBlank()) appendLine("\n--- $name ---\n$value") }
+            section("SHARED WORLD BASELINE", worldContext)
             section("SCENARIO PREMISE", scenario.premise)
             section("WORLD AND SETTING", scenario.setting)
             section("NARRATION STYLE", scenario.narrationStyle)

@@ -30,6 +30,7 @@ import com.example.ui.screens.*
 sealed class Screen(val route: String, val title: String, val icon: androidx.compose.ui.graphics.vector.ImageVector) {
     object Home : Screen("home", "Home", Icons.Filled.Home)
     object Characters : Screen("characters", "Characters", Icons.Filled.Person)
+    object Worlds : Screen("worlds", "Worlds", Icons.Filled.Public)
     object Scenarios : Screen("scenarios", "Scenarios", Icons.Filled.AutoStories)
     object Personas : Screen("personas", "Personas", Icons.Filled.Face)
     object Lorebooks : Screen("lorebooks", "Lorebooks", Icons.Filled.MenuBook)
@@ -42,6 +43,7 @@ val bottomNavItems = listOf(
     Screen.Characters,
     Screen.Personas,
     Screen.Scenarios,
+    Screen.Worlds,
     Screen.Lorebooks,
     Screen.Chats,
     Screen.Settings
@@ -158,6 +160,16 @@ fun ElsewhereApp(container: AppContainer) {
             composable(Screen.Scenarios.route) {
                 ScenariosScreen(container, onChatCreated = { navController.navigate("chat_detail/$it") },
                     onPersonas = { navController.navigate(Screen.Personas.route) })
+            }
+            composable(Screen.Worlds.route) {
+                val repository = container.worldRepository
+                if (repository == null) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) {
+                        Text("Worlds are unavailable in this environment.")
+                    }
+                } else {
+                    WorldsScreen(repository)
+                }
             }
             composable(Screen.Personas.route) { 
                 PersonasScreen(

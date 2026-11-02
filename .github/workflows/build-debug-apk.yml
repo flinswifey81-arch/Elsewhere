@@ -10,6 +10,12 @@ on:
       - feature/solo-ensemble-co-leads
       - feature/final-freeze-fixes-2026-10-31
 
+# Keep one active build per pull request/branch: frequent exploratory commits
+# should not launch overlapping resource-heavy Robolectric suites.
+concurrency:
+  group: temporary-elsewhere-test-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -44,6 +50,9 @@ jobs:
         run: |
           bash ./gradlew :app:testSandboxUnitTest --no-daemon \
             --tests com.example.AppDatabaseMigrationTest \
+            --tests com.example.WorldRepositoryTest \
+            --tests com.example.WorldDefinitionCodecTest \
+            --tests com.example.WorldsScreenTest \
             --tests com.example.EnsembleCoLeadContextTest \
             --tests com.example.domain.backup.BackupCryptoTest \
             --tests com.example.domain.backup.BackupRepositoryTest \
