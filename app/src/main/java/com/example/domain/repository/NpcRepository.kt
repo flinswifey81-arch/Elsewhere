@@ -354,9 +354,9 @@ class NpcRepository(
             // dialogue (and later their portrait) to another NPC.
             // Names/aliases take precedence over model-supplied IDs. A fabricated
             // or stale ID must never pull a different NPC's portrait into this message.
-            val resolved = nameMatch ?: idMatch?.takeIf { known ->
-                segment.speakerName?.let { matchesNameOrAlias(known, it) } == true
-            }
+            // Speaker names must resolve unambiguously; a model-supplied ID cannot
+            // resolve a shared alias or override a conflicting visible name.
+            val resolved = nameMatch
             when {
                 resolved != null -> segment.copy(
                     speakerId = resolved.npcId,
