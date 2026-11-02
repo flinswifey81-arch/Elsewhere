@@ -1904,8 +1904,13 @@ class ChatDetailGenerationTest {
         val harness = createHarness(CancellablePartialProvider(), ResponseLengthProfile.NORMAL)
         harness.viewModel.onDraftChanged("Start a long response.")
         harness.viewModel.sendMessage()
+        // This test verifies the generation guard, not the earlier history-loading guard.
+        // Both are valid reasons to block tools; wait for the intended state before asserting
+        // the exact warning instead of depending on Room's initial history emission timing.
         withTimeout(15_000) {
-            harness.viewModel.uiState.first { it is ChatUiState.Success && it.isGenerating }
+            harness.viewModel.uiState.first {
+                it is ChatUiState.Success && it.historyLoaded && it.isGenerating
+            }
         }
 
         harness.viewModel.wackContext()
