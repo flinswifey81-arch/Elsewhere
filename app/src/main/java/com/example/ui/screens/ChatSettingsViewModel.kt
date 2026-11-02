@@ -138,7 +138,7 @@ class ChatSettingsViewModel(
 
     fun onCoLeadRebalanceRequested() {
         val settings = _uiState.value.storedSettings ?: return
-        if (!settings.narratorEnabled || !settings.coLeadEnsembleEnabled) return
+        if (!settings.coLeadEnsembleEnabled) return
         updateSettings { it.copy(coLeadRebalanceTurnsRemaining = 4) }
     }
 

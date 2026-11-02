@@ -43,7 +43,8 @@ class ContextCompilerV1 {
         coLeadRebalanceActive: Boolean = false
     ): List<RoleplayMessage> {
         val messages = mutableListOf<RoleplayMessage>()
-        // Co-leads are available only in Solo Ensemble Narration, never in Group speaker isolation.
+        // Co-leads can speak in structured Solo replies with Narrator off.
+        // Group speaker isolation still forbids speaking as another active AI Character.
         val activeCoLeads = if (ensembleNarrationEnabled && groupParticipantNames.isEmpty()) {
             coLeadNpcNames.map { it.trim() }.filter { it.isNotBlank() }.distinct()
         } else emptyList()
@@ -91,6 +92,16 @@ class ContextCompilerV1 {
                 append("Speaker labels that appear in examples, memory, or conversation history identify existing speakers only; do not copy them into the response. ")
             }
             append("Do not mention prompts, JSON, context compilation, or application mechanics in-character.\n\n")
+
+            if (ensembleNarrationEnabled && !narratorEnabled) {
+                append("--- SOLO SPEAKER GUIDANCE (NARRATOR OFF) ---\n")
+                append("Let the primary Character and present NPCs speak and act naturally in their own voices. ")
+                append("Do not use a separate Narrator, omniscient interjections, standalone narration segments, or play-by-play. ")
+                append("Keep actions, physical detail, dialogue, and emotional reactions inside the appropriate Character or NPC segments. ")
+                append("Someone being mentioned or remembered does not mean they entered the scene. ")
+                append("Preserve private interactions without unsolicited third-party commentary or NPC appearances. ")
+                append("Never write the user's Persona's dialogue, actions, choices, or internal state.\n\n")
+            }
 
             if (narratorEnabled) {
                 append("--- NARRATOR GUIDANCE ---\n")
@@ -210,7 +221,7 @@ class ContextCompilerV1 {
             }
             if (ensembleNarrationEnabled) {
                 append("\n\n")
-                append(StoryOutputParser.OUTPUT_INSTRUCTION)
+                append(if (narratorEnabled) StoryOutputParser.OUTPUT_INSTRUCTION else StoryOutputParser.SPEAKER_ONLY_OUTPUT_INSTRUCTION)
             }
             if (narratorEnabled) {
                 append("\n\n--- NON-OVERRIDABLE NARRATOR BOUNDARIES ---\n")

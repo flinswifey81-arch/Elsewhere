@@ -1222,8 +1222,9 @@ class ChatDetailViewModel(
         ).orEmpty()
         val activeCoopRoom = coopSessionManager?.state?.value?.room?.takeIf { it.chatId == chatId }
         val npcBankEnabled = activeCoopRoom == null && npcRepository?.getSettings(chatId)?.isEnabled == true
+        // Structured Solo speaker attribution must not depend on enabling Narrator.
         val ensembleNarrationEnabled = summary.chat.chatType == ChatType.SOLO &&
-            settings.narratorEnabled && activeCoopRoom == null
+            (settings.narratorEnabled || npcBankEnabled) && activeCoopRoom == null
         val projectedNpcDossiers = if (npcBankEnabled) {
             npcRepository?.getProjectedDossiers(chatId).orEmpty()
         } else emptyList()

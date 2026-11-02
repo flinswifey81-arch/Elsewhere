@@ -106,7 +106,7 @@ fun ChatSettingsScreen(
                         )
                     }
                     Text(
-                        "Formats one normal model response as an integrated scene with standalone narration and optional supporting NPC segments. This uses no extra model request. Turning it off keeps these instructions and the NPC Bank intact.",
+                        "Adds optional standalone narration. NPC speaker bubbles and Co-Leads can work without Narrator when the NPC Bank is enabled; no extra model call.",
                         style = MaterialTheme.typography.bodySmall
                     )
                     if (soloMode) {
@@ -118,20 +118,20 @@ fun ChatSettingsScreen(
                             Column(modifier = Modifier.weight(1f)) {
                                 Text("Co-Leads (Solo Ensemble)", style = MaterialTheme.typography.titleSmall)
                                 Text(
-                                    "Give NPCs pinned with Keep in scene comparable narrative importance to the selected Character. Balance naturally across turns, not by strict word counts. Requires Narrator and an enabled NPC Bank; no extra model calls.",
+                                    "Give NPCs pinned with Keep in scene comparable narrative importance to the selected Character. Balance naturally across turns, not by strict word counts. Requires an enabled NPC Bank, not Narrator; no extra model calls.",
                                     style = MaterialTheme.typography.bodySmall
                                 )
                             }
                             Switch(
                                 checked = uiState.settings?.coLeadEnsembleEnabled == true,
-                                enabled = uiState.settings?.narratorEnabled == true,
+                                enabled = true,
                                 onCheckedChange = viewModel::onCoLeadEnsembleChanged
                             )
                         }
                         if (uiState.settings?.coLeadEnsembleEnabled == true) {
                             OutlinedButton(
                                 onClick = viewModel::onCoLeadRebalanceRequested,
-                                enabled = uiState.settings?.narratorEnabled == true,
+                                enabled = true,
                                 modifier = Modifier.fillMaxWidth().testTag("rebalance_existing_chat")
                             ) { Text("Rebalance Existing Chat") }
                             val remaining = uiState.settings?.coLeadRebalanceTurnsRemaining ?: 0
