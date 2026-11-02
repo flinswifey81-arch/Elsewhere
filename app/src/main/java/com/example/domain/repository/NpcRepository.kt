@@ -362,7 +362,10 @@ class NpcRepository(
                     speakerId = resolved.npcId,
                     speakerName = resolved.displayName
                 )
-                idMatch != null -> segment.copy(speakerId = null)
+                idMatch != null && !segment.speakerName.isNullOrBlank() ->
+                    segment.copy(speakerId = null)
+                // Older structured messages can have a known ID without a display name.
+                // Preserve that genuine stored reference, rather than erasing it.
                 else -> segment
             }
         }
