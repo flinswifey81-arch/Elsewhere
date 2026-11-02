@@ -29,12 +29,12 @@ data class NpcDossierEntity(
     /** Local-only private notes; never sent to a model or placed in exports by default. */
     val authorNotes: String = "",
     val keepInScene: Boolean = false,
-    /** Scene status belongs to this chat, never to reusable NPC library canon. */
-    @ColumnInfo(defaultValue = "'AUTO'") val sceneMode: String = "AUTO",
     val isManualBase: Boolean = true,
     val extensionFieldsJson: String? = null,
     val createdAt: Long = System.currentTimeMillis(),
-    val updatedAt: Long = System.currentTimeMillis()
+    val updatedAt: Long = System.currentTimeMillis(),
+    /** Scene status belongs to this chat, never to reusable NPC library canon. */
+    @ColumnInfo(defaultValue = "'AUTO'") val sceneMode: String = "AUTO"
 )
 
 @Entity(tableName = "npc_bank_settings")
