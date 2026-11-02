@@ -18,7 +18,11 @@ data class NpcSceneMember(
 object NpcSceneCastResolver {
     fun resolve(dossiers: List<NpcDossier>, recentMessages: List<MessageEntity>): List<NpcSceneMember> {
         val recent = recentMessages.filter { it.isPrimaryVariant }.takeLast(24)
-            .map { StoryResponseCodec.promptTranscript(NpcStructuredOutputParser.finalVisibleStoryText(it.content)) }
+            .map { message ->
+                message to StoryResponseCodec.promptTranscript(
+                    NpcStructuredOutputParser.finalVisibleStoryText(message.content)
+                )
+            }
         return dossiers.map { npc ->
             val mode = runCatching { NpcSceneMode.valueOf(npc.sceneMode) }.getOrDefault(NpcSceneMode.AUTO)
             val presence = when (mode) {
@@ -30,10 +34,10 @@ object NpcSceneCastResolver {
         }
     }
 
-    private fun infer(npc: NpcDossier, recent: List<String>): NpcScenePresence {
+    private fun infer(npc: NpcDossier, recent: List<Pair<MessageEntity, String>>): NpcScenePresence {
         val aliases = (listOf(npc.displayName) + npc.aliases)
             .filter(String::isNotBlank).distinctBy { it.lowercase(Locale.ROOT) }
-        for (content in recent.asReversed()) {
+        for ((message, content) in recent.asReversed()) {
             val cues = aliases.flatMap { alias ->
                 val name = "(?<![\\p{L}\\p{N}_])" + Regex.escape(alias) + "(?![\\p{L}\\p{N}_])"
                 val gone = Regex(
@@ -49,6 +53,14 @@ object NpcSceneCastResolver {
             }
             val latest = cues.maxByOrNull { it.first }?.second
             if (latest != null) return latest
+            // An attributed, persisted NPC dialogue segment confirms participation.
+            // Plain mentions and Character/Narrator prose do not.
+            val segments = StoryResponseCodec.decode(message.content)?.segments.orEmpty()
+            if (segments.any { segment ->
+                segment.type == com.example.domain.story.StorySegmentType.NPC &&
+                    (segment.speakerId == npc.npcId ||
+                        aliases.any { it.equals(segment.speakerName, ignoreCase = true) })
+            }) return NpcScenePresence.PRESENT
         }
         return NpcScenePresence.UNKNOWN
     }

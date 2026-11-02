@@ -16,6 +16,7 @@ import com.example.data.model.NpcLibraryEntryEntity
 import com.example.domain.npc.NpcStructuredUpdate
 import com.example.domain.npc.NpcStructuredOutputParser
 import com.example.domain.story.StoryResponseCodec
+import com.example.domain.story.StorySegmentType
 import com.squareup.moshi.Json
 import com.squareup.moshi.JsonClass
 import com.squareup.moshi.Moshi
@@ -263,15 +264,19 @@ class NpcRepository(
                     messageDao.insertMessage(message)
                 }
                 if (metadata != null) messageDao.insertGenerationMetadata(metadata)
+                // An explicitly attributed NPC speaker is stronger evidence than an incidental
+                // prose mention. Resolve their Bank identity in the SAME transaction as the reply.
+                val completeUpdates = updates + missingSpeakerDiscoveryUpdates(message, updates)
                 applyStructuredUpdatesInTransaction(
                     chatId = message.chatId,
                     sourceMessageId = message.messageId,
                     variantGroupId = message.variantGroupId,
                     sourceRevision = 0,
                     isApplied = true,
-                    updates = updates,
+                    updates = completeUpdates,
                     activePersonaId = activePersonaId
                 )
+                reconcileNpcSpeakerIds(message)
             }
         }
     }
@@ -295,7 +300,65 @@ class NpcRepository(
                     updates = updates,
                     activePersonaId = activePersonaId
                 )
+                // Continuations already include earlier segments. Do not re-discover those
+                // historical speakers or turn a switched-away variant back into a live NPC.
+                reconcileNpcSpeakerIds(message)
             }
+        }
+    }
+
+    /**
+     * Only a real structured NPC speaker segment qualifies for automatic creation.
+     * A plain mention, label inside ordinary prose, or unrelated narrator text does not.
+     * Do not create a second NPC if metadata is already creating the same speaker.
+     */
+    private suspend fun missingSpeakerDiscoveryUpdates(
+        message: MessageEntity,
+        metadataUpdates: List<NpcStructuredUpdate>
+    ): List<NpcStructuredUpdate> {
+        val story = StoryResponseCodec.decode(message.content) ?: return emptyList()
+        val projected = project(dao.getDossiers(message.chatId), dao.getUpdates(message.chatId))
+        return story.segments.asSequence()
+            .filter { it.type == StorySegmentType.NPC && !it.content.isBlank() }
+            .mapNotNull { it.speakerName?.trim()?.takeIf { name -> name.isNotEmpty() && name.length <= 120 }?.let { name -> name to it.speakerId } }
+            .distinctBy { (name, _) -> name.lowercase(Locale.ROOT) }
+            .filterNot { (name, speakerId) ->
+                projected.any { it.npcId == speakerId } ||
+                    findByName(projected, name) != null ||
+                    metadataUpdates.any { update ->
+                        update.displayName?.equals(name, ignoreCase = true) == true ||
+                            update.aliases?.any { it.equals(name, ignoreCase = true) } == true
+                    }
+            }
+            .map { (name, _) ->
+                NpcStructuredUpdate(null, name, null, null, null, null, null, null, null)
+            }
+            .toList()
+    }
+
+    /** Persist stable Bank IDs instead of the model's temporary name-derived speaker IDs. */
+    private suspend fun reconcileNpcSpeakerIds(message: MessageEntity) {
+        val story = StoryResponseCodec.decode(message.content) ?: return
+        if (story.segments.none { it.type == StorySegmentType.NPC }) return
+        val projected = project(dao.getDossiers(message.chatId), dao.getUpdates(message.chatId))
+        val segments = story.segments.map { segment ->
+            if (segment.type != StorySegmentType.NPC) return@map segment
+            val nameMatch = segment.speakerName?.let { findByName(projected, it) }
+            val idMatch = projected.firstOrNull { it.npcId == segment.speakerId }
+            // Conflicting evidence is ambiguous: do not silently give someone's
+            // dialogue (and later their portrait) to another NPC.
+            val resolved = when {
+                nameMatch != null && idMatch != null && nameMatch.npcId != idMatch.npcId -> null
+                nameMatch != null -> nameMatch
+                else -> idMatch
+            }
+            if (resolved == null) segment else segment.copy(
+                speakerId = resolved.npcId,
+                speakerName = resolved.displayName
+            )
+        }
+        if (segments != story.segments) {
+            messageDao.updateMessage(message.copy(content = StoryResponseCodec.encode(story.copy(segments = segments))))
         }
     }
 
@@ -344,7 +407,11 @@ class NpcRepository(
                     dao.insertDossier(base)
                     bases = bases + base
                 }
-                if (!isCreation) {
+                // A creation-by-name can refer to an existing NPC by name or alias.
+                // Preserve manually established identity/core fields instead of making
+                // the entire update fail and potentially creating a duplicate.
+                val knownByName = !isCreation && change.npcId == null && matchedProjection?.npcId == npcId
+                if (!isCreation && !knownByName) {
                     require(
                         change.displayName == null &&
                             change.aliases == null &&
@@ -356,11 +423,13 @@ class NpcRepository(
                 }
                 val current = projected.firstOrNull { it.npcId == npcId }
                 val fields = linkedMapOf<String, String>()
-                change.displayName?.let { fields[FIELD_DISPLAY_NAME] = it.trim() }
-                change.aliases?.let { fields[FIELD_ALIASES] = aliasesAdapter.toJson(it) }
+                if (isCreation) {
+                    change.displayName?.let { fields[FIELD_DISPLAY_NAME] = it.trim() }
+                    change.aliases?.let { fields[FIELD_ALIASES] = aliasesAdapter.toJson(it) }
+                    change.appearance?.let { fields[FIELD_APPEARANCE] = it }
+                    change.personality?.let { fields[FIELD_PERSONALITY] = it }
+                }
                 change.role?.let { fields[FIELD_ROLE] = it }
-                change.appearance?.let { fields[FIELD_APPEARANCE] = it }
-                change.personality?.let { fields[FIELD_PERSONALITY] = it }
                 change.relationshipToPersona?.let {
                     val field = activePersonaId?.let { personaId -> "$FIELD_PERSONA_RELATIONSHIP_PREFIX$personaId" }
                         ?: FIELD_RELATIONSHIP
@@ -681,10 +750,15 @@ class NpcRepository(
 
     private fun findByName(dossiers: List<NpcDossier>, name: String): NpcDossier? {
         val normalized = name.trim().lowercase(Locale.ROOT)
-        return dossiers.firstOrNull { dossier ->
-            dossier.displayName.lowercase(Locale.ROOT) == normalized ||
-                dossier.aliases.any { it.lowercase(Locale.ROOT) == normalized }
-        }
+        if (normalized.isBlank()) return null
+        // Exact display names outrank aliases. Never guess between two equally
+        // plausible matches; misattribution would attach dialogue to the wrong portrait.
+        val exact = dossiers.filter { it.displayName.trim().lowercase(Locale.ROOT) == normalized }
+        if (exact.size == 1) return exact.single()
+        if (exact.isNotEmpty()) return null
+        return dossiers.filter { dossier ->
+            dossier.aliases.any { it.trim().lowercase(Locale.ROOT) == normalized }
+        }.singleOrNull()
     }
 
     private fun NpcDossier.field(field: String): String? = when (field) {
