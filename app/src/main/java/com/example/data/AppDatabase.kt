@@ -7,7 +7,7 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.example.data.model.*
 
-const val APP_DATABASE_VERSION = 13
+const val APP_DATABASE_VERSION = 14
 
 @Database(
     entities = [
@@ -64,6 +64,13 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun worldDao(): WorldDao
 
     companion object {
+        val MIGRATION_13_14 = object : Migration(13, 14) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE worlds ADD COLUMN linksJson TEXT NOT NULL DEFAULT '{\"cast_roles\":[],\"relationships\":[]}'")
+                db.execSQL("ALTER TABLE worlds ADD COLUMN defaultLorebookIdsJson TEXT NOT NULL DEFAULT '[]'")
+            }
+        }
+
         val MIGRATION_12_13 = object : Migration(12, 13) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 // Additive schema. Legacy chats and all user content remain untouched.
