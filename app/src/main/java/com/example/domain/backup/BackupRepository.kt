@@ -686,7 +686,9 @@ class BackupRepository internal constructor(
         requireRefs(payload.messageAttachments, "message attachment") {
             it.chatId in chatIds && (it.messageId == null || it.messageId in messageIds)
         }
-        requireRefs(payload.npcDossiers, "NPC dossier") { it.chatId in chatIds }
+        requireRefs(payload.npcDossiers, "NPC dossier") {
+            it.chatId in chatIds && it.sceneMode in com.example.data.model.NpcSceneMode.entries.map { mode -> mode.name }
+        }
         requireRefs(payload.npcBankSettings, "NPC Bank settings") { it.chatId in chatIds }
         requireRefs(payload.npcDossierUpdates, "NPC update") {
             it.chatId in chatIds && it.npcId in npcIds && it.sourceMessageId in messageIds

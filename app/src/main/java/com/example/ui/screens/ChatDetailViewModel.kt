@@ -31,6 +31,8 @@ import com.example.domain.provider.ModelRouting
 import com.example.domain.provider.RoleplayMessage
 import com.example.domain.provider.StreamEvent
 import com.example.domain.npc.NpcStructuredOutputParser
+import com.example.domain.npc.NpcSceneCastResolver
+import com.example.domain.npc.NpcScenePresence
 import com.example.domain.story.StoryOutputParser
 import com.example.domain.story.StoryResponseCodec
 import com.example.domain.story.StorySpeakerIdentity
@@ -1222,22 +1224,37 @@ class ChatDetailViewModel(
         ).orEmpty()
         val activeCoopRoom = coopSessionManager?.state?.value?.room?.takeIf { it.chatId == chatId }
         val npcBankEnabled = activeCoopRoom == null && npcRepository?.getSettings(chatId)?.isEnabled == true
-        // Structured Solo speaker attribution must not depend on enabling Narrator.
-        val ensembleNarrationEnabled = summary.chat.chatType == ChatType.SOLO &&
-            (settings.narratorEnabled || npcBankEnabled) && activeCoopRoom == null
         val projectedNpcDossiers = if (npcBankEnabled) {
             npcRepository?.getProjectedDossiers(chatId).orEmpty()
         } else emptyList()
-        val knownNpcSpeakers = projectedNpcDossiers.map { dossier ->
+        val sceneCast = NpcSceneCastResolver.resolve(projectedNpcDossiers, history + currentMessage)
+        val presentNpcs = sceneCast.filter { it.presence == NpcScenePresence.PRESENT }.map { it.dossier }
+        // NPC Bank stores continuity; the active Scene Cast controls whether we need speaker splitting.
+        // Without any present NPC, ordinary Solo prose stays untouched.
+        val ensembleNarrationEnabled = summary.chat.chatType == ChatType.SOLO &&
+            (settings.narratorEnabled || presentNpcs.isNotEmpty()) && activeCoopRoom == null
+        val knownNpcSpeakers = presentNpcs.map { dossier ->
             StorySpeakerIdentity(dossier.npcId, dossier.displayName)
         }
         val coLeadNpcNames = if (ensembleNarrationEnabled && settings.coLeadEnsembleEnabled) {
-            projectedNpcDossiers.filter { it.keepInScene }
+            presentNpcs.filter { it.keepInScene }
                 .take(NpcRepository.SOLO_ENSEMBLE_NPC_CONTEXT_LIMIT)
                 .map { it.displayName }
         } else emptyList()
         val coLeadRebalanceActive = settings.coLeadRebalanceTurnsRemaining > 0 && coLeadNpcNames.isNotEmpty()
-        val supportingCast = if (npcBankEnabled) {
+        val sceneInstructions = if (npcBankEnabled && sceneCast.isNotEmpty()) {
+            val present = presentNpcs.map { it.displayName }
+            val absent = sceneCast.filter { it.presence == NpcScenePresence.AWAY }.map { it.dossier.displayName }
+            buildString {
+                append("[SCENE CAST — physically present supporting characters] ")
+                append("Present: ").append(present.joinToString(", ").ifEmpty { "none confirmed" }).append(". ")
+                if (absent.isNotEmpty()) append("Absent: ").append(absent.joinToString(", ")).append(". ")
+                append("Other remembered NPCs have unknown presence. ")
+                append("Absent or unknown NPCs must not appear or speak until an actual entrance. ")
+                append("Pinned Co-Leads have priority but are not teleported into scenes.")
+            }
+        } else null
+        val activeNpcDossiers = if (npcBankEnabled) {
             npcRepository?.relevantContext(
                 chatId = chatId,
                 recentMessages = history + currentMessage,
@@ -1252,6 +1269,8 @@ class ChatDetailViewModel(
                 }
             )
         } else null
+        val supportingCast = listOfNotNull(sceneInstructions, activeNpcDossiers)
+            .joinToString("\n\n").takeIf(String::isNotBlank)
 
         val contextMessages = if (summary.chat.chatType == ChatType.GROUP) {
             val state = _uiState.value as? ChatUiState.Success

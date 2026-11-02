@@ -7,6 +7,9 @@ import com.example.data.model.GenerationMetadataEntity
 import com.example.data.model.NpcBankSettingsEntity
 import com.example.data.model.NpcDossier
 import com.example.data.model.NpcDossierEntity
+import com.example.data.model.NpcSceneMode
+import com.example.domain.npc.NpcSceneCastResolver
+import com.example.domain.npc.NpcScenePresence
 import com.example.data.model.NpcDossierUpdateEntity
 import com.example.data.model.NpcLibraryBankEntity
 import com.example.data.model.NpcLibraryEntryEntity
@@ -179,6 +182,7 @@ class NpcRepository(
                 secrets = dossier.secrets.trim(),
                 authorNotes = dossier.authorNotes.trim(),
                 keepInScene = dossier.keepInScene,
+                sceneMode = existing?.sceneMode ?: dossier.sceneMode,
                 isManualBase = true,
                 extensionFieldsJson = existing?.extensionFieldsJson,
                 createdAt = existing?.createdAt ?: dossier.createdAt,
@@ -194,6 +198,13 @@ class NpcRepository(
         withContext(Dispatchers.IO) {
             val existing = requireNotNull(dao.getDossier(npcId)) { "NPC not found." }
             dao.updateDossier(existing.copy(keepInScene = keep, updatedAt = System.currentTimeMillis()))
+        }
+    }
+
+    suspend fun setSceneMode(npcId: String, mode: NpcSceneMode) = dataCoordinator.withMutation {
+        withContext(Dispatchers.IO) {
+            val current = requireNotNull(dao.getDossier(npcId)) { "NPC not found." }
+            dao.updateDossier(current.copy(sceneMode = mode.name, updatedAt = System.currentTimeMillis()))
         }
     }
 
@@ -427,7 +438,11 @@ class NpcRepository(
                         NpcStructuredOutputParser.finalVisibleStoryText(it.content)
                     )
                 }.lowercase(Locale.ROOT)
-            val selected = dossiers.map { dossier ->
+            // Physical scene presence gates NPC context; a Co-Lead pin only affects priority.
+            val present = NpcSceneCastResolver.resolve(dossiers, recentMessages)
+                .filter { it.presence == NpcScenePresence.PRESENT }
+                .map { it.dossier }
+            val selected = present.map { dossier ->
                 val names = listOf(dossier.displayName) + dossier.aliases
                 val mentionScore = names.sumOf { alias ->
                     if (alias.isBlank()) 0 else Regex("(?i)(?<![\\p{L}\\p{N}_])${Regex.escape(alias)}(?![\\p{L}\\p{N}_])")
@@ -529,6 +544,7 @@ class NpcRepository(
                     secrets = card.secrets.trim(),
                     authorNotes = card.authorNotes.trim(),
                     keepInScene = card.keepInScene,
+                    sceneMode = replacing?.sceneMode ?: "AUTO",
                     isManualBase = true,
                     extensionFieldsJson = card.extensionFields.takeIf(Map<*, *>::isNotEmpty)?.let(mapAdapter::toJson),
                     createdAt = replacing?.createdAt ?: System.currentTimeMillis(),
@@ -650,6 +666,7 @@ class NpcRepository(
             secrets = secrets,
             authorNotes = base.authorNotes,
             keepInScene = base.keepInScene,
+            sceneMode = base.sceneMode,
             isManualBase = base.isManualBase,
             createdAt = base.createdAt,
             updatedAt = maxOf(base.updatedAt, relevant.maxOfOrNull { it.createdAt } ?: base.updatedAt)
@@ -687,6 +704,7 @@ class NpcRepository(
     }
 
     private fun validateCard(card: NpcDossier) {
+        require(card.sceneMode in NpcSceneMode.entries.map { it.name }) { "Invalid NPC scene mode." }
         require(card.displayName.isNotBlank() && card.displayName.length <= 120) { "NPC display name is required." }
         require(card.aliases.size <= 20 && card.aliases.all { it.isNotBlank() && it.length <= 120 }) { "NPC aliases are invalid." }
         validateScopeMap(card.personaRelationships)

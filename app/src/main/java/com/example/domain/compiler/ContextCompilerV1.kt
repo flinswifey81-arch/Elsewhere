@@ -70,6 +70,10 @@ class ContextCompilerV1 {
             append("React to both spoken dialogue and visible actions from the user/Persona. ")
             append("Maintain your character's identity, voice, behavior, and established relationship state. ")
             append("Respect previously established conversation events. ")
+            if (npcBankEnabled && groupParticipantNames.isEmpty()) {
+                append("Supporting NPCs may speak only when present in the current scene; a remembered name, dossier, or Co-Lead pin does not create presence. ")
+                append("Do not force absent NPCs into a scene just to fill dialogue. ")
+            }
             if (ensembleNarrationEnabled) {
                 if (activeCoLeads.isNotEmpty()) {
                     append("The selected Character and these NPC co-leads (${activeCoLeads.joinToString(", ")}) have equal emotional and narrative importance. ")
