@@ -1160,7 +1160,8 @@ class ChatDetailViewModel(
                 memory.sourceMessageId == null || (history + current).any { it.messageId == memory.sourceMessageId }
             },
             lore = lorebookRepository?.resolveActiveLore(chatId, history, current, AutomaticMemoryManager.DEFAULT_RECENT_MESSAGE_LIMIT).orEmpty(),
-            continuation = continuation
+            continuation = continuation,
+            worldContext = scenarioRepository?.worldContextForChat(chatId)
         ).map { if (it.sourceMessageId == source?.messageId && images.isNotEmpty()) it.copy(images = images) else it }
         return PreparedGeneration(ResponseSpeaker("narrator:$chatId", "Narrator", SpeakerType.NARRATOR), messages,
             GenerationOptions(modelId = modelId, routing = ModelRouting.fromSettings(settings.providerRoutingMode, settings.providerEndpoint),
