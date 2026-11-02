@@ -31,6 +31,9 @@ interface WorldDao {
     @Query("SELECT * FROM world_memberships WHERE worldId = :worldId ORDER BY resourceType, resourceId")
     suspend fun getMemberships(worldId: String): List<WorldMembershipEntity>
 
+    @Query("SELECT * FROM world_memberships WHERE resourceType = :resourceType AND resourceId = :resourceId ORDER BY worldId")
+    suspend fun getMembershipsForResource(resourceType: String, resourceId: String): List<WorldMembershipEntity>
+
     @Query("SELECT * FROM world_memberships ORDER BY worldId, resourceType, resourceId")
     suspend fun getAllMemberships(): List<WorldMembershipEntity>
 
