@@ -578,6 +578,19 @@ open class StoryOutputParser {
             Segments may alternate in any natural order and each type may appear more than once. Omit unneeded NPC or narration segments. Put only metadata on a segment-header line and put story prose on following lines. Use Markdown italics for actions inside Character or NPC dialogue segments when appropriate. Never emit a Persona segment and never write dialogue, thoughts, feelings, decisions, or significant actions for the user's Persona. If an NPC Bank update contract is also present, append its terminal metadata block only after $END_MARKER. Do not mention or explain this contract.
             Follow this contract independently on every response, even if an earlier assistant response used another format. Never substitute visible Narrator:, Character (Name):, or NPC (Name): transcript labels for the markers above.
         """.trimIndent()
+
+        /** Solo speaker attribution without requiring a separate narratorial voice. */
+        val SPEAKER_ONLY_OUTPUT_INSTRUCTION: String = """
+            --- SOLO CHARACTER AND NPC RESPONSE CONTRACT (NARRATOR OFF) ---
+            Return one coherent response in exactly this line-oriented structure; do not use a Markdown code fence:
+            $START_MARKER
+            $SEGMENT_MARKER{"type":"character"}
+            The primary Character's dialogue, actions, feelings, and immediate descriptions.
+            $SEGMENT_MARKER{"type":"npc","speaker_id":"known NPC id when available","speaker_name":"NPC display name"}
+            A present supporting NPC's dialogue, actions, and reactions, only when scene-relevant.
+            $END_MARKER
+            Character and NPC segments can alternate naturally and repeat when necessary; NPC segments are optional. Do not emit standalone narration or a narrator segment. Express actions, sensory detail, and emotion through the relevant Character or NPC instead. A mentioned or remembered NPC is not necessarily present. Do not summon unrelated or absent characters. Never emit a Persona segment or write dialogue, significant actions, choices, thoughts, or decisions for the user's Persona. Preserve established character perspective and knowledge boundaries. Put only metadata on a segment-header line and prose on following lines; italicize actions when appropriate. If the NPC Bank update contract is present, append its metadata block only after $END_MARKER. Follow this contract for every response, regardless of earlier reply formatting. Never substitute visible Narrator:, Character (Name):, or NPC (Name): transcript labels. Do not mention the contract.
+        """.trimIndent()
     }
 
     private data class TranscriptHeader(

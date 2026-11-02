@@ -58,7 +58,8 @@ class EnsembleCoLeadContextTest {
         narratorEnabled: Boolean,
         coLeads: List<String> = emptyList(),
         groupNames: List<String> = emptyList(),
-        rebalance: Boolean = false
+        rebalance: Boolean = false,
+        npcBankEnabled: Boolean = coLeads.isNotEmpty()
     ): String = ContextCompilerV1().compileSoloContext(
         character = character,
         persona = persona,
@@ -69,6 +70,8 @@ class EnsembleCoLeadContextTest {
         customTargetMax = null,
         customHardMax = null,
         narratorEnabled = narratorEnabled,
+        npcBankEnabled = npcBankEnabled,
+        ensembleNarrationEnabled = groupNames.isEmpty() && (narratorEnabled || npcBankEnabled),
         groupParticipantNames = groupNames,
         coLeadNpcNames = coLeads,
         coLeadRebalanceActive = rebalance
@@ -97,13 +100,28 @@ class EnsembleCoLeadContextTest {
         assertTrue(active.contains("TEMPORARY ESTABLISHED-CHAT REBALANCE"))
         assertTrue(active.contains("do not retcon, force equal dialogue"))
         assertFalse(systemPrompt(true, rebalance = true).contains("TEMPORARY ESTABLISHED-CHAT REBALANCE"))
-        assertFalse(systemPrompt(false, listOf("Mara"), rebalance = true).contains("TEMPORARY ESTABLISHED-CHAT REBALANCE"))
+        assertTrue(systemPrompt(false, listOf("Mara"), rebalance = true).contains("TEMPORARY ESTABLISHED-CHAT REBALANCE"))
     }
 
     @Test
-    fun narratorOffAndGroupIgnoreCoLeadDesignation() {
-        val inactive = systemPrompt(narratorEnabled = false, coLeads = listOf("Mara"))
-        assertFalse(inactive.contains("have equal emotional and narrative importance"))
+    fun npcBankProvidesSpeakerAttributionWithoutNarratorOrCoLeads() {
+        val withNpcBank = systemPrompt(narratorEnabled = false, npcBankEnabled = true)
+        assertTrue(withNpcBank.contains("SOLO CHARACTER AND NPC RESPONSE CONTRACT (NARRATOR OFF)"))
+        assertFalse(withNpcBank.contains("have equal emotional and narrative importance"))
+        assertFalse(withNpcBank.contains("--- NARRATOR GUIDANCE ---"))
+
+        val regularSolo = systemPrompt(narratorEnabled = false, npcBankEnabled = false)
+        assertFalse(regularSolo.contains("SOLO CHARACTER AND NPC RESPONSE CONTRACT (NARRATOR OFF)"))
+        assertFalse(regularSolo.contains("--- ENSEMBLE STORY RESPONSE CONTRACT ---"))
+    }
+
+    @Test
+    fun narratorOffStillSupportsCoLeadsButGroupIgnoresDesignation() {
+        val speakerOnly = systemPrompt(narratorEnabled = false, coLeads = listOf("Mara"))
+        assertTrue(speakerOnly.contains("have equal emotional and narrative importance"))
+        assertTrue(speakerOnly.contains("SOLO CHARACTER AND NPC RESPONSE CONTRACT (NARRATOR OFF)"))
+        assertTrue(speakerOnly.contains("Do not use a separate Narrator"))
+        assertFalse(speakerOnly.contains("--- NARRATOR GUIDANCE ---"))
         val group = systemPrompt(
             narratorEnabled = true,
             coLeads = listOf("Mara"),

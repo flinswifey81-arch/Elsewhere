@@ -51,6 +51,8 @@ jobs:
             --tests com.example.ChatSettingsScreenInitTest \
             --tests com.example.EndpointSelectionPersistenceTest \
             --tests com.example.LorebookRepositoryTest \
+            --tests com.example.NpcRepositoryTest \
+            --tests com.example.NpcSceneCastResolverTest \
             --tests com.example.ChatLorebooksScreenTest \
             --tests com.example.GroupCharacterControlsTest \
             --tests com.example.LorebookUiTest.manualEditorExposesAllLoreEntryControls \

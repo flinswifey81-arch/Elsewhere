@@ -94,6 +94,7 @@ class NpcRepositoryTest {
             )
         )
 
+        repository.setSceneMode("npc", com.example.data.model.NpcSceneMode.HERE)
         val context = repository.relevantContext("chat", emptyList()).orEmpty()
 
         assertTrue(context.contains("Trusted guide"))
@@ -108,7 +109,8 @@ class NpcRepositoryTest {
                 dossier().copy(
                     npcId = "ensemble-npc-$index",
                     displayName = "Partner $index",
-                    personality = "Distinct personality $index"
+                    personality = "Distinct personality $index",
+                    sceneMode = "HERE"
                 )
             )
         }
@@ -170,7 +172,8 @@ class NpcRepositoryTest {
         repository.saveManual(
             dossier(secrets = "STORYTELLER_SECRET").copy(
                 personaRelationships = mapOf("persona-a" to "Trusts A", "persona-b" to "Distrusts B"),
-                characterKnowledge = mapOf("character-a" to "Knows the brass key", "character-b" to "Knows the river route")
+                characterKnowledge = mapOf("character-a" to "Knows the brass key", "character-b" to "Knows the river route"),
+                sceneMode = "HERE"
             )
         )
 
@@ -189,6 +192,19 @@ class NpcRepositoryTest {
         assertFalse(context.contains("Distrusts B"))
         assertFalse(context.contains("river route"))
         assertTrue(context.contains("STORYTELLER_SECRET"))
+    }
+
+    @Test
+    fun explicitSceneModePersistsAndOverridesCoLeadPin() = runBlocking {
+        repository.saveManual(dossier().copy(keepInScene = true))
+        repository.setSceneMode("npc", com.example.data.model.NpcSceneMode.AWAY)
+        assertEquals("AWAY", repository.getProjectedDossiers("chat").single().sceneMode)
+        assertTrue(repository.relevantContext("chat", emptyList()).isNullOrBlank())
+        // Editing a dossier must not silently reset a presence override.
+        repository.saveManual(repository.getProjectedDossiers("chat").single().copy(role = "Updated role"))
+        assertEquals("AWAY", repository.getProjectedDossiers("chat").single().sceneMode)
+        repository.setSceneMode("npc", com.example.data.model.NpcSceneMode.HERE)
+        assertTrue(repository.relevantContext("chat", emptyList()).orEmpty().contains("Name: Mara"))
     }
 
     @Test

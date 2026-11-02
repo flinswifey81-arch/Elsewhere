@@ -1,5 +1,6 @@
 package com.example.data.model
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
@@ -31,7 +32,9 @@ data class NpcDossierEntity(
     val isManualBase: Boolean = true,
     val extensionFieldsJson: String? = null,
     val createdAt: Long = System.currentTimeMillis(),
-    val updatedAt: Long = System.currentTimeMillis()
+    val updatedAt: Long = System.currentTimeMillis(),
+    /** Scene status belongs to this chat, never to reusable NPC library canon. */
+    @ColumnInfo(defaultValue = "'AUTO'") val sceneMode: String = "AUTO"
 )
 
 @Entity(tableName = "npc_bank_settings")
@@ -67,6 +70,8 @@ data class NpcDossierUpdateEntity(
     val createdAt: Long = System.currentTimeMillis()
 )
 
+enum class NpcSceneMode { AUTO, HERE, AWAY }
+
 data class NpcDossier(
     val npcId: String,
     val chatId: String,
@@ -84,7 +89,8 @@ data class NpcDossier(
     val keepInScene: Boolean,
     val isManualBase: Boolean,
     val createdAt: Long,
-    val updatedAt: Long
+    val updatedAt: Long,
+    val sceneMode: String = "AUTO"
 )
 
 @Entity(tableName = "npc_library_banks")

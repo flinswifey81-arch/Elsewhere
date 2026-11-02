@@ -132,7 +132,7 @@ class AppDatabaseMigrationTest {
     }
 
     @Test
-    fun migrationFrom3To12ValidatesAgainstRoomAndPreservesExistingChatData() = runBlocking {
+    fun migrationFrom3To13ValidatesAgainstRoomAndPreservesExistingChatData() = runBlocking {
         val helper = FrameworkSQLiteOpenHelperFactory().create(
             SupportSQLiteOpenHelper.Configuration.builder(context)
                 .name(databaseName)
@@ -171,12 +171,13 @@ class AppDatabaseMigrationTest {
                 AppDatabase.MIGRATION_8_9,
                 AppDatabase.MIGRATION_9_10,
                 AppDatabase.MIGRATION_10_11,
-                AppDatabase.MIGRATION_11_12
+                AppDatabase.MIGRATION_11_12,
+                AppDatabase.MIGRATION_12_13
             )
             .allowMainThreadQueries()
             .build()
         try {
-            // Opening through Room executes every migration through 12 and validates the resulting schema.
+            // Opening through Room executes every migration through 13 and validates the resulting schema.
             migrated.openHelper.writableDatabase
             assertEquals("Keep Me", migrated.chatDao().getChatById("chat-keep")?.displayName)
             assertEquals("Preserve this", migrated.messageDao().getMessagesForChatOnce("chat-keep").single().content)
@@ -195,6 +196,31 @@ class AppDatabaseMigrationTest {
         } finally {
             migrated.close()
         }
+    }
+
+    @Test
+    fun migrationFrom12To13AddsScenePresenceWithoutLosingOldNpcIdentity() {
+        val helper = FrameworkSQLiteOpenHelperFactory().create(
+            SupportSQLiteOpenHelper.Configuration.builder(context)
+                .name(databaseName)
+                .callback(object : SupportSQLiteOpenHelper.Callback(12) {
+                    override fun onCreate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                        db.execSQL("CREATE TABLE npc_dossiers (npcId TEXT NOT NULL PRIMARY KEY, displayName TEXT NOT NULL)")
+                    }
+                    override fun onUpgrade(db: androidx.sqlite.db.SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+                })
+                .build()
+        )
+        helper.writableDatabase.apply {
+            execSQL("INSERT INTO npc_dossiers (npcId, displayName) VALUES ('old-npc', 'Mara')")
+            AppDatabase.MIGRATION_12_13.migrate(this)
+            query("SELECT displayName, sceneMode FROM npc_dossiers WHERE npcId = 'old-npc'").use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals("Mara", cursor.getString(0))
+                assertEquals("AUTO", cursor.getString(1))
+            }
+        }
+        helper.close()
     }
 
     @Test
