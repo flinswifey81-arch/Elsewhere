@@ -1,5 +1,10 @@
 package com.example.ui.screens
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.platform.LocalContext
+import com.example.domain.world.WorldDefinitionCodec
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -33,6 +38,55 @@ import kotlinx.coroutines.launch
 fun WorldsScreen(repository: WorldRepository) {
     val worlds by repository.observeWorlds().collectAsState(initial = emptyList())
     val scope = rememberCoroutineScope()
+
+    val context = LocalContext.current
+    var showImportJson by remember { mutableStateOf(false) }
+    var importJsonText by remember { mutableStateOf("") }
+    var pendingExportJson by remember { mutableStateOf<String?>(null) }
+    var notice by remember { mutableStateOf<String?>(null) }
+    val exportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json")
+    ) { uri: Uri? ->
+        val json = pendingExportJson
+        pendingExportJson = null
+        if (uri != null && json != null) {
+            scope.launch {
+                runCatching {
+                    context.contentResolver.openOutputStream(uri)?.bufferedWriter()?.use { it.write(json) }
+                        ?: error("Unable to open the selected export location.")
+                }.onSuccess { notice = "World definition saved. Chats, episodes, images and draft events are NOT in this JSON." }
+                    .onFailure { error = it.message ?: "Unable to save World JSON." }
+            }
+        }
+    }
+    val importFileLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri != null) scope.launch {
+            runCatching {
+                // Bounded read to avoid loading giant or malicious content into the editor.
+                val input = context.contentResolver.openInputStream(uri)
+                    ?: error("Unable to open the selected file.")
+                input.bufferedReader().use { reader ->
+                    val content = StringBuilder()
+                    val block = CharArray(8192)
+                    while (true) {
+                        val length = reader.read(block)
+                        if (length < 0) break
+                        require(content.length + length <= WorldDefinitionCodec.MAX_JSON_CHARS) {
+                            "World JSON exceeds size limit."
+                        }
+                        content.append(block, 0, length)
+                    }
+                    content.toString()
+                }
+            }.onSuccess {
+                importJsonText = it
+                showImportJson = true
+                error = null
+            }.onFailure { error = it.message ?: "Unable to read World JSON." }
+        }
+    }
     var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
     val selected = worlds.firstOrNull { it.worldId == selectedId }
     var editingWorld by remember { mutableStateOf<WorldEntity?>(null) }
@@ -76,6 +130,42 @@ fun WorldsScreen(repository: WorldRepository) {
             }
         }
     }
+
+    if (showImportJson) AlertDialog(
+        onDismissRequest = { if (!busy) showImportJson = false },
+        title = { Text("Import World Definition JSON") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Creates a separate World. Includes setting, cast, relationships and accepted continuity. This is not an episode/chat-history restore.",
+                    style = MaterialTheme.typography.bodySmall)
+                OutlinedTextField(
+                    value = importJsonText,
+                    onValueChange = { importJsonText = it },
+                    label = { Text("Paste Elsewhere World JSON") },
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 190.dp, max = 330.dp),
+                    maxLines = 12,
+                    colors = elsewhereTextFieldColors(),
+                    enabled = !busy
+                )
+                Text("Embedded Character/Persona cards, Scenarios and Lorebooks are not supported by this first importer.",
+                    style = MaterialTheme.typography.bodySmall)
+            }
+        },
+        confirmButton = {
+            TextButton(enabled = !busy && importJsonText.isNotBlank(), onClick = {
+                submit {
+                    val created = repository.importDefinition(importJsonText)
+                    selectedId = created.worldId
+                    importJsonText = ""
+                    showImportJson = false
+                    notice = "Imported World: " + created.title
+                }
+            }, modifier = Modifier.testTag("import_world_definition_confirm")) { Text(if (busy) "Importing…" else "Import") }
+        },
+        dismissButton = {
+            TextButton(enabled = !busy, onClick = { showImportJson = false }) { Text("Cancel") }
+        }
+    )
 
     editingWorld?.let { draft ->
         WorldDetailsDialog(
@@ -175,6 +265,13 @@ fun WorldsScreen(repository: WorldRepository) {
                             Spacer(Modifier.width(8.dp))
                             Text("New World")
                         }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(onClick = { importJsonText = ""; showImportJson = true },
+                                modifier = Modifier.testTag("paste_world_json")) { Text("Paste World JSON") }
+                            TextButton(onClick = {
+                                importFileLauncher.launch(arrayOf("application/json", "text/plain", "application/octet-stream"))
+                            }) { Text("Import file") }
+                        }
                     }
                 }
                 if (worlds.isEmpty()) item { Text("No Worlds yet. Create your first setting by hand.") }
@@ -212,6 +309,18 @@ fun WorldsScreen(repository: WorldRepository) {
                             OutlinedButton(onClick = { isCreatingWorld = false; editingWorld = selected.copy() }) { Text("Edit World") }
                             TextButton(onClick = { deletingWorld = selected }) { Text("Delete") }
                         }
+                        OutlinedButton(enabled = !busy, modifier = Modifier.testTag("export_world_definition"),
+                            onClick = {
+                                submit {
+                                    val json = repository.exportDefinition(selected.worldId)
+                                    pendingExportJson = json
+                                    exportLauncher.launch(selected.title.replace(Regex("[^A-Za-z0-9_-]"), "_") + ".world.json")
+                                }
+                            }
+                        ) { Text("Export World Definition JSON") }
+                        Text("Definition JSON excludes episode history. Use encrypted full-app backups until complete World archives are available.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
                 item(key = "cast_header") {
@@ -265,6 +374,9 @@ fun WorldsScreen(repository: WorldRepository) {
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
+            }
+            notice?.let { message ->
+                item { Text(message, color = MaterialTheme.colorScheme.primary) }
             }
             error?.let { message ->
                 item { Text(message, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("worlds_error")) }
