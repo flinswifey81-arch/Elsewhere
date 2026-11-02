@@ -184,4 +184,29 @@ class WorldRepositoryTest {
         worlds.attach(existing.worldId, WorldResourceType.CHAT, chat.chatId)
         assertTrue(runCatching { worlds.exportDefinition(existing.worldId) }.isFailure)
     }
+    @Test
+    fun scenarioNarratorSeesOnlyTheChosenWorldAndItsAcceptedContinuity() = runBlocking {
+        val monday = worlds.createWorld("Mondstadt")
+        worlds.updateWorld(monday.copy(settingSummary = "Modern Teyvat",
+            worldRules = "Respect victims and preserve player agency."))
+        worlds.createCastMember(monday.worldId, "Venti", "Mayor who fixes local complaints")
+        val draft = worlds.draftEvent(monday.worldId, "Unconfirmed", "Do not inject me")
+        val accepted = worlds.draftEvent(monday.worldId, "Streetlights", "The city repaired three lights")
+        worlds.acceptEvent(monday.worldId, accepted.eventId)
+
+        val other = worlds.createWorld("Other World")
+        worlds.createCastMember(other.worldId, "Secret Stranger", "Not in Mondstadt")
+
+        val chat = ChatEntity(chatId = "mondstadt-episode", displayName = "Episode 1", chatType = ChatType.SCENARIO)
+        database.chatDao().insertChat(chat)
+        worlds.attach(monday.worldId, WorldResourceType.CHAT, chat.chatId)
+        val context = requireNotNull(com.example.domain.repository.ScenarioRepository(database).worldContextForChat(chat.chatId))
+        assertTrue(context.contains("Modern Teyvat"))
+        assertTrue(context.contains("Venti"))
+        assertTrue(context.contains("Streetlights"))
+        assertFalse(context.contains("Do not inject me"))
+        assertFalse(context.contains("Secret Stranger"))
+        assertTrue(com.example.domain.repository.ScenarioRepository(database).worldContextForChat("unlinked-chat") == null)
+    }
+
 }
