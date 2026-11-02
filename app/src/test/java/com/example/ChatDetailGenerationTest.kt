@@ -489,6 +489,7 @@ class ChatDetailGenerationTest {
                 secrets = "",
                 authorNotes = "",
                 keepInScene = true,
+                sceneMode = "HERE",
                 isManualBase = true,
                 createdAt = 1,
                 updatedAt = 1
@@ -559,6 +560,7 @@ class ChatDetailGenerationTest {
                 secrets = "",
                 authorNotes = "",
                 keepInScene = true,
+                sceneMode = "HERE",
                 isManualBase = true,
                 createdAt = 1,
                 updatedAt = 1
@@ -1202,6 +1204,7 @@ class ChatDetailGenerationTest {
                 secrets = "",
                 authorNotes = "",
                 keepInScene = true,
+                sceneMode = "HERE",
                 isManualBase = true,
                 createdAt = 1,
                 updatedAt = 1
@@ -1227,7 +1230,9 @@ class ChatDetailGenerationTest {
         harness.viewModel.regenerateMessage(firstReply.messageId)
         withTimeout(15_000) {
             harness.messageRepository.getMessagesForChat(harness.chatId).first { messages ->
-                messages.any { it.content == "Regenerated safely." && it.isPrimaryVariant }
+                messages.any {
+                    StoryResponseCodec.visibleText(it.content) == "Regenerated safely." && it.isPrimaryVariant
+                }
             }
         }
 
