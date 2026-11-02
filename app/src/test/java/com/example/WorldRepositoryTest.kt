@@ -112,4 +112,76 @@ class WorldRepositoryTest {
         assertEquals(1, worlds.getCast(second.worldId).size)
         assertFalse(database.worldDao().getWorlds().isEmpty())
     }
+
+    @Test
+    fun importedDefinitionPreservesRelationshipsAndExportsWithoutMutatingExistingWorlds() = runBlocking {
+        val original = worlds.createWorld("Different Teyvat AU")
+        val input = com.example.domain.world.WorldDefinitionV1(
+            format = com.example.domain.world.WorldDefinitionCodec.FORMAT,
+            schemaVersion = 1,
+            world = com.example.domain.world.WorldMetadataV1(
+                worldId = "law-disorder", title = "Law & Disorder: Mondstadt",
+                settingSummary = "Modern Mondstadt", genreTags = listOf("procedural", "omegaverse")
+            ),
+            resources = com.example.domain.world.WorldResourcesV1(
+                worldCast = listOf(
+                    com.example.domain.world.WorldCastV1("varka", "Varka", profile = mapOf("role" to "Commissioner")),
+                    com.example.domain.world.WorldCastV1("flins", "Flins", profile = mapOf("role" to "District Attorney"))
+                )
+            ),
+            links = com.example.domain.world.WorldLinksV1(
+                relationships = listOf(com.example.domain.world.WorldRelationshipV1("varka", "flins", "Mated Alphas"))
+            ),
+            continuity = listOf(com.example.domain.world.WorldContinuityV1(
+                "event", "City Hall", "Venti serves as Mayor.", "ACCEPTED",
+                relatedWorldCharacterIds = listOf("varka")
+            ))
+        )
+        val imported = worlds.importDefinition(com.example.domain.world.WorldDefinitionCodec.encode(input))
+        assertEquals("Law & Disorder: Mondstadt", imported.title)
+        assertEquals(2, worlds.getCast(imported.worldId).size)
+        val output = com.example.domain.world.WorldDefinitionCodec.parse(worlds.exportDefinition(imported.worldId))
+        assertEquals(1, output.links.relationships.size)
+        assertEquals("Mated Alphas", output.links.relationships.single().description)
+        assertEquals(output.resources.worldCast.map { it.worldCharacterId }.toSet(),
+            setOf(output.links.relationships.single().fromWorldCharacterId,
+                output.links.relationships.single().toWorldCharacterId))
+        assertEquals(1, output.continuity.size)
+        assertEquals("Venti serves as Mayor.", output.continuity.single().facts)
+        assertEquals(1, output.continuity.single().relatedWorldCharacterIds.size)
+        assertEquals(listOf("procedural", "omegaverse"), output.world.genreTags)
+
+        val reimported = worlds.importDefinition(worlds.exportDefinition(imported.worldId))
+        assertTrue(reimported.worldId != imported.worldId)
+        assertEquals(2, worlds.getCast(reimported.worldId).size)
+        assertEquals(3, database.worldDao().getWorlds().size)
+        assertNotNull(worlds.getWorld(original.worldId))
+    }
+
+    @Test
+    fun importFailsClosedWithoutLeavingPartialWorldWhenEmbeddedDataIsUnsupported() = runBlocking {
+        val oldCount = database.worldDao().getWorlds().size
+        val example = com.example.domain.world.WorldDefinitionV1(
+            format = com.example.domain.world.WorldDefinitionCodec.FORMAT,
+            schemaVersion = 1,
+            world = com.example.domain.world.WorldMetadataV1("test-world", "Test World", settingSummary = "Town"),
+            resources = com.example.domain.world.WorldResourcesV1(
+                characters = listOf(mapOf("name" to "Not Yet Supported"))
+            ),
+            links = com.example.domain.world.WorldLinksV1()
+        )
+        assertTrue(runCatching {
+            worlds.importDefinition(com.example.domain.world.WorldDefinitionCodec.encode(example))
+        }.isFailure)
+        assertEquals(oldCount, database.worldDao().getWorlds().size)
+    }
+
+    @Test
+    fun exportRefusesToDropExistingLinkedChats() = runBlocking {
+        val existing = worlds.createWorld("Connected")
+        val chat = ChatEntity(chatId = "active-story", displayName = "Story", chatType = ChatType.SOLO)
+        database.chatDao().insertChat(chat)
+        worlds.attach(existing.worldId, WorldResourceType.CHAT, chat.chatId)
+        assertTrue(runCatching { worlds.exportDefinition(existing.worldId) }.isFailure)
+    }
 }
