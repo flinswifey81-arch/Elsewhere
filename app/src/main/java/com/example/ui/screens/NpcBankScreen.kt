@@ -25,6 +25,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -47,12 +48,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.data.model.NpcDossier
+import com.example.data.model.NpcSceneMode
 import com.example.data.model.NpcLibraryBankEntity
 import com.example.data.model.NpcLibraryEntryEntity
 import com.example.domain.repository.NpcImportCollisionMode
@@ -119,6 +122,11 @@ class NpcBankViewModel(
         runCatching { repository.saveManual(dossier.copy(chatId = chatId)) }
             .onSuccess { notice("NPC dossier saved.") }
             .onFailure { notice(it.message ?: "NPC dossier could not be saved.") }
+    }
+
+    fun setSceneMode(npcId: String, mode: NpcSceneMode) = viewModelScope.launch {
+        runCatching { repository.setSceneMode(npcId, mode) }
+            .onFailure { notice(it.message ?: "Scene presence could not be saved.") }
     }
 
     fun delete(npcId: String) = viewModelScope.launch {
@@ -265,7 +273,7 @@ fun NpcBankScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Text(
-                "A private cast list for this chat. Automatic discovery is opt-in. Private author notes are never sent. Story secrets may guide storyteller continuity, but never become Character knowledge unless you explicitly add them to that Character's knowledge.",
+                "The NPC Bank remembers your cast; Scene Cast controls who participates now. Auto reads explicit arrival/departure cues in recent messages. Here and Away override guesses. Pinned Co-Leads still need to be present. Private author notes remain private.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -318,6 +326,27 @@ fun NpcBankScreen(
                                 }
                                 IconButton(onClick = { deleteTarget = dossier }) {
                                     Icon(Icons.Filled.Delete, contentDescription = "Delete NPC", tint = MaterialTheme.colorScheme.error)
+                                }
+                            }
+                            Text(
+                                "Scene Cast",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                NpcSceneMode.entries.forEach { mode ->
+                                    FilterChip(
+                                        selected = dossier.sceneMode == mode.name,
+                                        onClick = { viewModel.setSceneMode(dossier.npcId, mode) },
+                                        label = {
+                                            Text(when (mode) {
+                                                NpcSceneMode.AUTO -> "Auto"
+                                                NpcSceneMode.HERE -> "Here"
+                                                NpcSceneMode.AWAY -> "Away"
+                                            })
+                                        },
+                                        modifier = Modifier.testTag("npc_scene_${dossier.npcId}_${mode.name}")
+                                    )
                                 }
                             }
                             if (dossier.relationshipToPersona.isNotBlank()) Text("Relationship: ${dossier.relationshipToPersona}")

@@ -94,6 +94,7 @@ class NpcRepositoryTest {
             )
         )
 
+        repository.setSceneMode("npc", com.example.data.model.NpcSceneMode.HERE)
         val context = repository.relevantContext("chat", emptyList()).orEmpty()
 
         assertTrue(context.contains("Trusted guide"))
@@ -108,7 +109,8 @@ class NpcRepositoryTest {
                 dossier().copy(
                     npcId = "ensemble-npc-$index",
                     displayName = "Partner $index",
-                    personality = "Distinct personality $index"
+                    personality = "Distinct personality $index",
+                    sceneMode = "HERE"
                 )
             )
         }
