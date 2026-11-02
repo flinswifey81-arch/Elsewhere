@@ -341,6 +341,32 @@ class NpcRepositoryTest {
     }
 
     @Test
+    fun modelProvidedIdCannotAttributeDifferentSpeakerToExistingNpc() = runBlocking {
+        repository.saveManual(dossier().copy(npcId = "mara", displayName = "Mara"))
+        val message = generatedMessage(
+            StorySegment(StorySegmentType.NPC, "Hello from Rhea.", "mara", "Rhea")
+        )
+        repository.persistGeneratedMessageAtomically(message, null, false, emptyList(), null)
+        val rhea = repository.getProjectedDossiers("chat").single { it.displayName == "Rhea" }
+        val stored = requireNotNull(database.messageDao().getMessageById(message.messageId))
+        assertEquals(rhea.npcId, StoryResponseCodec.decode(stored.content)?.segments?.single()?.speakerId)
+        assertTrue(rhea.npcId != "mara")
+    }
+
+    @Test
+    fun ambiguousAliasWithRealIdDoesNotTakeWrongPortrait() = runBlocking {
+        repository.saveManual(dossier().copy(npcId = "mara", displayName = "Mara", aliases = listOf("Guide")))
+        repository.saveManual(dossier().copy(npcId = "rhea", displayName = "Rhea", aliases = listOf("Guide")))
+        val message = generatedMessage(
+            StorySegment(StorySegmentType.NPC, "I will help.", "mara", "Guide")
+        )
+        repository.persistGeneratedMessageAtomically(message, null, false, emptyList(), null)
+        assertEquals(2, repository.getProjectedDossiers("chat").size)
+        val stored = requireNotNull(database.messageDao().getMessageById(message.messageId))
+        assertEquals(null, StoryResponseCodec.decode(stored.content)?.segments?.single()?.speakerId)
+    }
+
+    @Test
     fun mentioningSomeoneInOrdinaryProseDoesNotCreateNpc() = runBlocking {
         val message = MessageEntity(
             messageId = "plain", chatId = "chat", speakerType = SpeakerType.CHARACTER,

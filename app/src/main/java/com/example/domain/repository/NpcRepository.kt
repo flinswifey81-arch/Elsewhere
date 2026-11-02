@@ -328,7 +328,7 @@ class NpcRepository(
             }
             .distinctBy { (name, _) -> name.lowercase(Locale.ROOT) }
             .filterNot { (name, speakerId) ->
-                projected.any { it.npcId == speakerId } ||
+                projected.any { it.npcId == speakerId && matchesNameOrAlias(it, name) } ||
                     projected.any { matchesNameOrAlias(it, name) } ||
                     metadataUpdates.any { update ->
                         update.displayName?.equals(name, ignoreCase = true) == true ||
@@ -352,15 +352,19 @@ class NpcRepository(
             val idMatch = projected.firstOrNull { it.npcId == segment.speakerId }
             // Conflicting evidence is ambiguous: do not silently give someone's
             // dialogue (and later their portrait) to another NPC.
-            val resolved = when {
-                nameMatch != null && idMatch != null && nameMatch.npcId != idMatch.npcId -> null
-                nameMatch != null -> nameMatch
-                else -> idMatch
+            // Names/aliases take precedence over model-supplied IDs. A fabricated
+            // or stale ID must never pull a different NPC's portrait into this message.
+            val resolved = nameMatch ?: idMatch?.takeIf { known ->
+                segment.speakerName?.let { matchesNameOrAlias(known, it) } == true
             }
-            if (resolved == null) segment else segment.copy(
-                speakerId = resolved.npcId,
-                speakerName = resolved.displayName
-            )
+            when {
+                resolved != null -> segment.copy(
+                    speakerId = resolved.npcId,
+                    speakerName = resolved.displayName
+                )
+                idMatch != null -> segment.copy(speakerId = null)
+                else -> segment
+            }
         }
         if (segments != story.segments) {
             messageDao.updateMessage(message.copy(content = StoryResponseCodec.encode(story.copy(segments = segments))))
