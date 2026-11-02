@@ -22,7 +22,10 @@ import org.robolectric.annotation.Config
 class WorldsScreenTest {
     @get:Rule val compose = createComposeRule()
 
-    // Robolectric Compose idling can loop indefinitely with a synthetic small-window\n    // qualifier; phone-width coverage belongs in device instrumentation tests.\n    @Test\n    fun worldCanBeCreatedManually() {
+    // Robolectric Compose can loop indefinitely with a synthetic small-window qualifier.
+    // Phone-width coverage belongs in device instrumentation tests.
+    @Test
+    fun worldCanBeCreatedManually() {
         var saved: WorldEntity? = null
         compose.setContent {
             var draft by remember { mutableStateOf(WorldEntity(worldId = "test", title = "")) }
