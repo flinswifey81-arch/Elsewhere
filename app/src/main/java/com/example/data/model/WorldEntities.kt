@@ -15,6 +15,9 @@ data class WorldEntity(
     val settingSummary: String = "",
     val worldRules: String = "",
     val genreTagsJson: String = "[]",
+    /** Versioned World definition links; existing chats and source cards stay independent. */
+    val linksJson: String = """{"cast_roles":[],"relationships":[]}""",
+    val defaultLorebookIdsJson: String = "[]",
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis()
 )
