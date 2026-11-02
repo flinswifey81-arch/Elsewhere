@@ -30,14 +30,27 @@ import com.example.ui.components.elsewhereTopAppBarColors
 import kotlinx.coroutines.launch
 
 /**
- * Manual Worlds editor. Does not claim to export: selective World export is not yet built.
- * Keep experimental data safe using the existing encrypted full-app backup.
+ * Manual Worlds editor with limited World-definition JSON import/export.
+ * Complete archives with linked resources and episode history remain a separate milestone.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun WorldsScreen(repository: WorldRepository) {
     val worlds by repository.observeWorlds().collectAsState(initial = emptyList())
     val scope = rememberCoroutineScope()
+
+    var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
+    val selected = worlds.firstOrNull { it.worldId == selectedId }
+    var editingWorld by remember { mutableStateOf<WorldEntity?>(null) }
+    var isCreatingWorld by remember { mutableStateOf(false) }
+    var editingCast by remember { mutableStateOf<WorldCastEntity?>(null) }
+    var editingEvent by remember { mutableStateOf<WorldContinuityEventEntity?>(null) }
+    var deletingWorld by remember { mutableStateOf<WorldEntity?>(null) }
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var refreshVersion by remember { mutableIntStateOf(0) }
+    var cast by remember { mutableStateOf<List<WorldCastEntity>>(emptyList()) }
+    var events by remember { mutableStateOf<List<WorldContinuityEventEntity>>(emptyList()) }
 
     val context = LocalContext.current
     var showImportJson by remember { mutableStateOf(false) }
@@ -87,18 +100,6 @@ fun WorldsScreen(repository: WorldRepository) {
             }.onFailure { error = it.message ?: "Unable to read World JSON." }
         }
     }
-    var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
-    val selected = worlds.firstOrNull { it.worldId == selectedId }
-    var editingWorld by remember { mutableStateOf<WorldEntity?>(null) }
-    var isCreatingWorld by remember { mutableStateOf(false) }
-    var editingCast by remember { mutableStateOf<WorldCastEntity?>(null) }
-    var editingEvent by remember { mutableStateOf<WorldContinuityEventEntity?>(null) }
-    var deletingWorld by remember { mutableStateOf<WorldEntity?>(null) }
-    var busy by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
-    var refreshVersion by remember { mutableIntStateOf(0) }
-    var cast by remember { mutableStateOf<List<WorldCastEntity>>(emptyList()) }
-    var events by remember { mutableStateOf<List<WorldContinuityEventEntity>>(emptyList()) }
 
     LaunchedEffect(selectedId, refreshVersion) {
         val id = selectedId
