@@ -1231,7 +1231,10 @@ class ChatDetailGenerationTest {
         withTimeout(15_000) {
             harness.messageRepository.getMessagesForChat(harness.chatId).first { messages ->
                 messages.any {
-                    StoryResponseCodec.visibleText(it.content) == "Regenerated safely." && it.isPrimaryVariant
+                    it.isPrimaryVariant && (
+                        StoryResponseCodec.decode(it.content)?.segments?.singleOrNull()?.content
+                            ?: it.content
+                        ) == "Regenerated safely."
                 }
             }
         }
