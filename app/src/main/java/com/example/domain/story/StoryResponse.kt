@@ -564,6 +564,21 @@ open class StoryOutputParser {
             .joinToString("\n")
             .trim()
 
+        /**
+         * Detect explicit transcript headings when a model carries Narrator-on formatting
+         * into an ordinary Solo response. Do not rewrite quoted or in-prose labels.
+         */
+        fun hasExplicitSpeakerFormatting(output: String, primaryCharacterName: String): Boolean {
+            val firstLine = output.lineSequence().firstOrNull { it.isNotBlank() }?.trim() ?: return false
+            if (firstLine == START_MARKER || firstLine.startsWith(SEGMENT_MARKER)) return true
+            CHARACTER_TRANSCRIPT_PATTERN.matchEntire(firstLine)?.let { match ->
+                val suppliedName = match.groupValues[1].trim()
+                return suppliedName.isEmpty() || suppliedName.equals(primaryCharacterName, ignoreCase = true)
+            }
+            return NPC_TRANSCRIPT_PATTERN.matches(firstLine) ||
+                NARRATOR_TRANSCRIPT_PATTERN.matches(firstLine)
+        }
+
         val OUTPUT_INSTRUCTION: String = """
             --- ENSEMBLE STORY RESPONSE CONTRACT ---
             Return one coherent response using exactly this line-oriented structure. Do not use a Markdown code fence:

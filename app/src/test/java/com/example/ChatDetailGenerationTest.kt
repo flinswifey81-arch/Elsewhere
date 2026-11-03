@@ -830,6 +830,48 @@ class ChatDetailGenerationTest {
     }
 
     @Test
+    fun narratorOffNormalizesPreviousCharacterTranscriptPrefix() = runBlocking {
+        val provider = SequentialResponseProvider(listOf(
+            "Character (Rowan): *He drops the bags.* \"You're sitting down.\""
+        ))
+        val harness = createHarness(provider, ResponseLengthProfile.NORMAL, narratorEnabled = false)
+        harness.viewModel.onDraftChanged("I'm sleepy.")
+        harness.viewModel.sendMessage()
+        val completed = withTimeout(15_000) {
+            harness.messageRepository.getMessagesForChat(harness.chatId).first { it.size == 2 }
+        }
+        val story = requireNotNull(StoryResponseCodec.decode(completed.last().content))
+        assertEquals(StorySegmentType.CHARACTER, story.segments.single().type)
+        assertEquals("*He drops the bags.* \"You're sitting down.\"",
+            story.segments.single().content)
+        assertFalse(StoryResponseCodec.visibleText(completed.last().content).contains("Character (Rowan):"))
+        assertEquals(1, provider.requests.size)
+    }
+
+    @Test
+    fun narratorOffCanDiscoverLabeledNpcWithoutExtraRequest() = runBlocking {
+        val provider = SequentialResponseProvider(listOf(
+            "Character (Rowan): \"Who are you?\"\nNPC (Liora Fen): \"The courier.\""
+        ))
+        val harness = createHarness(provider, ResponseLengthProfile.NORMAL, narratorEnabled = false,
+            npcBankEnabledInitially = true)
+        harness.viewModel.onDraftChanged("Who's at the door?")
+        harness.viewModel.sendMessage()
+        val completed = withTimeout(15_000) {
+            harness.messageRepository.getMessagesForChat(harness.chatId).first { it.size == 2 }
+        }
+        val story = requireNotNull(StoryResponseCodec.decode(completed.last().content))
+        assertEquals(listOf(StorySegmentType.CHARACTER, StorySegmentType.NPC),
+            story.segments.map { it.type })
+        val npc = harness.npcRepository.getProjectedDossiers(harness.chatId).single()
+        assertEquals("Liora Fen", npc.displayName)
+        val stored = requireNotNull(harness.messageRepository.getMessagesForChatOnce(harness.chatId)
+            .singleOrNull { it.speakerType == SpeakerType.CHARACTER })
+        assertEquals(npc.npcId, StoryResponseCodec.decode(stored.content)?.segments?.last()?.speakerId)
+        assertEquals(1, provider.requests.size)
+    }
+
+    @Test
     fun malformedNarratedOutputIsSavedWithoutExposingControlMarkers() = runBlocking {
         val provider = SequentialResponseProvider(
             listOf(

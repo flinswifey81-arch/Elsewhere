@@ -266,7 +266,9 @@ class NpcRepository(
                 if (metadata != null) messageDao.insertGenerationMetadata(metadata)
                 // An explicitly attributed NPC speaker is stronger evidence than an incidental
                 // prose mention. Resolve their Bank identity in the SAME transaction as the reply.
-                val completeUpdates = updates + missingSpeakerDiscoveryUpdates(message, updates)
+                val completeUpdates = updates + if (dao.getSettings(message.chatId)?.isEnabled == true) {
+                    missingSpeakerDiscoveryUpdates(message, updates)
+                } else emptyList()
                 applyStructuredUpdatesInTransaction(
                     chatId = message.chatId,
                     sourceMessageId = message.messageId,

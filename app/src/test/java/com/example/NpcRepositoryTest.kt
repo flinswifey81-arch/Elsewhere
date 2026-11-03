@@ -248,6 +248,7 @@ class NpcRepositoryTest {
 
     @Test
     fun attributedNpcSpeakerCreatesDossierWithoutOptionalMetadata() = runBlocking {
+        repository.setEnabled("chat", true)
         val message = generatedMessage(
             StorySegment(StorySegmentType.CHARACTER, "Welcome.", "character", "Rowan"),
             StorySegment(StorySegmentType.NPC, "\"I'm here.\", says Mara.", "story-npc:temporary", "Mara")
@@ -259,6 +260,15 @@ class NpcRepositoryTest {
         assertEquals(npc.npcId, speaker.speakerId)
         assertEquals("Mara", speaker.speakerName)
         assertFalse(npc.isManualBase)
+    }
+
+    @Test
+    fun disabledNpcBankDoesNotDiscoverSpeakersFromNarratedOutput() = runBlocking {
+        val message = generatedMessage(StorySegment(
+            StorySegmentType.NPC, "I am the messenger.", "story-npc:temp", "Liora Fen"
+        ))
+        repository.persistGeneratedMessageAtomically(message, null, false, emptyList(), null)
+        assertTrue(repository.getProjectedDossiers("chat").isEmpty())
     }
 
     @Test
@@ -277,6 +287,7 @@ class NpcRepositoryTest {
 
     @Test
     fun namedNpcSpeakerAndDiscoveryMetadataMakeOneDossier() = runBlocking {
+        repository.setEnabled("chat", true)
         val message = generatedMessage(
             StorySegment(StorySegmentType.NPC, "\"There you are.\"", "story-npc:temp", "Liora")
         )
@@ -322,6 +333,7 @@ class NpcRepositoryTest {
 
     @Test
     fun ambiguousAliasCannotCaptureAnotherNpcsDialogueOrCreateDuplicate() = runBlocking {
+        repository.setEnabled("chat", true)
         repository.saveManual(dossier().copy(
             npcId = "mara", displayName = "Mara", aliases = listOf("The Guide")
         ))
@@ -342,6 +354,7 @@ class NpcRepositoryTest {
 
     @Test
     fun modelProvidedIdCannotAttributeDifferentSpeakerToExistingNpc() = runBlocking {
+        repository.setEnabled("chat", true)
         repository.saveManual(dossier().copy(npcId = "mara", displayName = "Mara"))
         val message = generatedMessage(
             StorySegment(StorySegmentType.NPC, "Hello from Rhea.", "mara", "Rhea")
