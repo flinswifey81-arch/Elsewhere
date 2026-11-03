@@ -788,7 +788,8 @@ class BackupRepository internal constructor(
                 }
                 BackupFileKind.SCENARIO_AVATAR,
                 BackupFileKind.CHARACTER_AVATAR,
-                BackupFileKind.PERSONA_AVATAR -> {
+                BackupFileKind.PERSONA_AVATAR,
+                BackupFileKind.NPC_AVATAR -> {
                     if (
                         detectedMime != "image/png" ||
                         bounds.outWidth > ProfileImageRepository.MAX_STORED_DIMENSION ||
