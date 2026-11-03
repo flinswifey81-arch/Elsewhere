@@ -308,7 +308,7 @@ class BackupRepository internal constructor(
         source: File,
         stagingDirectory: File
     ): BackupBinarySource {
-        val directory = when (kind) { BackupFileKind.SCENARIO_AVATAR -> "scenarios"; BackupFileKind.CHARACTER_AVATAR -> "characters"; else -> "personas" }
+        val directory = when (kind) { BackupFileKind.SCENARIO_AVATAR -> "scenarios"; BackupFileKind.CHARACTER_AVATAR -> "characters"; BackupFileKind.NPC_AVATAR -> "npcs"; else -> "personas" }
         val staged = File(stagingDirectory, "avatar-${kind.name.lowercase()}-${safeToken(ownerId)}")
         source.copyTo(staged, overwrite = false)
         return BackupBinarySource(
