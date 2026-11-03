@@ -862,7 +862,7 @@ class BackupRepository internal constructor(
         npcDossiers = payload.npcDossiers.size,
         messageAttachments = payload.messageAttachments.size,
         profileImages = files.count {
-            it.kind in listOf(BackupFileKind.CHARACTER_AVATAR, BackupFileKind.PERSONA_AVATAR, BackupFileKind.SCENARIO_AVATAR)
+            it.kind in listOf(BackupFileKind.CHARACTER_AVATAR, BackupFileKind.PERSONA_AVATAR, BackupFileKind.SCENARIO_AVATAR, BackupFileKind.NPC_AVATAR)
         },
         includesDrafts = payload.chatSettings.any { !it.draftMessage.isNullOrEmpty() } ||
             payload.messageAttachments.any { it.messageId == null },
