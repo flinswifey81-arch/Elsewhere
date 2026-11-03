@@ -1520,12 +1520,14 @@ class ChatDetailViewModel(
                     dataCoordinator.withMutation(dataRevision) {
                         if (npcRepository != null) {
                             try {
-                                npcRepository.persistContinuationAtomically(
+                                val report = npcRepository.persistContinuationAtomically(
                                     continuedMessage,
                                     persistedMetadata,
                                     npcUpdates,
-                                    activePersonaId
+                                    activePersonaId,
+                                    skipInvalidNpcMetadata = true
                                 )
+                                report.warning("Continuation")?.let { npcUpdateWarning = it }
                             } catch (npcError: Exception) {
                                 if (npcUpdates.isEmpty()) throw npcError
                                 npcRepository.persistContinuationAtomically(
@@ -1641,13 +1643,15 @@ class ChatDetailViewModel(
                 dataCoordinator.withMutation(dataRevision) {
                     if (npcRepository != null) {
                         try {
-                            npcRepository.persistGeneratedMessageAtomically(
+                            val report = npcRepository.persistGeneratedMessageAtomically(
                                 message = botMsg,
                                 metadata = persistedMetadata,
                                 isNewVariant = variantGroupId != null,
                                 updates = npcUpdates,
-                                activePersonaId = activePersonaId
+                                activePersonaId = activePersonaId,
+                                skipInvalidNpcMetadata = true
                             )
+                            report.warning("Response")?.let { memoryWarning = it }
                         } catch (npcError: Exception) {
                             if (npcUpdates.isEmpty()) throw npcError
                             npcRepository.persistGeneratedMessageAtomically(

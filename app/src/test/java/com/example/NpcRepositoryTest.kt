@@ -247,6 +247,55 @@ class NpcRepositoryTest {
     }
 
     @Test
+    fun invalidMetadataEntryIsSkippedWhileValidNeighborsAndStoryAreSaved() = runBlocking {
+        repository.setEnabled("chat", true)
+        val message = generatedMessage(
+            StorySegment(StorySegmentType.NPC, "I found the message.", "story-npc:temp", "Liora Fen")
+        )
+        val report = repository.persistGeneratedMessageAtomically(
+            message = message,
+            metadata = null,
+            isNewVariant = false,
+            updates = listOf(
+                NpcStructuredUpdate("fabricated-model-id", null, null, "False", null, null, null, null, null),
+                NpcStructuredUpdate(null, "Sorin", null, "Gate guard", null, null, null, null, null),
+                NpcStructuredUpdate(null, "Sorin", null, "Conflicting role", null, null, null, null, null)
+            ),
+            activePersonaId = null,
+            skipInvalidNpcMetadata = true
+        )
+        assertEquals(listOf("unknown NPC ID", "duplicate conflicting fields"), report.skippedReasons)
+        val dossiers = repository.getProjectedDossiers("chat")
+        assertEquals(2, dossiers.size)
+        assertEquals("Gate guard", dossiers.single { it.displayName == "Sorin" }.role)
+        val liora = dossiers.single { it.displayName == "Liora Fen" }
+        val persisted = requireNotNull(database.messageDao().getMessageById(message.messageId))
+        assertEquals(liora.npcId, StoryResponseCodec.decode(persisted.content)?.segments?.single()?.speakerId)
+        assertTrue(report.warning("Response").orEmpty().contains("2 NPC update(s) skipped"))
+    }
+
+    @Test
+    fun invalidMetadataWithNoValidRecordsStillDiscoversAttributedSpeaker() = runBlocking {
+        repository.setEnabled("chat", true)
+        val message = generatedMessage(
+            StorySegment(StorySegmentType.NPC, "A courier speaks.", "story-npc:temporary", "Liora Fen")
+        )
+        val report = repository.persistGeneratedMessageAtomically(
+            message = message, metadata = null, isNewVariant = false,
+            updates = listOf(
+                NpcStructuredUpdate("invented-id", null, null, "Courier", null, null, null, null, null)
+            ),
+            activePersonaId = null, skipInvalidNpcMetadata = true
+        )
+        assertEquals(1, report.skippedReasons.size)
+        val npc = repository.getProjectedDossiers("chat").single()
+        assertEquals("Liora Fen", npc.displayName)
+        assertEquals(npc.npcId, StoryResponseCodec.decode(
+            requireNotNull(database.messageDao().getMessageById(message.messageId)).content
+        )?.segments?.single()?.speakerId)
+    }
+
+    @Test
     fun attributedNpcSpeakerCreatesDossierWithoutOptionalMetadata() = runBlocking {
         repository.setEnabled("chat", true)
         val message = generatedMessage(

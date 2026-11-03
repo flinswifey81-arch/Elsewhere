@@ -30,6 +30,13 @@ import kotlinx.coroutines.withContext
 
 enum class NpcImportCollisionMode { IMPORT_AS_NEW, REPLACE_EXISTING }
 
+data class NpcUpdateApplyReport(val skippedReasons: List<String> = emptyList()) {
+    fun warning(kind: String): String? = skippedReasons.takeIf { it.isNotEmpty() }?.let { reasons ->
+        "$kind saved; ${reasons.size} NPC update(s) skipped: " +
+            reasons.distinct().joinToString(", ") + "."
+    }
+}
+
 @JsonClass(generateAdapter = true)
 data class NpcBankJson(
     @Json(name = "schema_version") val schemaVersion: Int = 1,
@@ -253,7 +260,8 @@ class NpcRepository(
         metadata: GenerationMetadataEntity?,
         isNewVariant: Boolean,
         updates: List<NpcStructuredUpdate>,
-        activePersonaId: String?
+        activePersonaId: String?,
+        skipInvalidNpcMetadata: Boolean = false
     ) = dataCoordinator.withMutation {
         withContext(Dispatchers.IO) {
             database.withTransaction {
@@ -264,21 +272,31 @@ class NpcRepository(
                     messageDao.insertMessage(message)
                 }
                 if (metadata != null) messageDao.insertGenerationMetadata(metadata)
-                // An explicitly attributed NPC speaker is stronger evidence than an incidental
-                // prose mention. Resolve their Bank identity in the SAME transaction as the reply.
-                val completeUpdates = updates + if (dao.getSettings(message.chatId)?.isEnabled == true) {
-                    missingSpeakerDiscoveryUpdates(message, updates)
-                } else emptyList()
-                applyStructuredUpdatesInTransaction(
+                // Metadata first, then speaker discovery to recover from bad model IDs.
+                val metadataReport = applyStructuredUpdatesInTransaction(
                     chatId = message.chatId,
                     sourceMessageId = message.messageId,
                     variantGroupId = message.variantGroupId,
                     sourceRevision = 0,
                     isApplied = true,
-                    updates = completeUpdates,
-                    activePersonaId = activePersonaId
+                    updates = updates,
+                    activePersonaId = activePersonaId,
+                    skipInvalidUpdates = skipInvalidNpcMetadata
                 )
+                if (dao.getSettings(message.chatId)?.isEnabled == true) {
+                    val missingSpeakers = missingSpeakerDiscoveryUpdates(message, emptyList())
+                    applyStructuredUpdatesInTransaction(
+                        chatId = message.chatId,
+                        sourceMessageId = message.messageId,
+                        variantGroupId = message.variantGroupId,
+                        sourceRevision = 0,
+                        isApplied = true,
+                        updates = missingSpeakers,
+                        activePersonaId = activePersonaId
+                    )
+                }
                 reconcileNpcSpeakerIds(message)
+                metadataReport
             }
         }
     }
@@ -287,24 +305,27 @@ class NpcRepository(
         message: MessageEntity,
         metadata: GenerationMetadataEntity?,
         updates: List<NpcStructuredUpdate>,
-        activePersonaId: String?
+        activePersonaId: String?,
+        skipInvalidNpcMetadata: Boolean = false
     ) = dataCoordinator.withMutation {
         withContext(Dispatchers.IO) {
             database.withTransaction {
                 messageDao.updateMessage(message)
                 if (metadata != null) messageDao.insertGenerationMetadata(metadata)
-                applyStructuredUpdatesInTransaction(
+                val metadataReport = applyStructuredUpdatesInTransaction(
                     chatId = message.chatId,
                     sourceMessageId = message.messageId,
                     variantGroupId = message.variantGroupId,
                     sourceRevision = dao.nextSourceRevision(message.messageId),
                     isApplied = message.isPrimaryVariant,
                     updates = updates,
-                    activePersonaId = activePersonaId
+                    activePersonaId = activePersonaId,
+                    skipInvalidUpdates = skipInvalidNpcMetadata
                 )
                 // Continuations already include earlier segments. Do not re-discover those
                 // historical speakers or turn a switched-away variant back into a live NPC.
                 reconcileNpcSpeakerIds(message)
+                metadataReport
             }
         }
     }
@@ -383,17 +404,24 @@ class NpcRepository(
         sourceRevision: Int,
         isApplied: Boolean,
         updates: List<NpcStructuredUpdate>,
-        activePersonaId: String?
-    ) {
-        if (updates.isEmpty()) return
+        activePersonaId: String?,
+        skipInvalidUpdates: Boolean = false
+    ): NpcUpdateApplyReport {
+        if (updates.isEmpty()) return NpcUpdateApplyReport()
         require(updates.size <= 24) { "Too many NPC updates." }
         val sourceOrderIndex = requireNotNull(messageDao.getMessageById(sourceMessageId)) {
             "NPC updates require a persisted source response."
         }.orderIndex
         var bases = dao.getDossiers(chatId)
+        val initialBaseIds = bases.map { it.npcId }.toSet()
         var projected = project(bases, dao.getUpdates(chatId))
         val events = mutableListOf<NpcDossierUpdateEntity>()
+        val skipped = mutableListOf<String>()
         updates.forEachIndexed { updateIndex, change ->
+            val checkpointBases = bases
+            val checkpointProjected = projected
+            val checkpointEventCount = events.size
+            try {
                 var npcId = change.npcId
                 val existingBase = npcId?.let { id -> bases.firstOrNull { it.npcId == id } }
                 val matchedProjection = change.displayName?.let { name -> findByName(projected, name) }
@@ -425,7 +453,7 @@ class NpcRepository(
                         createdAt = System.currentTimeMillis() + updateIndex,
                         updatedAt = System.currentTimeMillis()
                     )
-                    dao.insertDossier(base)
+                    // Defer writes until all fields validate; failed entries remain atomic.
                     bases = bases + base
                 }
                 // A creation-by-name can refer to an existing NPC by name or alias.
@@ -478,8 +506,26 @@ class NpcRepository(
                     )
                 }
                 projected = project(bases, dao.getUpdates(chatId) + events)
+            } catch (invalid: IllegalArgumentException) {
+                if (!skipInvalidUpdates) throw invalid
+                bases = checkpointBases
+                projected = checkpointProjected
+                while (events.size > checkpointEventCount) events.removeAt(events.lastIndex)
+                skipped += when (invalid.message) {
+                    "A discovered NPC requires a display name." -> "unknown NPC ID"
+                    "NPC identity belongs to another chat." -> "wrong-chat NPC ID"
+                    "Duplicate NPC field update." -> "duplicate conflicting fields"
+                    "NPC field is too long." -> "oversized NPC field"
+                    "Ambiguous NPC name; edit the Bank to disambiguate." -> "ambiguous name"
+                    "Automatic updates cannot change an existing NPC's identity or core profile. Edit the dossier manually instead." ->
+                        "protected identity fields"
+                    else -> "invalid NPC details"
+                }
+            }
         }
+        bases.filter { it.npcId !in initialBaseIds }.forEach { dao.insertDossier(it) }
         dao.insertUpdates(events)
+        return NpcUpdateApplyReport(skipped)
     }
 
     suspend fun selectVariant(variantGroupId: String, messageId: String) = dataCoordinator.withMutation {
