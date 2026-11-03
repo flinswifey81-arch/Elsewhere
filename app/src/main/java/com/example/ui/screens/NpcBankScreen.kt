@@ -60,6 +60,10 @@ import com.example.data.model.NpcLibraryBankEntity
 import com.example.data.model.NpcLibraryEntryEntity
 import com.example.domain.repository.NpcImportCollisionMode
 import com.example.domain.repository.NpcRepository
+import com.example.domain.repository.ProfileImageKind
+import com.example.domain.repository.ProfileImageRepository
+import com.example.ui.components.ProfileImageAvatar
+import com.example.ui.components.ProfileImageEditor
 import com.example.domain.repository.ChatRepository
 import com.example.data.model.ChatSummary
 import com.example.ui.components.elsewhereDestructiveButtonColors
@@ -86,7 +90,8 @@ data class NpcBankUiState(
 
 class NpcBankViewModel(
     private val chatId: String,
-    private val repository: NpcRepository
+    private val repository: NpcRepository,
+    private val profileImageRepository: ProfileImageRepository? = null
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(NpcBankUiState())
     val uiState: StateFlow<NpcBankUiState> = _uiState.asStateFlow()
@@ -130,8 +135,10 @@ class NpcBankViewModel(
     }
 
     fun delete(npcId: String) = viewModelScope.launch {
-        runCatching { repository.deleteDossier(npcId) }
-            .onFailure { notice(it.message ?: "NPC dossier could not be deleted.") }
+        runCatching {
+            repository.deleteDossier(npcId)
+            profileImageRepository?.removeImage(ProfileImageKind.NPC, npcId)
+        }.onFailure { notice(it.message ?: "NPC dossier or portrait could not be deleted.") }
     }
 
     fun setKeepInScene(npcId: String, keep: Boolean) = viewModelScope.launch {
@@ -171,9 +178,13 @@ class NpcBankViewModel(
 
     private fun notice(text: String) { _uiState.value = _uiState.value.copy(notice = text) }
 
-    class Factory(private val chatId: String, private val repository: NpcRepository) : ViewModelProvider.Factory {
+    class Factory(
+        private val chatId: String,
+        private val repository: NpcRepository,
+        private val profileImageRepository: ProfileImageRepository?
+    ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
-        override fun <T : ViewModel> create(modelClass: Class<T>): T = NpcBankViewModel(chatId, repository) as T
+        override fun <T : ViewModel> create(modelClass: Class<T>): T = NpcBankViewModel(chatId, repository, profileImageRepository) as T
     }
 }
 
@@ -183,9 +194,12 @@ fun NpcBankScreen(
     chatId: String,
     repository: NpcRepository,
     chatRepository: ChatRepository,
-    onNavigateBack: () -> Unit
+    onNavigateBack: () -> Unit,
+    profileImageRepository: ProfileImageRepository? = null
 ) {
-    val viewModel: NpcBankViewModel = viewModel(factory = NpcBankViewModel.Factory(chatId, repository))
+    val viewModel: NpcBankViewModel = viewModel(
+        factory = NpcBankViewModel.Factory(chatId, repository, profileImageRepository)
+    )
     val state by viewModel.uiState.collectAsState()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -310,6 +324,16 @@ fun NpcBankScreen(
                     Card(Modifier.fillMaxWidth()) {
                         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
+                                ProfileImageAvatar(
+                                    repository = profileImageRepository,
+                                    kind = ProfileImageKind.NPC,
+                                    profileId = dossier.npcId,
+                                    displayName = dossier.displayName,
+                                    size = 44.dp,
+                                    contentDescription = "Profile picture for ${dossier.displayName}",
+                                    modifier = Modifier.testTag("npc_portrait_${dossier.npcId}")
+                                )
+                                Spacer(Modifier.padding(end = 8.dp))
                                 Column(Modifier.weight(1f)) {
                                     Text(dossier.displayName, style = MaterialTheme.typography.titleMedium)
                                     if (dossier.role.isNotBlank()) Text(dossier.role, style = MaterialTheme.typography.bodySmall)
@@ -363,6 +387,7 @@ fun NpcBankScreen(
         NpcEditorDialog(
             initial = dossier,
             chatSummary = chatSummary,
+            profileImageRepository = profileImageRepository,
             onDismiss = { editing = null },
             onSave = { viewModel.save(it); editing = null }
         )
@@ -532,6 +557,7 @@ private suspend fun readNpcDocument(context: android.content.Context, uri: andro
 private fun NpcEditorDialog(
     initial: NpcDossier,
     chatSummary: ChatSummary?,
+    profileImageRepository: ProfileImageRepository?,
     onDismiss: () -> Unit,
     onSave: (NpcDossier) -> Unit
 ) {
@@ -552,6 +578,14 @@ private fun NpcEditorDialog(
         title = { Text(if (initial.displayName.isBlank()) "Add NPC" else "Edit NPC") },
         text = {
             LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                item {
+                    ProfileImageEditor(
+                        repository = profileImageRepository,
+                        kind = ProfileImageKind.NPC,
+                        profileId = initial.npcId.takeIf { initial.displayName.isNotBlank() },
+                        displayName = name
+                    )
+                }
                 item { NpcField("Display name", name) { name = it.take(120) } }
                 item { NpcField("Aliases (comma separated)", aliases) { aliases = it.take(1000) } }
                 item { NpcField("Role", role) { role = it.take(4000) } }

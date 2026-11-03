@@ -60,6 +60,8 @@ import com.example.ui.components.elsewhereTopAppBarColors
 import com.example.ui.theme.LocalElsewhereSemanticColors
 import com.example.domain.repository.ProfileImageKind
 import com.example.domain.repository.ProfileImageRepository
+import com.example.data.model.NpcDossier
+import com.example.domain.npc.NpcSpeakerPortraitResolver
 import com.example.domain.story.StoryResponse
 import com.example.domain.story.StoryResponseCodec
 import com.example.domain.story.StorySegmentType
@@ -106,6 +108,10 @@ fun ChatDetailScreen(
     )
 
     val uiState by viewModel.uiState.collectAsState()
+    val npcFlow = remember(chatId, appContainer.npcRepository) {
+        appContainer.npcRepository?.observeProjectedDossiers(chatId)
+    }
+    val npcDossiers: List<NpcDossier> = npcFlow?.collectAsState(initial = emptyList())?.value.orEmpty()
     val draft by viewModel.draft.collectAsState()
     val clipboardManager = LocalClipboardManager.current
     val snackbarHostState = remember { SnackbarHostState() }
@@ -284,6 +290,7 @@ fun ChatDetailScreen(
                                 MessageBubble(
                                     group = group,
                                     profileImageRepository = appContainer.profileImageRepository,
+                                    npcDossiers = npcDossiers,
                                     attachments = state.attachments.filter { it.messageId == group.primaryMessage.messageId },
                                     attachmentFile = { attachment -> appContainer.messageAttachmentRepository?.resolveFile(attachment) },
                                     mutationsEnabled = !state.isGenerating &&
@@ -319,6 +326,7 @@ fun ChatDetailScreen(
                                         characterId = state.generationCharacterId
                                             ?: state.chatSummary.characters.firstOrNull()?.characterId,
                                         profileImageRepository = appContainer.profileImageRepository,
+                                        npcDossiers = npcDossiers,
                                         characterName = generationCharacterName
                                             ?: (if (state.chatSummary.chat.chatType == ChatType.SCENARIO) "Narrator" else null)
                                             ?: state.chatSummary.characters.firstOrNull()?.displayName
@@ -853,6 +861,7 @@ private fun LazyListState.isNearBottom(thresholdPx: Int): Boolean {
 fun MessageBubble(
     group: MessageGroup,
     profileImageRepository: ProfileImageRepository? = null,
+    npcDossiers: List<NpcDossier> = emptyList(),
     attachments: List<MessageAttachmentEntity> = emptyList(),
     attachmentFile: (MessageAttachmentEntity) -> File? = { null },
     responsibleParticipantName: String? = null,
@@ -873,6 +882,7 @@ fun MessageBubble(
             group = group,
             story = ensembleStory,
             profileImageRepository = profileImageRepository,
+            npcDossiers = npcDossiers,
             responsibleParticipantName = responsibleParticipantName,
             mutationsEnabled = mutationsEnabled,
             onSwitchVariant = onSwitchVariant,
@@ -1115,6 +1125,7 @@ private fun EnsembleMessageBubble(
     group: MessageGroup,
     story: StoryResponse,
     profileImageRepository: ProfileImageRepository?,
+    npcDossiers: List<NpcDossier>,
     responsibleParticipantName: String?,
     mutationsEnabled: Boolean,
     onSwitchVariant: (String) -> Unit,
@@ -1182,7 +1193,8 @@ private fun EnsembleMessageBubble(
                 story = story,
                 primaryCharacterId = message.speakerId,
                 primaryCharacterName = message.speakerDisplayNameSnapshot,
-                profileImageRepository = profileImageRepository
+                profileImageRepository = profileImageRepository,
+                npcDossiers = npcDossiers
             )
         }
 
@@ -1243,7 +1255,8 @@ private fun StorySegments(
     story: StoryResponse,
     primaryCharacterId: String?,
     primaryCharacterName: String,
-    profileImageRepository: ProfileImageRepository?
+    profileImageRepository: ProfileImageRepository?,
+    npcDossiers: List<NpcDossier>
 ) {
     val semanticColors = LocalElsewhereSemanticColors.current
     story.segments.forEachIndexed { index, segment ->
@@ -1258,7 +1271,9 @@ private fun StorySegments(
             )
             StorySegmentType.CHARACTER, StorySegmentType.NPC -> {
                 val isPrimary = segment.type == StorySegmentType.CHARACTER
-                val speakerId = if (isPrimary) primaryCharacterId else segment.speakerId
+                val speakerId = if (isPrimary) primaryCharacterId else {
+                    NpcSpeakerPortraitResolver.resolveId(segment.speakerId, segment.speakerName, npcDossiers)
+                }
                 val speakerName = if (isPrimary) primaryCharacterName else segment.speakerName ?: "Supporting character"
                 Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.Start) {
                     Text(
@@ -1270,7 +1285,7 @@ private fun StorySegments(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         ProfileImageAvatar(
                             repository = profileImageRepository,
-                            kind = if (isPrimary) ProfileImageKind.CHARACTER else null,
+                            kind = if (isPrimary) ProfileImageKind.CHARACTER else ProfileImageKind.NPC,
                             profileId = speakerId,
                             displayName = speakerName,
                             size = 36.dp,
@@ -1444,7 +1459,8 @@ fun StreamingBubble(
     content: String,
     characterName: String,
     characterId: String? = null,
-    profileImageRepository: ProfileImageRepository? = null
+    profileImageRepository: ProfileImageRepository? = null,
+    npcDossiers: List<NpcDossier> = emptyList()
 ) {
     val story = remember(content) { StoryResponseCodec.decode(content) }
     if (story != null) {
@@ -1453,7 +1469,8 @@ fun StreamingBubble(
                 story = story,
                 primaryCharacterId = characterId,
                 primaryCharacterName = characterName,
-                profileImageRepository = profileImageRepository
+                profileImageRepository = profileImageRepository,
+                npcDossiers = npcDossiers
             )
             Text(
                 text = "Generating…",

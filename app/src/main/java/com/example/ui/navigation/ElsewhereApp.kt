@@ -270,7 +270,8 @@ fun ElsewhereApp(container: AppContainer) {
                         chatId = chatId,
                         repository = repository,
                         chatRepository = container.chatRepository,
-                        onNavigateBack = { navController.popBackStack() }
+                        onNavigateBack = { navController.popBackStack() },
+                        profileImageRepository = container.profileImageRepository
                     )
                 }
             }
