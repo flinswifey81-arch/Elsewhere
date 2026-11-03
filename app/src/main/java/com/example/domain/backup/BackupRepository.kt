@@ -742,6 +742,14 @@ class BackupRepository internal constructor(
                 throw BackupValidationException("Persona avatar metadata is invalid.")
             }
         }
+        manifest.files.filter { it.kind == BackupFileKind.NPC_AVATAR }.forEach {
+            if (
+                it.ownerId !in npcIds || it.mimeType != "image/png" ||
+                it.byteSize !in 1..ProfileImageRepository.MAX_STORED_BYTES
+            ) {
+                throw BackupValidationException("NPC portrait metadata is invalid.")
+            }
+        }
         if (payload.appearance.fontSize !in 12f..24f) {
             throw BackupValidationException("Backup font-size setting is invalid.")
         }
