@@ -294,6 +294,11 @@ class BackupRepository internal constructor(
                 )
             }
         }
+        payload.npcDossiers.forEach { npc ->
+            profileImageRepository.resolveImage(ProfileImageKind.NPC, npc.npcId)?.let { source ->
+                result += profileSource(BackupFileKind.NPC_AVATAR, npc.npcId, source, stagingDirectory)
+            }
+        }
         return result.sortedBy { it.manifest.entryName }
     }
 
