@@ -5,6 +5,10 @@ import com.example.data.model.NpcDossier
 import com.example.data.model.SpeakerType
 import com.example.domain.npc.NpcSceneCastResolver
 import com.example.domain.npc.NpcScenePresence
+import com.example.domain.story.StoryResponse
+import com.example.domain.story.StoryResponseCodec
+import com.example.domain.story.StorySegment
+import com.example.domain.story.StorySegmentType
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -41,6 +45,14 @@ class NpcSceneCastResolverTest {
     @Test fun manualOverrideBeatsAnyInferredCue() {
         assertEquals(NpcScenePresence.AWAY, resolve(npc("AWAY", pinned = true), "Mara enters."))
         assertEquals(NpcScenePresence.PRESENT, resolve(npc("HERE"), "Mara leaves."))
+    }
+
+    @Test fun attributedNpcSegmentConfirmsPresenceWithoutExplicitEntrance() {
+        val encoded = StoryResponseCodec.encode(StoryResponse(segments = listOf(
+            StorySegment(StorySegmentType.CHARACTER, "The door is open.", "character", "Rowan"),
+            StorySegment(StorySegmentType.NPC, "\"I know.\"", "npc-1", "Mara")
+        )))
+        assertEquals(NpcScenePresence.PRESENT, resolve(npc(), encoded))
     }
 
     @Test fun noHistoryMeansNotConfirmedPresent() {

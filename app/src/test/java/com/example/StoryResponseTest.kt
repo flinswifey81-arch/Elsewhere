@@ -123,6 +123,32 @@ class StoryResponseTest {
     }
 
     @Test
+    fun narratorToggleRecognizesExplicitCharacterPrefixWithoutTouchingProse() {
+        val varka = StorySpeakerIdentity("varka", "Varka")
+        val leaked = "Character (Varka): *Varka drops the bags.* \"You're sitting down.\""
+        assertTrue(StoryOutputParser.hasExplicitSpeakerFormatting(leaked, varka.name))
+        val normalized = parser.parse(leaked, varka)
+        assertEquals(StorySegmentType.CHARACTER, normalized.response.segments.single().type)
+        assertEquals("*Varka drops the bags.* \"You're sitting down.\"",
+            normalized.response.segments.single().content)
+        assertFalse(StoryOutputParser.hasExplicitSpeakerFormatting(
+            "He reads Character (Varka): A Biography aloud.", varka.name))
+        assertFalse(StoryOutputParser.hasExplicitSpeakerFormatting(
+            "Character (Mara): The Lost Book is here.", varka.name))
+        assertFalse(StoryOutputParser.hasExplicitSpeakerFormatting(
+            "\"Character (Varka): Please,\" she whispers.", varka.name))
+    }
+
+    @Test
+    fun typedUnknownNpcTranscriptIsRecoveredWithoutNarrator() {
+        val output = "Character (Zebulus): \"Wait.\"\nNPC (Liora Fen): \"The bridge is gone.\""
+        val parsed = parser.parse(output, primary)
+        assertEquals(listOf(StorySegmentType.CHARACTER, StorySegmentType.NPC),
+            parsed.response.segments.map { it.type })
+        assertEquals("Liora Fen", parsed.response.segments.last().speakerName)
+    }
+
+    @Test
     fun ordinaryOutputFallsBackToCharacterAndContinuationAppendsLogicalSegments() {
         val first = parser.parse("A quiet ordinary reply.", primary)
         assertFalse(first.usedStructuredFormat)

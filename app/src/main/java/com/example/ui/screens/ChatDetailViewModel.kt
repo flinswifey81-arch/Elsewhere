@@ -1043,7 +1043,13 @@ class ChatDetailViewModel(
                     } else {
                         com.example.domain.npc.ParsedNpcOutput(generatedContent)
                     }
-                    val storyParsed = if (prepared.ensembleNarrationEnabled) {
+                    // A narrator-off reply may still imitate earlier typed speaker labels.
+                    // Normalize clear transcript output, but preserve ordinary Solo prose.
+                    val explicitSpeakerFormat = prepared.character.type == SpeakerType.CHARACTER &&
+                        StoryOutputParser.hasExplicitSpeakerFormatting(
+                            parsed.storyText, fullCharacter.displayName
+                        )
+                    val storyParsed = if (prepared.ensembleNarrationEnabled || explicitSpeakerFormat) {
                         storyOutputParser.parse(
                             output = parsed.storyText,
                             primaryCharacter = StorySpeakerIdentity(fullCharacter.characterId, fullCharacter.displayName),
@@ -1514,12 +1520,14 @@ class ChatDetailViewModel(
                     dataCoordinator.withMutation(dataRevision) {
                         if (npcRepository != null) {
                             try {
-                                npcRepository.persistContinuationAtomically(
+                                val report = npcRepository.persistContinuationAtomically(
                                     continuedMessage,
                                     persistedMetadata,
                                     npcUpdates,
-                                    activePersonaId
+                                    activePersonaId,
+                                    skipInvalidNpcMetadata = true
                                 )
+                                report.warning("Continuation")?.let { npcUpdateWarning = it }
                             } catch (npcError: Exception) {
                                 if (npcUpdates.isEmpty()) throw npcError
                                 npcRepository.persistContinuationAtomically(
@@ -1635,13 +1643,15 @@ class ChatDetailViewModel(
                 dataCoordinator.withMutation(dataRevision) {
                     if (npcRepository != null) {
                         try {
-                            npcRepository.persistGeneratedMessageAtomically(
+                            val report = npcRepository.persistGeneratedMessageAtomically(
                                 message = botMsg,
                                 metadata = persistedMetadata,
                                 isNewVariant = variantGroupId != null,
                                 updates = npcUpdates,
-                                activePersonaId = activePersonaId
+                                activePersonaId = activePersonaId,
+                                skipInvalidNpcMetadata = true
                             )
+                            report.warning("Response")?.let { memoryWarning = it }
                         } catch (npcError: Exception) {
                             if (npcUpdates.isEmpty()) throw npcError
                             npcRepository.persistGeneratedMessageAtomically(
@@ -1912,7 +1922,10 @@ class ChatDetailViewModel(
         val storyText = if (prepared.npcBankEnabled) {
             NpcStructuredOutputParser.visibleStoryText(content)
         } else content
-        if (!prepared.ensembleNarrationEnabled) return storyText
+        if (!prepared.ensembleNarrationEnabled &&
+            (prepared.character.type != SpeakerType.CHARACTER ||
+                !StoryOutputParser.hasExplicitSpeakerFormatting(storyText, prepared.character.displayName))
+        ) return storyText
         val parsed = storyOutputParser.parse(
             output = storyText,
             primaryCharacter = StorySpeakerIdentity(

@@ -13,6 +13,7 @@ import com.example.domain.provider.RoleplayMessage
 import com.example.domain.lore.ActiveLoreEntry
 import com.example.domain.npc.NpcStructuredOutputParser
 import com.example.domain.story.StoryOutputParser
+import com.example.domain.story.StorySegmentType
 import com.example.domain.story.StoryResponseCodec
 import com.example.domain.story.StorySpeakerIdentity
 
@@ -253,6 +254,21 @@ class ContextCompilerV1 {
                     primaryCharacter = StorySpeakerIdentity(character.characterId, character.displayName),
                     knownNpcs = knownNpcSpeakers
                 )
+            } else if (!ensembleNarrationEnabled && message.speakerType == SpeakerType.CHARACTER) {
+                // Don't teach a narrator-off response to copy visible "Character (Name):"
+                // headings from earlier narrated turns. Retain real multi-speaker history.
+                val stored = StoryResponseCodec.decode(visibleContent)
+                val segments = stored?.segments ?: if (
+                    StoryOutputParser.hasExplicitSpeakerFormatting(visibleContent, character.displayName)
+                ) StoryOutputParser().parse(
+                    visibleContent,
+                    StorySpeakerIdentity(character.characterId, character.displayName),
+                    knownNpcSpeakers
+                ).response.segments else emptyList()
+                segments.singleOrNull()
+                    ?.takeIf { it.type == StorySegmentType.CHARACTER }
+                    ?.content
+                    ?: StoryResponseCodec.promptTranscript(visibleContent)
             } else {
                 StoryResponseCodec.promptTranscript(visibleContent)
             }
