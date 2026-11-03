@@ -189,8 +189,10 @@ class BackupRepositoryTest {
         attachmentFile.writeBytes(attachmentBytes)
         val characterAvatarBytes = pngBytes(Color.BLUE)
         val personaAvatarBytes = pngBytes(Color.GREEN)
+        val npcPortraitBytes = pngBytes(Color.MAGENTA)
         writeAvatar(ProfileImageKind.CHARACTER, CHARACTER_ID, characterAvatarBytes)
         writeAvatar(ProfileImageKind.PERSONA, PERSONA_ID, personaAvatarBytes)
+        writeAvatar(ProfileImageKind.NPC, "npc", npcPortraitBytes)
 
         val encrypted = ByteArrayOutputStream()
         val preview = source.repository.exportEncrypted(encrypted, PASSPHRASE.toCharArray())
@@ -199,7 +201,7 @@ class BackupRepositoryTest {
         assertEquals(1, preview.chats)
         assertEquals(2, preview.messages)
         assertEquals(1, preview.messageAttachments)
-        assertEquals(2, preview.profileImages)
+        assertEquals(3, preview.profileImages)
         assertTrue(preview.includesDrafts)
         assertTrue(preview.includesCoopHistory)
 
@@ -218,7 +220,7 @@ class BackupRepositoryTest {
         )
         assertEquals(1, result.restoredChats)
         assertEquals(2, result.restoredMessages)
-        assertEquals(3, result.restoredFiles)
+        assertEquals(4, result.restoredFiles)
         assertTrue(result.safetyBackupAvailable)
 
         val restored = target.readPayload()
@@ -278,6 +280,8 @@ class BackupRepositoryTest {
         val restoredAttachment = restored.messageAttachments.single()
         assertNotEquals(originalPayload.messageAttachments.single().relativePath, restoredAttachment.relativePath)
         assertArrayEquals(attachmentBytes, target.attachments.resolveFile(restoredAttachment)!!.readBytes())
+        assertArrayEquals(npcPortraitBytes,
+            target.profileImages.resolveImage(ProfileImageKind.NPC, "npc")!!.readBytes())
         assertArrayEquals(
             characterAvatarBytes,
             target.profileImages.resolveImage(ProfileImageKind.CHARACTER, CHARACTER_ID)!!.readBytes()
