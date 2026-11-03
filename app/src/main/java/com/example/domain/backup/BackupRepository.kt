@@ -534,14 +534,13 @@ class BackupRepository internal constructor(
     private fun prepareProfileImages(validated: ValidatedBackup, stageRoot: File) {
         stageRoot.mkdirs()
         validated.manifest.files.filter {
-            it.kind in listOf(BackupFileKind.CHARACTER_AVATAR, BackupFileKind.PERSONA_AVATAR, BackupFileKind.SCENARIO_AVATAR)
+            it.kind in listOf(BackupFileKind.CHARACTER_AVATAR, BackupFileKind.PERSONA_AVATAR, BackupFileKind.SCENARIO_AVATAR, BackupFileKind.NPC_AVATAR)
         }.forEach { fileManifest ->
-            val kind = if (fileManifest.kind == BackupFileKind.SCENARIO_AVATAR) {
-                ProfileImageKind.SCENARIO
-            } else if (fileManifest.kind == BackupFileKind.CHARACTER_AVATAR) {
-                ProfileImageKind.CHARACTER
-            } else {
-                ProfileImageKind.PERSONA
+            val kind = when (fileManifest.kind) {
+                BackupFileKind.SCENARIO_AVATAR -> ProfileImageKind.SCENARIO
+                BackupFileKind.CHARACTER_AVATAR -> ProfileImageKind.CHARACTER
+                BackupFileKind.NPC_AVATAR -> ProfileImageKind.NPC
+                else -> ProfileImageKind.PERSONA
             }
             val source = requireNotNull(validated.extractedFiles[fileManifest.entryName])
             val directory = File(stageRoot, kind.directoryName).apply { mkdirs() }
