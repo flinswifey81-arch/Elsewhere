@@ -5,6 +5,7 @@ on:
   pull_request:
     branches:
       - main
+      - feature/background-chat-lifecycle-2026-11-04
   push:
     branches:
       - feature/solo-ensemble-co-leads
@@ -48,6 +49,8 @@ jobs:
             --tests com.example.domain.backup.BackupCryptoTest \
             --tests com.example.domain.backup.BackupRepositoryTest \
             --tests com.example.ChatDetailGenerationTest \
+            --tests com.example.RetainedChatViewModelStoresTest \
+            --tests com.example.ReplyNotificationPolicyTest \
             --tests com.example.ChatMessageReadingUiTest \
             --tests com.example.ChatSettingsScreenInitTest \
             --tests com.example.EndpointSelectionPersistenceTest \
