@@ -88,10 +88,15 @@ class AndroidGenerationNotifications(
     @Synchronized
     override fun replySaved(chatId: String, chatTitle: String, speakerName: String, messageId: String) {
         // A stream Done event does NOT mean the response was saved; only this callback does.
-        if (retainedStores.isVisible(chatId) && appVisible) return
-        if (ContextCompat.checkSelfPermission(
-                appContext, Manifest.permission.POST_NOTIFICATIONS
-            ) != PackageManager.PERMISSION_GRANTED
+        val hasPermission = ContextCompat.checkSelfPermission(
+            appContext, Manifest.permission.POST_NOTIFICATIONS
+        ) == PackageManager.PERMISSION_GRANTED
+        if (!ReplyNotificationPolicy.shouldAlert(
+                saved = true,
+                chatVisible = retainedStores.isVisible(chatId),
+                appVisible = appVisible,
+                permissionGranted = hasPermission
+            )
         ) return
 
         val deepLink = Intent(appContext, MainActivity::class.java).apply {
