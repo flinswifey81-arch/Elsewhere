@@ -21,10 +21,12 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 import kotlin.math.abs
 
 /** Offline Compose regression coverage: no chat model, API key, or network request. */
 @RunWith(RobolectricTestRunner::class)
+@Config(qualifiers = "w480dp-h800dp")
 class ChatMessageReadingUiTest {
     @get:Rule val compose = createComposeRule()
 
@@ -57,7 +59,7 @@ class ChatMessageReadingUiTest {
         }
         val bubble = compose.onNodeWithTag("chat_message_bubble").getUnclippedBoundsInRoot()
         val avatar = compose.onNodeWithTag("message_avatar_CHARACTER_rowan").getUnclippedBoundsInRoot()
-        assertTrue("Long prose should use most of the 420dp reading width: ${bubble.width}", bubble.width > 330.dp)
+        assertTrue("Long prose should use most of the 420dp reading width", bubble.right - bubble.left > 330.dp)
         assertTrue("Avatar must align with the top of the bubble", abs((bubble.top - avatar.top).value) < 2f)
         compose.onNodeWithContentDescription("Message menu").performClick()
         compose.onNodeWithText("Copy").performClick()
@@ -90,8 +92,8 @@ class ChatMessageReadingUiTest {
         }
         val first = compose.onNodeWithTag("story_message_bubble_0").getUnclippedBoundsInRoot()
         val second = compose.onNodeWithTag("story_message_bubble_1").getUnclippedBoundsInRoot()
-        assertTrue(first.width > 330.dp)
-        assertTrue(second.width > 330.dp)
+        assertTrue(first.right - first.left > 330.dp)
+        assertTrue(second.right - second.left > 330.dp)
         compose.onNodeWithContentDescription("Message menu").performClick()
         compose.onNodeWithText("Copy").performClick()
         assertEquals(StoryResponseCodec.readableTranscript(story), copied)
