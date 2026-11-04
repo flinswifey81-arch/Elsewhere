@@ -1604,7 +1604,9 @@ class ChatDetailViewModel(
                         ?: npcUpdateWarning
                 )
             }
-            if (syncError == null && completionError == null && !isCoopGeneration) {
+            if (syncError == null && completionError == null && !isCoopGeneration &&
+                !retainPartialOnCoopFailure && metadata?.isPartial != true
+            ) {
                 runCatching {
                     generationLifecycle?.replySaved(
                         chatId, chatSummary?.chat?.displayName ?: "Chat",
@@ -1769,7 +1771,9 @@ class ChatDetailViewModel(
                 // The reply is already saved. Never lose it over a counter update.
             }
         }
-        if (syncError == null && completionError == null && !isCoopGeneration) {
+        if (syncError == null && completionError == null && !isCoopGeneration &&
+            !retainPartialOnCoopFailure && metadata?.isPartial != true
+        ) {
             runCatching {
                 generationLifecycle?.replySaved(
                     chatId, chatSummary?.chat?.displayName ?: "Chat",
