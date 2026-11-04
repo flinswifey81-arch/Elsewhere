@@ -60,7 +60,7 @@ class RetainedChatViewModelStores(private val maxIdleStores: Int = 8) {
     }
 
     private fun trimIdleLocked() {
-        val idle = entries.filter { !it.value.visible && !it.value.hasActiveWork() }
+        val idle = entries.entries.filter { !it.value.visible && !it.value.hasActiveWork() }
         val excess = idle.size - maxIdleStores
         if (excess <= 0) return
         idle.take(excess).forEach { (chatId, entry) ->
