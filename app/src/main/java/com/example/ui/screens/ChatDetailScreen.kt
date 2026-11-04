@@ -47,6 +47,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.viewmodel.compose.LocalViewModelStoreOwner
 import com.example.data.model.MessageEntity
 import com.example.data.model.SpeakerType
 import com.example.data.model.ChatType
@@ -86,7 +87,15 @@ fun ChatDetailScreen(
     onNavigateToNpcBank: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    // Navigation ordinarily destroys a screen-scoped ViewModel on exit. Use one application-
+    // owned store per chat so switching chats cannot cancel a pending provider response.
+    val navigationOwner = checkNotNull(LocalViewModelStoreOwner.current)
+    val retainedStores = appContainer.retainedChatViewModelStores
+    val chatOwner = remember(chatId, retainedStores, navigationOwner) {
+        retainedStores?.ownerFor(chatId) ?: navigationOwner
+    }
     val viewModel: ChatDetailViewModel = viewModel(
+        viewModelStoreOwner = chatOwner,
         factory = ChatDetailViewModel.Factory(
             chatId = chatId,
             chatRepository = appContainer.chatRepository,
@@ -106,6 +115,11 @@ fun ChatDetailScreen(
             npcOutputParser = appContainer.npcOutputParser
         )
     )
+
+    DisposableEffect(chatId, retainedStores, viewModel) {
+        retainedStores?.onAttached(chatId, viewModel::hasPendingGenerationWork)
+        onDispose { retainedStores?.onDetached(chatId) }
+    }
 
     val uiState by viewModel.uiState.collectAsState()
     val npcFlow = remember(chatId, appContainer.npcRepository) {
@@ -128,6 +142,7 @@ fun ChatDetailScreen(
 
     LaunchedEffect(uiState) {
         if (uiState is ChatUiState.Deleted) {
+            retainedStores?.forget(chatId)
             onChatDeleted()
         }
     }
