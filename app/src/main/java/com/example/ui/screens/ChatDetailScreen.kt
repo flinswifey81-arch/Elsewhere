@@ -1,6 +1,11 @@
 package com.example.ui.screens
 
 import android.graphics.BitmapFactory
+import android.Manifest
+import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.core.content.ContextCompat
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.result.PickVisualMediaRequest
@@ -41,6 +46,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.AnnotatedString
@@ -112,13 +118,34 @@ fun ChatDetailScreen(
             messageAttachmentRepository = appContainer.messageAttachmentRepository,
             scenarioRepository = appContainer.scenarioRepository,
             npcRepository = appContainer.npcRepository,
-            npcOutputParser = appContainer.npcOutputParser
+            npcOutputParser = appContainer.npcOutputParser,
+            generationLifecycle = appContainer.generationNotifications
         )
     )
 
     DisposableEffect(chatId, retainedStores, viewModel) {
         retainedStores?.onAttached(chatId, viewModel::hasPendingGenerationWork)
+        appContainer.generationNotifications?.dismissReady(chatId)
         onDispose { retainedStores?.onDetached(chatId) }
+    }
+
+    val context = LocalContext.current
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { /* Notification denial never blocks generation. */ }
+    val askForNotificationPermissionOnce = {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
+                PackageManager.PERMISSION_GRANTED
+        ) {
+            val preferences = context.getSharedPreferences(
+                "elsewhere_reply_notifications", Context.MODE_PRIVATE
+            )
+            if (!preferences.getBoolean("permission_asked", false)) {
+                preferences.edit().putBoolean("permission_asked", true).apply()
+                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
     }
 
     val uiState by viewModel.uiState.collectAsState()
@@ -311,8 +338,14 @@ fun ChatDetailScreen(
                                     mutationsEnabled = !state.isGenerating &&
                                         !state.partialStopped && !state.partialResolutionInProgress,
                                     onSwitchVariant = { msgId -> viewModel.switchVariant(group.primaryMessage.variantGroupId ?: group.primaryMessage.messageId, msgId) },
-                                    onRegenerate = { viewModel.regenerateMessage(it) },
-                                    onContinue = { viewModel.continueMessage(it) },
+                                    onRegenerate = {
+                                        askForNotificationPermissionOnce()
+                                        viewModel.regenerateMessage(it)
+                                    },
+                                    onContinue = {
+                                        askForNotificationPermissionOnce()
+                                        viewModel.continueMessage(it)
+                                    },
                                     onCopy = { content ->
                                         clipboardManager.setText(AnnotatedString(content))
                                         coroutineScope.launch {
@@ -474,6 +507,7 @@ fun ChatDetailScreen(
                                             (!isGroup && state.messages.lastOrNull()?.speakerType == SpeakerType.PERSONA)
                                         IconButton(
                                             onClick = {
+                                                askForNotificationPermissionOnce()
                                                 if (draft.isNotBlank() || state.draftAttachments.isNotEmpty()) viewModel.sendMessage()
                                                 else if (!isGroup) viewModel.retryGeneration()
                                             },
