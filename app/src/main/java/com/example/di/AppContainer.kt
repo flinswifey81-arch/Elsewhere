@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.Room
 import com.example.data.AppDatabase
 import com.example.domain.generation.RetainedChatViewModelStores
+import com.example.domain.generation.AndroidGenerationNotifications
 import com.example.domain.repository.AppearanceRepository
 import com.example.domain.repository.AppDataMaintenanceCoordinator
 import com.example.domain.repository.CharacterRepository
@@ -28,6 +29,7 @@ import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 
 interface AppContainer {
     val retainedChatViewModelStores: RetainedChatViewModelStores? get() = null
+    val generationNotifications: AndroidGenerationNotifications? get() = null
     val scenarioRepository: com.example.domain.repository.ScenarioRepository? get() = null
     val modelProvider: com.example.domain.provider.ModelProvider
     val characterRepository: CharacterRepository
@@ -49,6 +51,9 @@ interface AppContainer {
 
 class DefaultAppContainer(private val context: Context) : AppContainer {
     override val retainedChatViewModelStores = RetainedChatViewModelStores()
+    override val generationNotifications by lazy {
+        AndroidGenerationNotifications(context, retainedChatViewModelStores)
+    }
     private val dataCoordinator = AppDataMaintenanceCoordinator.Global
 
     private val okHttpClient: okhttp3.OkHttpClient by lazy {
