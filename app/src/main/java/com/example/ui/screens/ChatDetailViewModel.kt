@@ -2067,6 +2067,12 @@ class ChatDetailViewModel(
                 continuationTarget = targetMessage,
                 characterId = targetMessage.speakerId
             )
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                updateSuccessState {
+                    it.copy(generationError = "Continue could not start: ${error.message ?: "unknown error"}. The existing reply was not changed.")
+                }
             } finally {
                 generationStartInProgress = false
             }
