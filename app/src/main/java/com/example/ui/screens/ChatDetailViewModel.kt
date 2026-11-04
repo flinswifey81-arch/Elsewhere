@@ -1807,6 +1807,18 @@ class ChatDetailViewModel(
         return error
     }
 
+    /**
+     * Navigation must not destroy a chat's generation job, unsaved send, or unresolved partial.
+     * The application-scoped ViewModel owner consults this before releasing a hidden chat.
+     */
+    fun hasPendingGenerationWork(): Boolean {
+        val state = _uiState.value as? ChatUiState.Success
+        return sendInProgress || generationStartInProgress ||
+            sendJob?.isActive == true || generationJob?.isActive == true ||
+            state?.isGenerating == true || state?.partialStopped == true ||
+            partialResolutionInProgress || inChatToolInProgress
+    }
+
     fun stopGeneration() {
         generationJob?.cancel()
     }
