@@ -53,6 +53,8 @@ jobs:
             --tests com.example.LorebookRepositoryTest \
             --tests com.example.NpcRepositoryTest \
             --tests com.example.NpcSceneCastResolverTest \
+            --tests com.example.NpcSpeakerPortraitResolverTest \
+            --tests com.example.ProfileImageRepositoryTest \
             --tests com.example.ChatLorebooksScreenTest \
             --tests com.example.GroupCharacterControlsTest \
             --tests com.example.LorebookUiTest.manualEditorExposesAllLoreEntryControls \

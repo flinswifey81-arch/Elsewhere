@@ -294,6 +294,11 @@ class BackupRepository internal constructor(
                 )
             }
         }
+        payload.npcDossiers.forEach { npc ->
+            profileImageRepository.resolveImage(ProfileImageKind.NPC, npc.npcId)?.let { source ->
+                result += profileSource(BackupFileKind.NPC_AVATAR, npc.npcId, source, stagingDirectory)
+            }
+        }
         return result.sortedBy { it.manifest.entryName }
     }
 
@@ -303,7 +308,7 @@ class BackupRepository internal constructor(
         source: File,
         stagingDirectory: File
     ): BackupBinarySource {
-        val directory = when (kind) { BackupFileKind.SCENARIO_AVATAR -> "scenarios"; BackupFileKind.CHARACTER_AVATAR -> "characters"; else -> "personas" }
+        val directory = when (kind) { BackupFileKind.SCENARIO_AVATAR -> "scenarios"; BackupFileKind.CHARACTER_AVATAR -> "characters"; BackupFileKind.NPC_AVATAR -> "npcs"; else -> "personas" }
         val staged = File(stagingDirectory, "avatar-${kind.name.lowercase()}-${safeToken(ownerId)}")
         source.copyTo(staged, overwrite = false)
         return BackupBinarySource(
@@ -529,14 +534,13 @@ class BackupRepository internal constructor(
     private fun prepareProfileImages(validated: ValidatedBackup, stageRoot: File) {
         stageRoot.mkdirs()
         validated.manifest.files.filter {
-            it.kind in listOf(BackupFileKind.CHARACTER_AVATAR, BackupFileKind.PERSONA_AVATAR, BackupFileKind.SCENARIO_AVATAR)
+            it.kind in listOf(BackupFileKind.CHARACTER_AVATAR, BackupFileKind.PERSONA_AVATAR, BackupFileKind.SCENARIO_AVATAR, BackupFileKind.NPC_AVATAR)
         }.forEach { fileManifest ->
-            val kind = if (fileManifest.kind == BackupFileKind.SCENARIO_AVATAR) {
-                ProfileImageKind.SCENARIO
-            } else if (fileManifest.kind == BackupFileKind.CHARACTER_AVATAR) {
-                ProfileImageKind.CHARACTER
-            } else {
-                ProfileImageKind.PERSONA
+            val kind = when (fileManifest.kind) {
+                BackupFileKind.SCENARIO_AVATAR -> ProfileImageKind.SCENARIO
+                BackupFileKind.CHARACTER_AVATAR -> ProfileImageKind.CHARACTER
+                BackupFileKind.NPC_AVATAR -> ProfileImageKind.NPC
+                else -> ProfileImageKind.PERSONA
             }
             val source = requireNotNull(validated.extractedFiles[fileManifest.entryName])
             val directory = File(stageRoot, kind.directoryName).apply { mkdirs() }
@@ -738,6 +742,14 @@ class BackupRepository internal constructor(
                 throw BackupValidationException("Persona avatar metadata is invalid.")
             }
         }
+        manifest.files.filter { it.kind == BackupFileKind.NPC_AVATAR }.forEach {
+            if (
+                it.ownerId !in npcIds || it.mimeType != "image/png" ||
+                it.byteSize !in 1..ProfileImageRepository.MAX_STORED_BYTES
+            ) {
+                throw BackupValidationException("NPC portrait metadata is invalid.")
+            }
+        }
         if (payload.appearance.fontSize !in 12f..24f) {
             throw BackupValidationException("Backup font-size setting is invalid.")
         }
@@ -776,7 +788,8 @@ class BackupRepository internal constructor(
                 }
                 BackupFileKind.SCENARIO_AVATAR,
                 BackupFileKind.CHARACTER_AVATAR,
-                BackupFileKind.PERSONA_AVATAR -> {
+                BackupFileKind.PERSONA_AVATAR,
+                BackupFileKind.NPC_AVATAR -> {
                     if (
                         detectedMime != "image/png" ||
                         bounds.outWidth > ProfileImageRepository.MAX_STORED_DIMENSION ||
@@ -849,7 +862,7 @@ class BackupRepository internal constructor(
         npcDossiers = payload.npcDossiers.size,
         messageAttachments = payload.messageAttachments.size,
         profileImages = files.count {
-            it.kind in listOf(BackupFileKind.CHARACTER_AVATAR, BackupFileKind.PERSONA_AVATAR, BackupFileKind.SCENARIO_AVATAR)
+            it.kind in listOf(BackupFileKind.CHARACTER_AVATAR, BackupFileKind.PERSONA_AVATAR, BackupFileKind.SCENARIO_AVATAR, BackupFileKind.NPC_AVATAR)
         },
         includesDrafts = payload.chatSettings.any { !it.draftMessage.isNullOrEmpty() } ||
             payload.messageAttachments.any { it.messageId == null },
