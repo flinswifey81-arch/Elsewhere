@@ -919,7 +919,8 @@ fun MessageBubble(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = if (isUser) Alignment.End else Alignment.Start
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            if (isUser) Spacer(Modifier.weight(1f))
             Text(
                 text = message.speakerDisplayNameSnapshot,
                 style = MaterialTheme.typography.labelSmall,
@@ -934,6 +935,23 @@ fun MessageBubble(
                     modifier = Modifier.padding(end = 8.dp)
                 )
             }
+            if (!isUser) Spacer(Modifier.weight(1f))
+            Box {
+                IconButton(onClick = { showMenu = true }, modifier = Modifier.size(36.dp)) {
+                    Icon(Icons.Filled.MoreVert, contentDescription = "Message menu")
+                }
+                MessageMenu(
+                    expanded = showMenu,
+                    onDismiss = { showMenu = false },
+                    onCopy = { onCopy(message.content) },
+                    onEdit = { isEditing = true },
+                    onDelete = { showDeleteConfirm = true },
+                    onRegenerate = if (isUser) null else ({ onRegenerate(message.messageId) }),
+                    onContinue = if (isUser) null else ({ onContinue(message.messageId) }),
+                    onShowMetadata = if (isUser) null else ({ onShowMetadata(message.messageId) }),
+                    mutationsEnabled = mutationsEnabled
+                )
+            }
         }
         responsibleParticipantName?.let { participant ->
             Text(
@@ -945,7 +963,8 @@ fun MessageBubble(
         }
         
         Row(
-            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.Top,
             horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start
         ) {
             if (!isUser) {
@@ -960,30 +979,11 @@ fun MessageBubble(
                 )
                 Spacer(Modifier.width(6.dp))
             }
-            if (isUser) {
-                Box {
-                    IconButton(onClick = { showMenu = true }) {
-                        Icon(Icons.Filled.MoreVert, contentDescription = "Menu")
-                    }
-                    MessageMenu(
-                        expanded = showMenu,
-                        onDismiss = { showMenu = false },
-                        onCopy = { onCopy(message.content) },
-                        onEdit = { isEditing = true },
-                        onDelete = { showDeleteConfirm = true },
-                        onRegenerate = null,
-                        onContinue = null,
-                        onShowMetadata = null,
-                        mutationsEnabled = mutationsEnabled
-                    )
-                }
-            }
-
             Surface(
                 shape = shape,
                 color = color,
                 tonalElevation = 1.dp,
-                modifier = Modifier.fillMaxWidth(0.70f)
+                modifier = Modifier.weight(1f, fill = false).testTag("chat_message_bubble")
             ) {
                 if (isEditing) {
                     Column(modifier = Modifier.padding(8.dp)) {
@@ -1028,24 +1028,6 @@ fun MessageBubble(
                 }
             }
 
-            if (!isUser) {
-                Box {
-                    IconButton(onClick = { showMenu = true }) {
-                        Icon(Icons.Filled.MoreVert, contentDescription = "Menu")
-                    }
-                    MessageMenu(
-                        expanded = showMenu,
-                        onDismiss = { showMenu = false },
-                        onCopy = { onCopy(message.content) },
-                        onEdit = { isEditing = true },
-                        onDelete = { showDeleteConfirm = true },
-                        onRegenerate = { onRegenerate(message.messageId) },
-                        onContinue = { onContinue(message.messageId) },
-                        onShowMetadata = { onShowMetadata(message.messageId) },
-                        mutationsEnabled = mutationsEnabled
-                    )
-                }
-            }
             if (isUser) {
                 Spacer(Modifier.width(6.dp))
                 ProfileImageAvatar(
@@ -1145,23 +1127,42 @@ private fun EnsembleMessageBubble(
     var showDeleteConfirm by remember { mutableStateOf(false) }
 
     Column(modifier = Modifier.fillMaxWidth()) {
-        responsibleParticipantName?.let { participant ->
-            Text(
-                text = "Sent by $participant",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 8.dp)
-            )
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                responsibleParticipantName?.let { participant ->
+                    Text(
+                        text = "Sent by $participant",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 8.dp)
+                    )
+                }
+                if (message.editedAt != null) {
+                    Text(
+                        text = "(edited)",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                    )
+                }
+            }
+            Box {
+                IconButton(onClick = { showMenu = true }, modifier = Modifier.size(36.dp)) {
+                    Icon(Icons.Filled.MoreVert, contentDescription = "Message menu")
+                }
+                MessageMenu(
+                    expanded = showMenu,
+                    onDismiss = { showMenu = false },
+                    onCopy = { onCopy(StoryResponseCodec.readableTranscript(story)) },
+                    onEdit = { isEditing = true },
+                    onDelete = { showDeleteConfirm = true },
+                    onRegenerate = { onRegenerate(message.messageId) },
+                    onContinue = { onContinue(message.messageId) },
+                    onShowMetadata = { onShowMetadata(message.messageId) },
+                    mutationsEnabled = mutationsEnabled
+                )
+            }
         }
-        if (message.editedAt != null) {
-            Text(
-                text = "(edited)",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
-            )
-        }
-
         if (isEditing) {
             Surface(
                 shape = MaterialTheme.shapes.medium,
@@ -1198,32 +1199,15 @@ private fun EnsembleMessageBubble(
             )
         }
 
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(start = 42.dp, end = 8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            if (group.variants.size > 1) {
+        if (group.variants.size > 1) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(start = 42.dp, top = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 EnsembleVariantSelector(
                     group = group,
                     mutationsEnabled = mutationsEnabled,
                     onSwitchVariant = onSwitchVariant
-                )
-            }
-            Spacer(Modifier.weight(1f))
-            Box {
-                IconButton(onClick = { showMenu = true }) {
-                    Icon(Icons.Filled.MoreVert, contentDescription = "Menu")
-                }
-                MessageMenu(
-                    expanded = showMenu,
-                    onDismiss = { showMenu = false },
-                    onCopy = { onCopy(StoryResponseCodec.readableTranscript(story)) },
-                    onEdit = { isEditing = true },
-                    onDelete = { showDeleteConfirm = true },
-                    onRegenerate = { onRegenerate(message.messageId) },
-                    onContinue = { onContinue(message.messageId) },
-                    onShowMetadata = { onShowMetadata(message.messageId) },
-                    mutationsEnabled = mutationsEnabled
                 )
             }
         }
@@ -1282,7 +1266,7 @@ private fun StorySegments(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(start = 50.dp, bottom = 2.dp)
                     )
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
                         ProfileImageAvatar(
                             repository = profileImageRepository,
                             kind = if (isPrimary) ProfileImageKind.CHARACTER else ProfileImageKind.NPC,
@@ -1297,7 +1281,7 @@ private fun StorySegments(
                             shape = RoundedCornerShape(16.dp, 16.dp, 16.dp, 0.dp),
                             color = semanticColors.characterBubble,
                             tonalElevation = 1.dp,
-                            modifier = Modifier.fillMaxWidth(0.76f)
+                            modifier = Modifier.weight(1f, fill = false).testTag("story_message_bubble_$index")
                         ) {
                             MarkdownText(
                                 markdown = segment.content,
@@ -1491,7 +1475,7 @@ fun StreamingBubble(
             color = MaterialTheme.colorScheme.primary,
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
         )
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
             ProfileImageAvatar(
                 repository = profileImageRepository,
                 kind = ProfileImageKind.CHARACTER,
@@ -1506,7 +1490,7 @@ fun StreamingBubble(
                 shape = RoundedCornerShape(16.dp, 16.dp, 16.dp, 0.dp),
                 color = MaterialTheme.colorScheme.surfaceVariant,
                 tonalElevation = 1.dp,
-                modifier = Modifier.fillMaxWidth(0.70f)
+                modifier = Modifier.weight(1f, fill = false).testTag("streaming_message_bubble")
             ) {
                 MarkdownText(
                     markdown = content,
