@@ -1,6 +1,11 @@
 package com.example.ui.screens
 
 import android.graphics.BitmapFactory
+import android.Manifest
+import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.core.content.ContextCompat
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.result.PickVisualMediaRequest
@@ -41,12 +46,14 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.viewmodel.compose.LocalViewModelStoreOwner
 import com.example.data.model.MessageEntity
 import com.example.data.model.SpeakerType
 import com.example.data.model.ChatType
@@ -86,7 +93,15 @@ fun ChatDetailScreen(
     onNavigateToNpcBank: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    // Navigation ordinarily destroys a screen-scoped ViewModel on exit. Use one application-
+    // owned store per chat so switching chats cannot cancel a pending provider response.
+    val navigationOwner = checkNotNull(LocalViewModelStoreOwner.current)
+    val retainedStores = appContainer.retainedChatViewModelStores
+    val chatOwner = remember(chatId, retainedStores, navigationOwner) {
+        retainedStores?.ownerFor(chatId) ?: navigationOwner
+    }
     val viewModel: ChatDetailViewModel = viewModel(
+        viewModelStoreOwner = chatOwner,
         factory = ChatDetailViewModel.Factory(
             chatId = chatId,
             chatRepository = appContainer.chatRepository,
@@ -103,9 +118,35 @@ fun ChatDetailScreen(
             messageAttachmentRepository = appContainer.messageAttachmentRepository,
             scenarioRepository = appContainer.scenarioRepository,
             npcRepository = appContainer.npcRepository,
-            npcOutputParser = appContainer.npcOutputParser
+            npcOutputParser = appContainer.npcOutputParser,
+            generationLifecycle = appContainer.generationNotifications
         )
     )
+
+    DisposableEffect(chatId, retainedStores, viewModel) {
+        retainedStores?.onAttached(chatId, viewModel::hasPendingGenerationWork)
+        appContainer.generationNotifications?.dismissReady(chatId)
+        onDispose { retainedStores?.onDetached(chatId) }
+    }
+
+    val context = LocalContext.current
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { /* Notification denial never blocks generation. */ }
+    val askForNotificationPermissionOnce = {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
+                PackageManager.PERMISSION_GRANTED
+        ) {
+            val preferences = context.getSharedPreferences(
+                "elsewhere_reply_notifications", Context.MODE_PRIVATE
+            )
+            if (!preferences.getBoolean("permission_asked", false)) {
+                preferences.edit().putBoolean("permission_asked", true).apply()
+                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+    }
 
     val uiState by viewModel.uiState.collectAsState()
     val npcFlow = remember(chatId, appContainer.npcRepository) {
@@ -128,6 +169,7 @@ fun ChatDetailScreen(
 
     LaunchedEffect(uiState) {
         if (uiState is ChatUiState.Deleted) {
+            retainedStores?.forget(chatId)
             onChatDeleted()
         }
     }
@@ -296,8 +338,14 @@ fun ChatDetailScreen(
                                     mutationsEnabled = !state.isGenerating &&
                                         !state.partialStopped && !state.partialResolutionInProgress,
                                     onSwitchVariant = { msgId -> viewModel.switchVariant(group.primaryMessage.variantGroupId ?: group.primaryMessage.messageId, msgId) },
-                                    onRegenerate = { viewModel.regenerateMessage(it) },
-                                    onContinue = { viewModel.continueMessage(it) },
+                                    onRegenerate = {
+                                        askForNotificationPermissionOnce()
+                                        viewModel.regenerateMessage(it)
+                                    },
+                                    onContinue = {
+                                        askForNotificationPermissionOnce()
+                                        viewModel.continueMessage(it)
+                                    },
                                     onCopy = { content ->
                                         clipboardManager.setText(AnnotatedString(content))
                                         coroutineScope.launch {
@@ -459,6 +507,7 @@ fun ChatDetailScreen(
                                             (!isGroup && state.messages.lastOrNull()?.speakerType == SpeakerType.PERSONA)
                                         IconButton(
                                             onClick = {
+                                                askForNotificationPermissionOnce()
                                                 if (draft.isNotBlank() || state.draftAttachments.isNotEmpty()) viewModel.sendMessage()
                                                 else if (!isGroup) viewModel.retryGeneration()
                                             },

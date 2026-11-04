@@ -14,6 +14,7 @@ import com.example.data.model.PersonaEntity
 import com.example.data.model.ResponseLengthProfile
 import com.example.data.model.SpeakerType
 import com.example.domain.compiler.ContextCompilerV1
+import com.example.domain.generation.GenerationLifecycleReporter
 import com.example.domain.memory.AutomaticMemoryManager
 import com.example.domain.memory.ContextResetPolicy
 import com.example.domain.coop.CoopGenerationCommand
@@ -160,7 +161,8 @@ class ChatDetailViewModel(
     private val npcOutputParser: NpcStructuredOutputParser? = null,
     private val dataCoordinator: AppDataMaintenanceCoordinator = AppDataMaintenanceCoordinator.Global,
     private val scenarioRepository: com.example.domain.repository.ScenarioRepository? = null,
-    private val storyOutputParserFactory: () -> StoryOutputParser = ::StoryOutputParser
+    private val storyOutputParserFactory: () -> StoryOutputParser = ::StoryOutputParser,
+    private val generationLifecycle: GenerationLifecycleReporter? = null
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow<ChatUiState>(ChatUiState.Loading)
@@ -969,11 +971,15 @@ class ChatDetailViewModel(
             coLeadRebalanceActive = prepared.coLeadRebalanceActive
         )
         
+        runCatching {
+            generationLifecycle?.started(chatId, chatSummary?.chat?.displayName ?: "Chat")
+        }
         generationJob = viewModelScope.launch {
             // Generation preparation is complete once the provider job starts. Clear this before
             // any terminal UI state can be published so an immediately tapped Retry is not lost.
             generationStartInProgress = false
             try {
+                try {
                 modelProvider.streamResponse(prepared.messages, prepared.options).collect { event ->
                     when (event) {
                         is StreamEvent.Content -> {
@@ -1089,6 +1095,9 @@ class ChatDetailViewModel(
                     wasUserStopped = false,
                     errorMessage = "The response could not be processed safely. Generated text was retained so you can keep or discard it."
                 )
+            }
+            } finally {
+                runCatching { generationLifecycle?.finished(chatId) }
             }
         }
     }
@@ -1595,6 +1604,16 @@ class ChatDetailViewModel(
                         ?: npcUpdateWarning
                 )
             }
+            if (syncError == null && completionError == null && !isCoopGeneration &&
+                !retainPartialOnCoopFailure && metadata?.isPartial != true
+            ) {
+                runCatching {
+                    generationLifecycle?.replySaved(
+                        chatId, chatSummary?.chat?.displayName ?: "Chat",
+                        character.displayName, continuedMessage.messageId
+                    )
+                }
+            }
             refreshChatTimestamp(dataRevision)
             return syncError == null && completionError == null
         }
@@ -1752,6 +1771,16 @@ class ChatDetailViewModel(
                 // The reply is already saved. Never lose it over a counter update.
             }
         }
+        if (syncError == null && completionError == null && !isCoopGeneration &&
+            !retainPartialOnCoopFailure && metadata?.isPartial != true
+        ) {
+            runCatching {
+                generationLifecycle?.replySaved(
+                    chatId, chatSummary?.chat?.displayName ?: "Chat",
+                    character.displayName, botMsg.messageId
+                )
+            }
+        }
         refreshChatTimestamp(dataRevision)
         return syncError == null && completionError == null
     }
@@ -1805,6 +1834,18 @@ class ChatDetailViewModel(
             activeCoopGenerationExecutionId = null
         }
         return error
+    }
+
+    /**
+     * Navigation must not destroy a chat's generation job, unsaved send, or unresolved partial.
+     * The application-scoped ViewModel owner consults this before releasing a hidden chat.
+     */
+    fun hasPendingGenerationWork(): Boolean {
+        val state = _uiState.value as? ChatUiState.Success
+        return sendInProgress || generationStartInProgress ||
+            sendJob?.isActive == true || generationJob?.isActive == true ||
+            state?.isGenerating == true || state?.partialStopped == true ||
+            partialResolutionInProgress || inChatToolInProgress
     }
 
     fun stopGeneration() {
@@ -2233,7 +2274,8 @@ class ChatDetailViewModel(
         private val messageAttachmentRepository: MessageAttachmentRepository? = null,
         private val npcRepository: NpcRepository? = null,
         private val npcOutputParser: NpcStructuredOutputParser? = null,
-        private val scenarioRepository: com.example.domain.repository.ScenarioRepository? = null
+        private val scenarioRepository: com.example.domain.repository.ScenarioRepository? = null,
+        private val generationLifecycle: GenerationLifecycleReporter? = null
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
@@ -2244,7 +2286,8 @@ class ChatDetailViewModel(
                 messageAttachmentRepository,
                 npcRepository,
                 npcOutputParser,
-                scenarioRepository = scenarioRepository
+                scenarioRepository = scenarioRepository,
+                generationLifecycle = generationLifecycle
             ) as T
         }
     }

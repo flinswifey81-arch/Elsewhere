@@ -26,6 +26,7 @@ import com.example.data.model.ProviderRoutingMode
 import com.example.data.model.RoleplayMemoryEntity
 import com.example.data.model.ResponseLengthProfile
 import com.example.data.model.SpeakerType
+import com.example.domain.generation.GenerationLifecycleReporter
 import com.example.domain.provider.GenerationOptions
 import com.example.domain.provider.ModelProvider
 import com.example.domain.provider.OpenRouterModel
@@ -126,6 +127,16 @@ class ChatDetailGenerationTest {
         )
 
         val provider = RecordingStreamingProvider()
+        val savedReplyIds = mutableListOf<String>()
+        val generationEvents = object : GenerationLifecycleReporter {
+            override fun started(chatId: String, chatTitle: String) {}
+            override fun replySaved(
+                chatId: String, chatTitle: String, speakerName: String, messageId: String
+            ) {
+                savedReplyIds.add(messageId)
+            }
+            override fun finished(chatId: String) {}
+        }
         val viewModel = viewModels.create(ChatDetailViewModel::class.java) {
             ChatDetailViewModel(
                 chatId,
@@ -135,7 +146,8 @@ class ChatDetailGenerationTest {
                 personaRepository,
                 provider,
                 memoryRepository,
-                dataCoordinator = dataCoordinator
+                dataCoordinator = dataCoordinator,
+                generationLifecycle = generationEvents
             )
         }
         withTimeout(15_000) { viewModel.uiState.first { it is ChatUiState.Success } }
@@ -187,6 +199,9 @@ class ChatDetailGenerationTest {
         assertEquals(1, continuationRequest.count { it.role == Role.USER })
         assertEquals(1, continuationRequest.count { it.role == Role.ASSISTANT })
         assertTrue(continuationRequest.last().content.contains("Continue the previous message"))
+        withTimeout(5_000) { while (savedReplyIds.size < 2) yield() }
+        // A saved Continue updates the existing message instead of inventing a new chat turn.
+        assertEquals(listOf(persisted.last().messageId, persisted.last().messageId), savedReplyIds)
     }
 
     @Test
