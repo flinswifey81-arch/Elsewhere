@@ -327,6 +327,7 @@ fun WorldsScreen(
                             }
                         ) { Text("Export World Definition JSON") }
                         if (archiveTransfer != null) {
+                            WorldArchiveChatLinks(repository, archiveTransfer, selected)
                             WorldArchiveControls(archiveTransfer, selected, onImported = { selectedId = it })
                         }
                         Text("Definition JSON excludes episode history. Encrypted World archives include chat history and files when available in Elsewhere Test.",
