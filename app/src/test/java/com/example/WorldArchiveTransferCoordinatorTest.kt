@@ -117,11 +117,10 @@ class WorldArchiveTransferCoordinatorTest {
         ))
         val output = ByteArrayOutputStream()
         val password = "a secure world password".toCharArray()
-        assertThrows(IllegalArgumentException::class.java) {
-            runBlocking {
-                transfer.exportReviewed(approved, output, password, includePrivateMaterial = false)
-            }
+        val failedExport = runCatching {
+            transfer.exportReviewed(approved, output, password, includePrivateMaterial = false)
         }
+        assertTrue(failedExport.exceptionOrNull() is IllegalArgumentException)
         assertEquals(0, output.size())
         assertTrue(password.all { it == '\u0000' })
     }
