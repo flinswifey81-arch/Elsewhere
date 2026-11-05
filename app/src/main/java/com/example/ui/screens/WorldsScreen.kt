@@ -5,6 +5,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.ui.platform.LocalContext
 import com.example.domain.world.WorldDefinitionCodec
+import com.example.domain.world.WorldArchiveTransferCoordinator
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -35,7 +36,10 @@ import kotlinx.coroutines.launch
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun WorldsScreen(repository: WorldRepository) {
+fun WorldsScreen(
+    repository: WorldRepository,
+    archiveTransfer: WorldArchiveTransferCoordinator? = null
+) {
     val worlds by repository.observeWorlds().collectAsState(initial = emptyList())
     val scope = rememberCoroutineScope()
 
@@ -255,7 +259,7 @@ fun WorldsScreen(repository: WorldRepository) {
                 item {
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Text("A World organizes its setting, recurring cast and continuity independently of any one chat or episode.")
-                        Text("Selective World JSON and archive imports/exports are not available yet. Use Settings → Local backup & restore for experimental data.",
+                        Text("World definitions and complete encrypted history archives are different formats. The full-history archive workflow is currently available only in Elsewhere Test.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Button(onClick = {
@@ -274,6 +278,9 @@ fun WorldsScreen(repository: WorldRepository) {
                             }) { Text("Import file") }
                         }
                     }
+                }
+                if (archiveTransfer != null) item(key = "archive_import") {
+                    WorldArchiveControls(archiveTransfer, world = null, onImported = { selectedId = it })
                 }
                 if (worlds.isEmpty()) item { Text("No Worlds yet. Create your first setting by hand.") }
                 items(worlds, key = { it.worldId }) { world ->
@@ -319,7 +326,10 @@ fun WorldsScreen(repository: WorldRepository) {
                                 }
                             }
                         ) { Text("Export World Definition JSON") }
-                        Text("Definition JSON excludes episode history. Use encrypted full-app backups until complete World archives are available.",
+                        if (archiveTransfer != null) {
+                            WorldArchiveControls(archiveTransfer, selected, onImported = { selectedId = it })
+                        }
+                        Text("Definition JSON excludes episode history. Encrypted World archives include chat history and files when available in Elsewhere Test.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
