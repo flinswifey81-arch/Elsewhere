@@ -141,7 +141,7 @@ fun WorldArchiveControls(
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("Encrypted World archives · Elsewhere Test",
+        Text("Encrypted World archives · Worlds Preview",
             style = MaterialTheme.typography.titleSmall)
         Text(
             "Experimental: exports attached chats and variants with their World. " +
@@ -237,7 +237,7 @@ fun WorldArchiveControls(
                         singleLine = true, enabled = !busy
                     )
                     Text(
-                        "Keep Elsewhere Test open during export. If the World changes, " +
+                        "Keep Worlds Preview open during export. If the World changes, " +
                             "export will stop rather than save an out-of-date preview.",
                         style = MaterialTheme.typography.bodySmall
                     )
@@ -362,7 +362,7 @@ fun WorldArchiveControls(
                         visualTransformation = PasswordVisualTransformation(),
                         singleLine = true, enabled = !busy
                     )
-                    Text("Keep Elsewhere Test open while importing.",
+                    Text("Keep Worlds Preview open while importing.",
                         style = MaterialTheme.typography.bodySmall)
                 }
             },
