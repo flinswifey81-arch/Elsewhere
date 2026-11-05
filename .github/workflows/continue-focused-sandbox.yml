@@ -42,6 +42,10 @@ jobs:
             --tests com.example.ChatDetailGenerationTest.streamedResponseIsPersistedAndCompiledContextIncludesMemory \
             --tests com.example.ChatDetailGenerationTest.structuredContinueAppendsToTheSameLogicalResponseWithoutRepeatingSegments \
             --tests com.example.ChatDetailGenerationTest.continueFromCharacterGreetingNeedsNoPersonaTurn \
+            --tests com.example.ChatDetailGenerationTest.malformedNarratedOutputIsSavedWithoutExposingControlMarkers \
+            --tests com.example.OpenRouterModelProviderTest.lateConnectionFailureAfterStopDoesNotMarkFinishedAnswerIncomplete \
+            --tests com.example.OpenRouterModelProviderTest.brokenConnectionBeforeFinishKeepsReceivedTextButReportsIncomplete \
+            --tests com.example.OpenRouterModelProviderTest.cleanConnectionCloseWithoutTerminalEvidenceIsNotSuccessful \
             --tests com.example.ChatDetailGenerationTest.retryAndRegenerateReuseOriginImageWhileContinueDoesNotResendIt \
             --tests com.example.LocalGroupGenerationTest.groupRetryRegenerateAndContinueKeepSelectedSpeakerAndNonPersistedDirectorTurn \
             --tests com.example.LocalGroupGenerationTest.groupCharactersAndRegenerationReuseOriginImageButContinueDoesNot \
