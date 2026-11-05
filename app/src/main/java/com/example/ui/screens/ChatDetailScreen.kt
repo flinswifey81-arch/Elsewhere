@@ -443,6 +443,29 @@ fun ChatDetailScreen(
                                     }
                                 }
                             }
+                            state.generationWarning?.let { warning ->
+                                Surface(
+                                    color = MaterialTheme.colorScheme.secondaryContainer,
+                                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            Icons.Filled.Info,
+                                            contentDescription = null,
+                                            modifier = Modifier.padding(end = 8.dp)
+                                        )
+                                        Text(
+                                            warning,
+                                            modifier = Modifier.weight(1f),
+                                            style = MaterialTheme.typography.bodySmall
+                                        )
+                                    }
+                                }
+                            }
                             Surface(
                                 color = MaterialTheme.colorScheme.surface,
                                 tonalElevation = 3.dp,
