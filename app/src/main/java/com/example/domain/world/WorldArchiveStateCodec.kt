@@ -197,6 +197,7 @@ object WorldArchiveStateCodec {
             "Portable World chat settings cannot depend on another device's global engine defaults"
         }
         requireScoped(state.conversationSummaries, chats, "Conversation summaries") { it.chatId }
+        val chatById = state.chats.associateBy { it.chatId }
         val settingsByChat = state.chatSettings.associateBy { it.chatId }
         val sessionsByChat = state.scenarioSessions.associateBy { it.chatId }
         require(state.chats.all { chat ->
@@ -204,7 +205,7 @@ object WorldArchiveStateCodec {
                 (chat.chatType != ChatType.SCENARIO || chat.chatId in sessionsByChat)
         }) { "Selected chat is missing settings or its Scenario snapshot" }
         require(state.scenarioSessions.all { session ->
-            state.chats.any { it.chatId == session.chatId && it.chatType == ChatType.SCENARIO }
+            chatById[session.chatId]?.chatType == ChatType.SCENARIO
         }) { "Scenario session is linked to a non-Scenario chat" }
 
         requireScoped(state.messages, chats, "Messages") { it.chatId }
