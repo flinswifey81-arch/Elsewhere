@@ -23,6 +23,7 @@ import com.example.domain.coop.AndroidCoopParticipantIdentityStore
 import com.example.domain.npc.NpcStructuredOutputParser
 import com.example.domain.backup.BackupRepository
 import com.example.domain.world.WorldArchiveAdditiveRestorer
+import com.example.domain.world.WorldArchiveTransferCoordinator
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 
@@ -46,6 +47,7 @@ interface AppContainer {
     val npcOutputParser: NpcStructuredOutputParser? get() = null
     val backupRepository: BackupRepository? get() = null
     val worldArchiveRestorer: WorldArchiveAdditiveRestorer? get() = null
+    val worldArchiveTransfer: WorldArchiveTransferCoordinator? get() = null
 }
 
 class DefaultAppContainer(private val context: Context) : AppContainer {
@@ -85,6 +87,13 @@ class DefaultAppContainer(private val context: Context) : AppContainer {
 
     override val worldArchiveRestorer by lazy {
         WorldArchiveAdditiveRestorer(database, context.filesDir, dataCoordinator)
+    }
+
+    override val worldArchiveTransfer by lazy {
+        WorldArchiveTransferCoordinator(
+            context, database, messageAttachmentRepository, profileImageRepository,
+            worldArchiveRestorer, dataCoordinator
+        )
     }
 
     override val scenarioRepository by lazy { com.example.domain.repository.ScenarioRepository(database, dataCoordinator) }
