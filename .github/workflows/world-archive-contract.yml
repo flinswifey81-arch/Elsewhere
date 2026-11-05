@@ -6,6 +6,7 @@ on:
       - feature/worlds-foundation-2026-11-01
       - feature/world-archive-manifest-contract-2026-11-05
       - feature/world-archive-history-closure-2026-11-05
+      - feature/world-archive-encrypted-io-2026-11-05
       - main
   workflow_dispatch:
 
