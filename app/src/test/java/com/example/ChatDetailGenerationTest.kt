@@ -184,9 +184,43 @@ class ChatDetailGenerationTest {
         }
         assertEquals(2, continuedMessages.size)
         val continuationRequest = provider.requests.last()
-        assertEquals(1, continuationRequest.count { it.role == Role.USER })
+        assertEquals(2, continuationRequest.count { it.role == Role.USER })
         assertEquals(1, continuationRequest.count { it.role == Role.ASSISTANT })
+        assertEquals(Role.USER, continuationRequest.last().role)
+        assertTrue(continuationRequest.last().content.startsWith("[DIRECTOR TURN CONTROL"))
         assertTrue(continuationRequest.last().content.contains("Continue the previous message"))
+        assertTrue(continuationRequest.last().content.contains("Do not invent dialogue"))
+        assertFalse(continuationRequest.drop(1).any { it.role == Role.SYSTEM })
+    }
+
+    @Test
+    fun continueFromCharacterGreetingNeedsNoPersonaTurn() = runBlocking {
+        val provider = SequentialResponseProvider(listOf(" And then the door opened."))
+        val harness = createHarness(
+            provider = provider,
+            responseLengthProfile = ResponseLengthProfile.NORMAL,
+            initialStoredCharacterContent = "The door closed."
+        )
+        val greeting = harness.messageRepository.getMessagesForChatOnce(harness.chatId).single()
+        assertEquals(SpeakerType.CHARACTER, greeting.speakerType)
+
+        harness.viewModel.continueMessage(greeting.messageId)
+
+        val continued = withTimeout(15_000) {
+            harness.messageRepository.getMessagesForChat(harness.chatId).first { messages ->
+                messages.size == 1 &&
+                    messages.single().messageId == greeting.messageId &&
+                    messages.single().content.contains("And then the door opened.")
+            }
+        }
+        assertEquals(1, continued.size)
+        assertEquals(0, continued.count { it.speakerType == SpeakerType.PERSONA })
+        assertEquals(1, provider.requests.size)
+        val prompt = provider.requests.single()
+        assertEquals(Role.ASSISTANT, prompt[prompt.lastIndex - 1].role)
+        assertEquals(Role.USER, prompt.last().role)
+        assertTrue(prompt.last().content.startsWith("[DIRECTOR TURN CONTROL"))
+        assertFalse(prompt.drop(1).any { it.role == Role.SYSTEM })
     }
 
     @Test
