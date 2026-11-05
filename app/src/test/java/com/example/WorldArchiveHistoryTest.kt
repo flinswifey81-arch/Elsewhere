@@ -167,6 +167,7 @@ class WorldArchiveHistoryTest {
             first.variantGroupId(reply.messageId))
         assertEquals(first.get(WorldArchiveIdKind.MESSAGE, reply.messageId),
             first.metadataMessageId(reply.messageId))
+        assertNotEquals("memory-1", first.get(WorldArchiveIdKind.MEMORY, "memory-1"))
         assertNotEquals(first.get(WorldArchiveIdKind.MESSAGE, alternate.messageId),
             first.variantGroupId(reply.messageId))
         assertThrows(IllegalArgumentException::class.java) {
@@ -297,6 +298,33 @@ class WorldArchiveHistoryTest {
         assertThrows(IllegalArgumentException::class.java) {
             WorldArchiveSnapshotSelector.select(
                 sourcePayload().copy(coopRooms = listOf(room)), world.worldId
+            )
+        }
+    }
+
+    @Test
+    fun selectorFreezesInheritedEnginePreferencesWithoutModifyingAppDefaults() {
+        val source = sourcePayload().copy(
+            chatSettings = listOf(ChatSettingsEntity(
+                chatId = chat.chatId, useGlobalEngineDefaults = true
+            )),
+            engineDefaults = listOf(EngineDefaultsEntity(
+                selectedModelId = "selected/user-model", temperature = 0.7f
+            ))
+        )
+        val state = WorldArchiveSnapshotSelector.select(source, world.worldId)
+        assertEquals("selected/user-model", state.chatSettings.single().selectedModelId)
+        assertEquals(0.7f, state.chatSettings.single().temperature ?: 0f, 0.001f)
+        assertFalse(state.chatSettings.single().useGlobalEngineDefaults)
+        assertTrue(source.chatSettings.single().useGlobalEngineDefaults)
+        assertThrows(IllegalArgumentException::class.java) {
+            WorldArchiveSnapshotSelector.select(source.copy(engineDefaults = emptyList()), world.worldId)
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            WorldArchiveStateCodec.validate(
+                state.copy(chatSettings = listOf(ChatSettingsEntity(
+                    chatId = chat.chatId, useGlobalEngineDefaults = true
+                )))
             )
         }
     }
