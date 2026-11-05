@@ -39,6 +39,20 @@ class WorldArchiveEncryptedIO(private val workingRoot: File) {
         val assetFiles: Map<String, File>,
         private val directory: File
     ) : Closeable {
+        fun preview(): WorldArchiveImportPreview =
+            WorldArchiveImportPreview.from(state, manifest)
+
+        /**
+         * Creates the proposed *new World* identity plan after authentication.
+         * This neither writes records nor merges anyone with an existing namesake.
+         * The future Room restore must recheck live destination IDs transactionally.
+         */
+        fun planNewWorldImport(
+            namespace: String,
+            reservedIds: Map<WorldArchiveIdKind, Set<String>> = emptyMap()
+        ): WorldArchiveIdRemapPlan =
+            WorldArchiveIdPlanner.plan(state, namespace, reservedIds)
+
         override fun close() {
             directory.deleteRecursively()
         }
