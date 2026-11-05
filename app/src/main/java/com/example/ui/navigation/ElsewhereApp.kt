@@ -171,7 +171,7 @@ fun ElsewhereApp(container: AppContainer) {
                 } else {
                     WorldsScreen(
                         repository = repository,
-                        archiveTransfer = if (BuildConfig.APPLICATION_ID.endsWith(".test"))
+                        archiveTransfer = if (BuildConfig.WORLD_ARCHIVE_PREVIEW)
                             container.worldArchiveTransfer else null
                     )
                 }
