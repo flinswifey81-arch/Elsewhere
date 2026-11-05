@@ -48,12 +48,12 @@ jobs:
             --tests com.example.WorldRepositoryTest \
             --tests com.example.AppDatabaseMigrationTest
 
-      - name: Assemble Elsewhere Test APK for archive preview
-        run: bash ./gradlew :app:assembleSandbox --no-daemon
-      - name: Publish sandbox APK (never production)
+      - name: Assemble separate Worlds Preview APK
+        run: bash ./gradlew :app:assembleWorldsPreview --no-daemon
+      - name: Publish isolated Worlds Preview APK (never production or existing Test)
         uses: actions/upload-artifact@v4
         with:
-          name: Elsewhere-Test-World-Archives-Preview
-          path: app/build/outputs/apk/sandbox/app-sandbox.apk
+          name: Elsewhere-Worlds-Preview-Isolated-APK
+          path: app/build/outputs/apk/worldsPreview/*.apk
           if-no-files-found: error
           retention-days: 14
