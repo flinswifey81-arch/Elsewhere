@@ -136,6 +136,9 @@ class WorldArchiveTransferCoordinator(
                 val fingerprint = copyAndHashBounded(input, file)
                 val namespace = "elsewhere-world-import-${UUID.randomUUID()}"
                 val preview = archiveIO.inspectEncrypted(file.inputStream(), passphrase).use {
+                    require(it.manifest.entries.none { entry ->
+                        entry.kind == WorldArchiveEntryKind.NPC_PORTRAIT
+                    }) { "This World has NPC portrait files not yet supported by the importer." }
                     val mapped = WorldArchiveSemanticRemapper.rewrite(
                         it.state, it.planNewWorldImport(namespace)
                     )
