@@ -536,7 +536,7 @@ class OpenRouterModelProviderTest {
 
             data: {"choices":[{"delta":{},"finish_reason":"stop"}]}
 
-        """.trimIndent()
+        """.trimIndent() + "\n\n"
         val provider = OpenRouterModelProvider(
             client = OkHttpClient.Builder().addInterceptor(FailingAfterEventsInterceptor(sse)).build(),
             moshi = Moshi.Builder().build(),
@@ -560,7 +560,7 @@ class OpenRouterModelProviderTest {
         val sse = """
             data: {"choices":[{"delta":{"content":"Only a partial reply"},"finish_reason":null}]}
 
-        """.trimIndent()
+        """.trimIndent() + "\n\n"
         val provider = OpenRouterModelProvider(
             client = OkHttpClient.Builder().addInterceptor(FailingAfterEventsInterceptor(sse)).build(),
             moshi = Moshi.Builder().build(),
@@ -584,7 +584,7 @@ class OpenRouterModelProviderTest {
         val sse = """
             data: {"choices":[{"delta":{"content":"Maybe unfinished"},"finish_reason":null}]}
 
-        """.trimIndent()
+        """.trimIndent() + "\n\n"
         val provider = OpenRouterModelProvider(
             client = OkHttpClient.Builder().addInterceptor(StreamingInterceptor(sse)).build(),
             moshi = Moshi.Builder().build(),
