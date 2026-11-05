@@ -196,9 +196,13 @@ class ChatDetailGenerationTest {
         }
         assertEquals(2, continuedMessages.size)
         val continuationRequest = provider.requests.last()
-        assertEquals(1, continuationRequest.count { it.role == Role.USER })
+        assertEquals(2, continuationRequest.count { it.role == Role.USER })
         assertEquals(1, continuationRequest.count { it.role == Role.ASSISTANT })
+        assertEquals(Role.USER, continuationRequest.last().role)
+        assertTrue(continuationRequest.last().content.startsWith("[DIRECTOR TURN CONTROL"))
         assertTrue(continuationRequest.last().content.contains("Continue the previous message"))
+        assertTrue(continuationRequest.last().content.contains("Do not invent dialogue"))
+        assertFalse(continuationRequest.drop(1).any { it.role == Role.SYSTEM })
         withTimeout(5_000) { while (savedReplyIds.size < 2) yield() }
         // A saved Continue updates the existing message instead of inventing a new chat turn.
         assertEquals(listOf(persisted.last().messageId, persisted.last().messageId), savedReplyIds)
