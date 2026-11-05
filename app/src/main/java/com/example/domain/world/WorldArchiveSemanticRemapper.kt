@@ -120,7 +120,8 @@ object WorldArchiveSemanticRemapper {
         }
 
         val freshWorldId = id(WorldArchiveIdKind.WORLD, source.worldId)
-        val oldNpcIds = source.npcDossiers.map { it.npcId }.toSet()
+        val npcOwnerById = source.npcDossiers.associate { it.npcId to it.chatId }
+        val oldNpcIds = npcOwnerById.keys
         val selectedChatIds = source.chats.map { it.chatId }.toSet()
         fun content(originalChat: String, raw: String): String {
             if (!StoryResponseCodec.isEncoded(raw)) return raw
@@ -150,6 +151,9 @@ object WorldArchiveSemanticRemapper {
                     speakerId = when (segment.type) {
                         StorySegmentType.CHARACTER -> id(WorldArchiveIdKind.CHARACTER, speaker)
                         StorySegmentType.NPC -> if (speaker in oldNpcIds) {
+                            require(npcOwnerById[speaker] == originalChat) {
+                                "Structured NPC speaker refers to a dossier from another chat"
+                            }
                             id(WorldArchiveIdKind.NPC_DOSSIER, speaker)
                         } else {
                             // An unbanked scene speaker is scoped to its original chat, not
