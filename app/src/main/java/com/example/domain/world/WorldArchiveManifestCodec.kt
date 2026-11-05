@@ -70,14 +70,20 @@ object WorldArchiveManifestCodec {
 
     fun parse(json: String): WorldArchiveManifestV1 {
         require(json.length in 1..MAX_MANIFEST_CHARS) { "World archive manifest is empty or oversized" }
-        val parsed = requireNotNull(adapter.fromJson(json)) { "World archive manifest is empty" }
+        val parsed = try {
+            adapter.fromJson(json)
+        } catch (failure: Exception) {
+            throw IllegalArgumentException("World archive manifest is malformed or has unknown fields", failure)
+        } ?: throw IllegalArgumentException("World archive manifest is empty")
         validate(parsed)
         return parsed
     }
 
     fun encode(manifest: WorldArchiveManifestV1): String {
         validate(manifest)
-        return adapter.toJson(manifest)
+        val json = adapter.toJson(manifest)
+        require(json.length <= MAX_MANIFEST_CHARS) { "World archive manifest is oversized" }
+        return json
     }
 
     fun validate(manifest: WorldArchiveManifestV1) {
