@@ -14,6 +14,7 @@ import com.example.data.model.PersonaEntity
 import com.example.data.model.ResponseLengthProfile
 import com.example.data.model.SpeakerType
 import com.example.domain.compiler.ContextCompilerV1
+import com.example.domain.generation.GenerationLifecycleReporter
 import com.example.domain.memory.AutomaticMemoryManager
 import com.example.domain.memory.ContextResetPolicy
 import com.example.domain.coop.CoopGenerationCommand
@@ -139,6 +140,7 @@ sealed class ChatUiState {
         val partialResolutionInProgress: Boolean = false,
         val generationDetails: com.example.ui.screens.GenerationDetailsState = com.example.ui.screens.GenerationDetailsState(),
         val generationError: String? = null,
+        val generationWarning: String? = null,
         val inChatToolStatus: InChatToolStatus? = null,
         val attachments: List<MessageAttachmentEntity> = emptyList(),
         val draftAttachments: List<MessageAttachmentEntity> = emptyList()
@@ -160,7 +162,8 @@ class ChatDetailViewModel(
     private val npcOutputParser: NpcStructuredOutputParser? = null,
     private val dataCoordinator: AppDataMaintenanceCoordinator = AppDataMaintenanceCoordinator.Global,
     private val scenarioRepository: com.example.domain.repository.ScenarioRepository? = null,
-    private val storyOutputParserFactory: () -> StoryOutputParser = ::StoryOutputParser
+    private val storyOutputParserFactory: () -> StoryOutputParser = ::StoryOutputParser,
+    private val generationLifecycle: GenerationLifecycleReporter? = null
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow<ChatUiState>(ChatUiState.Loading)
@@ -625,7 +628,7 @@ class ChatDetailViewModel(
             }
 
             sendInProgress = false
-            updateSuccessState { it.copy(generationError = null) }
+            updateSuccessState { it.copy(generationError = null, generationWarning = null) }
             if (summary.chat.chatType == ChatType.GROUP) {
                 dataCoordinator.withMutation(dataRevision) {
                     chatRepository.updateChat(summary.chat.copy(updatedAt = System.currentTimeMillis()))
@@ -947,6 +950,7 @@ class ChatDetailViewModel(
                 partialStopped = false,
                 partialResolutionInProgress = false,
                 generationError = null,
+                generationWarning = null,
                 generationCharacterId = fullCharacter.characterId
             )
         }
@@ -969,11 +973,15 @@ class ChatDetailViewModel(
             coLeadRebalanceActive = prepared.coLeadRebalanceActive
         )
         
+        runCatching {
+            generationLifecycle?.started(chatId, chatSummary?.chat?.displayName ?: "Chat")
+        }
         generationJob = viewModelScope.launch {
             // Generation preparation is complete once the provider job starts. Clear this before
             // any terminal UI state can be published so an immediately tapped Retry is not lost.
             generationStartInProgress = false
             try {
+                try {
                 modelProvider.streamResponse(prepared.messages, prepared.options).collect { event ->
                     when (event) {
                         is StreamEvent.Content -> {
@@ -1089,6 +1097,9 @@ class ChatDetailViewModel(
                     wasUserStopped = false,
                     errorMessage = "The response could not be processed safely. Generated text was retained so you can keep or discard it."
                 )
+            }
+            } finally {
+                runCatching { generationLifecycle?.finished(chatId) }
             }
         }
     }
@@ -1591,9 +1602,19 @@ class ChatDetailViewModel(
                     isGenerating = false,
                     streamingContent = null,
                     generationCharacterId = null,
-                    generationError = syncError?.let { "The approved continuation could not be confirmed by the room: ${it.message}" }
-                        ?: npcUpdateWarning
+                    generationError = syncError?.let { "The approved continuation could not be confirmed by the room: ${it.message}" },
+                    generationWarning = if (syncError == null) npcUpdateWarning else null
                 )
+            }
+            if (syncError == null && completionError == null && !isCoopGeneration &&
+                !retainPartialOnCoopFailure && metadata?.isPartial != true
+            ) {
+                runCatching {
+                    generationLifecycle?.replySaved(
+                        chatId, chatSummary?.chat?.displayName ?: "Chat",
+                        character.displayName, continuedMessage.messageId
+                    )
+                }
             }
             refreshChatTimestamp(dataRevision)
             return syncError == null && completionError == null
@@ -1733,8 +1754,8 @@ class ChatDetailViewModel(
                 isGenerating = false,
                 streamingContent = null,
                 generationCharacterId = null,
-                generationError = syncError?.let { "The approved response could not be confirmed by the room: ${it.message}" }
-                    ?: memoryWarning
+                generationError = syncError?.let { "The approved response could not be confirmed by the room: ${it.message}" },
+                generationWarning = if (syncError == null) memoryWarning else null
             )
         }
         
@@ -1750,6 +1771,16 @@ class ChatDetailViewModel(
                 throw cancellation
             } catch (_: Exception) {
                 // The reply is already saved. Never lose it over a counter update.
+            }
+        }
+        if (syncError == null && completionError == null && !isCoopGeneration &&
+            !retainPartialOnCoopFailure && metadata?.isPartial != true
+        ) {
+            runCatching {
+                generationLifecycle?.replySaved(
+                    chatId, chatSummary?.chat?.displayName ?: "Chat",
+                    character.displayName, botMsg.messageId
+                )
             }
         }
         refreshChatTimestamp(dataRevision)
@@ -1768,7 +1799,7 @@ class ChatDetailViewModel(
         } catch (_: Exception) {
             updateSuccessState { state ->
                 state.copy(
-                    generationError = state.generationError
+                    generationWarning = state.generationWarning
                         ?: "The response was saved, but the chat's updated time could not be refreshed."
                 )
             }
@@ -1805,6 +1836,18 @@ class ChatDetailViewModel(
             activeCoopGenerationExecutionId = null
         }
         return error
+    }
+
+    /**
+     * Navigation must not destroy a chat's generation job, unsaved send, or unresolved partial.
+     * The application-scoped ViewModel owner consults this before releasing a hidden chat.
+     */
+    fun hasPendingGenerationWork(): Boolean {
+        val state = _uiState.value as? ChatUiState.Success
+        return sendInProgress || generationStartInProgress ||
+            sendJob?.isActive == true || generationJob?.isActive == true ||
+            state?.isGenerating == true || state?.partialStopped == true ||
+            partialResolutionInProgress || inChatToolInProgress
     }
 
     fun stopGeneration() {
@@ -2067,6 +2110,12 @@ class ChatDetailViewModel(
                 continuationTarget = targetMessage,
                 characterId = targetMessage.speakerId
             )
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                updateSuccessState {
+                    it.copy(generationError = "Continue could not start: ${error.message ?: "unknown error"}. The existing reply was not changed.")
+                }
             } finally {
                 generationStartInProgress = false
             }
@@ -2233,7 +2282,8 @@ class ChatDetailViewModel(
         private val messageAttachmentRepository: MessageAttachmentRepository? = null,
         private val npcRepository: NpcRepository? = null,
         private val npcOutputParser: NpcStructuredOutputParser? = null,
-        private val scenarioRepository: com.example.domain.repository.ScenarioRepository? = null
+        private val scenarioRepository: com.example.domain.repository.ScenarioRepository? = null,
+        private val generationLifecycle: GenerationLifecycleReporter? = null
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
@@ -2244,7 +2294,8 @@ class ChatDetailViewModel(
                 messageAttachmentRepository,
                 npcRepository,
                 npcOutputParser,
-                scenarioRepository = scenarioRepository
+                scenarioRepository = scenarioRepository,
+                generationLifecycle = generationLifecycle
             ) as T
         }
     }
