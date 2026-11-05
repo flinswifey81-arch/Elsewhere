@@ -66,7 +66,7 @@ class WorldArchiveAdditiveRestorerTest {
             ),
             chats = listOf(importedChat), messages = listOf(importedMessage),
             chatSettings = listOf(ChatSettingsEntity(importedChat.chatId)),
-            scenarios = scenario?.let(::listOf).orEmpty(),
+            scenarios = scenario?.let { listOf(it) }.orEmpty(),
             messageAttachments = if (withImage) listOf(
                 WorldArchiveMessageAttachmentV1(
                     attachmentId = "picture-source", chatId = importedChat.chatId,
