@@ -79,9 +79,9 @@ class WorldArchiveEncryptedIOTest {
         val output = ByteArrayOutputStream()
         val service = io()
         val password = "sample secure passphrase".toCharArray()
-        val manifest = service.exportEncrypted(
-            original, WorldDefinitionCodec.encode(definition()),
-            listOf(source), output, password, createdAt = 1L
+        assertEquals(definition(), WorldArchiveDefinitionProjection.fromState(original))
+        val manifest = service.exportSelectedEncrypted(
+            original, listOf(source), output, password, createdAt = 1L
         )
         assertTrue(password.all { it == '\u0000' })
         val encrypted = output.toByteArray()
