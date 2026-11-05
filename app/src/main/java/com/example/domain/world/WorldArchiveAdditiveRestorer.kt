@@ -122,6 +122,18 @@ class WorldArchiveAdditiveRestorer(
         }
     }
 
+    /**
+     * Cheap startup check that does not open Room or take the data-maintenance lock unless
+     * a previous import actually left staging or recovery work behind.
+     */
+    fun needsRecovery(): Boolean =
+        File(appFilesRoot, JOURNAL_DIR).listFiles()?.any {
+            it.isFile && (it.name.endsWith(".pending") || it.name.endsWith(".writing"))
+        } == true ||
+            File(appFilesRoot, STAGING_DIR).listFiles()?.any {
+                it.isDirectory && it.name.startsWith("import-")
+            } == true
+
     /** Call on app startup before exposing World import or profile-image mutations. */
     suspend fun recoverInterruptedImports(): Int =
         dataCoordinator.withDataReplacement { recoverInterruptedImportsLocked() }
@@ -341,7 +353,7 @@ class WorldArchiveAdditiveRestorer(
     companion object {
         private const val JOURNAL_DIR = "world_import_recovery"
         private const val STAGING_DIR = "world_import_staging"
-        private val SAFE_UUID = Regex("[a-f0-9-]{36}")
+        private val SAFE_UUID = Regex("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
         private val ATTACHMENT_PATH = Regex(
             "message_attachments/world-import-[a-f0-9-]{36}\\.(png|jpg|webp)"
         )
