@@ -221,7 +221,7 @@ class WorldArchiveEncryptedIO(private val workingRoot: File) {
                             output.write(buffer, 0, read)
                         }
                     }
-                    require(size == expected.byteSize && digest.hex() == expected.sha256) {
+                    require(size == expected.byteSize && digest.digest().hex() == expected.sha256) {
                         "World archive file checksum or byte length is invalid"
                     }
                     zip.closeEntry()
