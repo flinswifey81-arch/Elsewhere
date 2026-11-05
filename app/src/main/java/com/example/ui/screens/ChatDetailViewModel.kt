@@ -140,6 +140,7 @@ sealed class ChatUiState {
         val partialResolutionInProgress: Boolean = false,
         val generationDetails: com.example.ui.screens.GenerationDetailsState = com.example.ui.screens.GenerationDetailsState(),
         val generationError: String? = null,
+        val generationWarning: String? = null,
         val inChatToolStatus: InChatToolStatus? = null,
         val attachments: List<MessageAttachmentEntity> = emptyList(),
         val draftAttachments: List<MessageAttachmentEntity> = emptyList()
@@ -627,7 +628,7 @@ class ChatDetailViewModel(
             }
 
             sendInProgress = false
-            updateSuccessState { it.copy(generationError = null) }
+            updateSuccessState { it.copy(generationError = null, generationWarning = null) }
             if (summary.chat.chatType == ChatType.GROUP) {
                 dataCoordinator.withMutation(dataRevision) {
                     chatRepository.updateChat(summary.chat.copy(updatedAt = System.currentTimeMillis()))
@@ -949,6 +950,7 @@ class ChatDetailViewModel(
                 partialStopped = false,
                 partialResolutionInProgress = false,
                 generationError = null,
+                generationWarning = null,
                 generationCharacterId = fullCharacter.characterId
             )
         }
@@ -1600,8 +1602,8 @@ class ChatDetailViewModel(
                     isGenerating = false,
                     streamingContent = null,
                     generationCharacterId = null,
-                    generationError = syncError?.let { "The approved continuation could not be confirmed by the room: ${it.message}" }
-                        ?: npcUpdateWarning
+                    generationError = syncError?.let { "The approved continuation could not be confirmed by the room: ${it.message}" },
+                    generationWarning = if (syncError == null) npcUpdateWarning else null
                 )
             }
             if (syncError == null && completionError == null && !isCoopGeneration &&
@@ -1752,8 +1754,8 @@ class ChatDetailViewModel(
                 isGenerating = false,
                 streamingContent = null,
                 generationCharacterId = null,
-                generationError = syncError?.let { "The approved response could not be confirmed by the room: ${it.message}" }
-                    ?: memoryWarning
+                generationError = syncError?.let { "The approved response could not be confirmed by the room: ${it.message}" },
+                generationWarning = if (syncError == null) memoryWarning else null
             )
         }
         
@@ -1797,7 +1799,7 @@ class ChatDetailViewModel(
         } catch (_: Exception) {
             updateSuccessState { state ->
                 state.copy(
-                    generationError = state.generationError
+                    generationWarning = state.generationWarning
                         ?: "The response was saved, but the chat's updated time could not be refreshed."
                 )
             }
