@@ -3,11 +3,13 @@ package com.example
 import com.example.data.model.ChatEntity
 import com.example.data.model.ChatSettingsEntity
 import com.example.data.model.ChatType
+import com.example.data.model.MessageAttachmentEntity
 import com.example.data.model.MessageEntity
 import com.example.data.model.SpeakerType
 import com.example.data.model.WorldEntity
 import com.example.data.model.WorldMembershipEntity
 import com.example.domain.backup.BackupCrypto
+import com.example.domain.repository.ProfileImageKind
 import com.example.domain.world.*
 import org.junit.Assert.*
 import org.junit.Rule
@@ -97,6 +99,68 @@ class WorldArchiveEncryptedIOTest {
         assertArrayEquals(imageBytes, extracted.readBytes())
         inspected.close()
         assertFalse(extracted.exists())
+    }
+
+    @Test fun localAttachmentIsCopiedAndVerifiedWithoutExportingTheDevicePath() {
+        val original = state(withImage = true)
+        val sourceFile = asset()
+        val backing = MessageAttachmentEntity(
+            attachmentId = "image-a", chatId = chat.chatId,
+            messageId = message.messageId,
+            relativePath = "message_attachments/device-private-original.png",
+            mimeType = "image/png", byteSize = imageBytes.size.toLong(),
+            pixelWidth = 1, pixelHeight = 1, sha256 = sha(imageBytes),
+            sortPosition = 0, createdAt = 1L
+        )
+        val collector = WorldArchiveAssetCollector(
+            attachmentFile = { row -> if (row.attachmentId == backing.attachmentId) sourceFile else null },
+            profileFile = { _, _ -> null }
+        )
+        val stagedFile: File
+        val encrypted = ByteArrayOutputStream()
+        collector.stage(original, listOf(backing), temp.newFolder("staging")).use { staged ->
+            assertEquals(1, staged.sources.size)
+            stagedFile = staged.sources.single().file
+            assertTrue(stagedFile.isFile)
+            assertNotEquals(sourceFile.canonicalPath, stagedFile.canonicalPath)
+            assertEquals("assets/message-attachments/image-a", staged.sources.single().path)
+            assertArrayEquals(imageBytes, stagedFile.readBytes())
+            val writer = io()
+            writer.exportEncrypted(
+                original, WorldDefinitionCodec.encode(definition()),
+                staged.sources, encrypted, "secure passphrase".toCharArray(), 1L
+            )
+        }
+        assertFalse(stagedFile.exists())
+        assertTrue(sourceFile.isFile)
+        val reader = io()
+        reader.inspectEncrypted(
+            ByteArrayInputStream(encrypted.toByteArray()), "secure passphrase".toCharArray()
+        ).use { inspected ->
+            assertArrayEquals(imageBytes,
+                inspected.assetFiles.getValue("assets/message-attachments/image-a").readBytes())
+        }
+    }
+
+    @Test fun imageStagingRejectsMissingOrChangedSourceFiles() {
+        val original = state(withImage = true)
+        val backing = MessageAttachmentEntity(
+            attachmentId = "image-a", chatId = chat.chatId,
+            messageId = message.messageId, relativePath = "message_attachments/placeholder.png",
+            mimeType = "image/png", byteSize = imageBytes.size.toLong(),
+            pixelWidth = 1, pixelHeight = 1, sha256 = sha(imageBytes),
+            sortPosition = 0, createdAt = 1L
+        )
+        val collector = WorldArchiveAssetCollector(
+            attachmentFile = { temp.newFile().apply { writeText("corrupted image") } },
+            profileFile = { _, _ -> null }
+        )
+        assertThrows(IllegalArgumentException::class.java) {
+            collector.stage(original, emptyList(), temp.newFolder())
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            collector.stage(original, listOf(backing), temp.newFolder())
+        }
     }
 
     @Test fun wrongPassphraseAndCorruptedCiphertextNeverReturnAHistoryPreview() {
