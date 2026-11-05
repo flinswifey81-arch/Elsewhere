@@ -87,7 +87,9 @@ object WorldArchiveSnapshotSelector {
         characterIds.addAll(scenarioDefinitions.flatMap { definition ->
             definition.npcs.mapNotNull { it.sourceCharacterId }
         })
-        val scopedRelationships = source.relationships.filter { it.scopeChatId in includedChatIds }
+        val scopedRelationships = source.relationships.filter {
+            it.scopeChatId?.let(includedChatIds::contains) == true
+        }
         characterIds.addAll(scopedRelationships.flatMap { listOf(it.sourceCharacterId, it.targetCharacterId) })
 
         val personaIds = memberships.filter { it.resourceType == WorldResourceType.PERSONA.name }
