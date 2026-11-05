@@ -193,6 +193,9 @@ object WorldArchiveStateCodec {
             "Chat participant is missing its Character or Persona"
         }
         requireScoped(state.chatSettings, chats, "Chat settings") { it.chatId }
+        require(state.chatSettings.none { it.useGlobalEngineDefaults }) {
+            "Portable World chat settings cannot depend on another device's global engine defaults"
+        }
         requireScoped(state.conversationSummaries, chats, "Conversation summaries") { it.chatId }
         require(state.chats.all { chat ->
             state.chatSettings.count { it.chatId == chat.chatId } == 1 &&
