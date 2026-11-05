@@ -8,6 +8,7 @@ on:
       - feature/world-archive-history-closure-2026-11-05
       - feature/world-archive-encrypted-io-2026-11-05
       - feature/world-archive-semantic-remap-2026-11-05
+      - feature/world-archive-additive-restore-2026-11-05
       - main
   workflow_dispatch:
 
@@ -42,6 +43,17 @@ jobs:
             --tests com.example.WorldArchiveHistoryTest \
             --tests com.example.WorldArchiveEncryptedIOTest \
             --tests com.example.WorldArchiveAdditiveRestorerTest \
+            --tests com.example.WorldArchiveTransferCoordinatorTest \
             --tests com.example.WorldDefinitionCodecTest \
             --tests com.example.WorldRepositoryTest \
             --tests com.example.AppDatabaseMigrationTest
+
+      - name: Assemble separate Worlds Preview APK
+        run: bash ./gradlew :app:assembleWorldsPreview --no-daemon
+      - name: Publish isolated Worlds Preview APK (never production or existing Test)
+        uses: actions/upload-artifact@v4
+        with:
+          name: Elsewhere-Worlds-Preview-Isolated-APK
+          path: app/build/outputs/apk/worldsPreview/*.apk
+          if-no-files-found: error
+          retention-days: 14

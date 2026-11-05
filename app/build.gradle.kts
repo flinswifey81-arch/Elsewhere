@@ -25,6 +25,7 @@ android {
     targetSdk = 36
     versionCode = 1
     versionName = "1.5"
+    buildConfigField("boolean", "WORLD_ARCHIVE_PREVIEW", "false")
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     buildConfigField(
@@ -62,6 +63,7 @@ android {
     debug { }
     create("sandbox") {
       initWith(getByName("debug"))
+      buildConfigField("boolean", "WORLD_ARCHIVE_PREVIEW", "true")
       applicationIdSuffix = ".test"
       versionNameSuffix = "-test"
       buildConfigField(
@@ -70,6 +72,14 @@ android {
         "\"$productionApplicationId\""
       )
       matchingFallbacks += listOf("debug")
+      signingConfigs.findByName("testing")?.let { signingConfig = it }
+    }
+    create("worldsPreview") {
+      initWith(getByName("sandbox"))
+      applicationIdSuffix = ".test.worlds"
+      versionNameSuffix = "-worlds-preview"
+      buildConfigField("boolean", "WORLD_ARCHIVE_PREVIEW", "true")
+      matchingFallbacks += listOf("sandbox", "debug")
       signingConfigs.findByName("testing")?.let { signingConfig = it }
     }
   }
@@ -93,8 +103,11 @@ androidComponents {
     (variantBuilder as com.android.build.api.variant.HasUnitTestBuilder).enableUnitTest = true
   }
   onVariants(selector().withBuildType("sandbox")) { variant ->
-    // 4 KB-aligned, uncompressed .so entries can be rejected by 16 KB page-size devices.
     // Compress/extract sandbox native libraries; leave production APK packaging unchanged.
+    variant.packaging.jniLibs.useLegacyPackaging.set(true)
+  }
+  onVariants(selector().withBuildType("worldsPreview")) { variant ->
+    // Worlds Preview is also isolated testing and needs the same 16 KB compatibility.
     variant.packaging.jniLibs.useLegacyPackaging.set(true)
   }
 }
