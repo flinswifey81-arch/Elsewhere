@@ -113,7 +113,7 @@ fun WorldArchiveControls(
             try {
                 withContext(Dispatchers.IO) {
                     val output = context.contentResolver.openOutputStream(uri, "w")
-                        ?: error("Unable to open the selected World export destination")
+                        ?: throw IllegalStateException("Unable to open the selected World export destination")
                     output.use { stream ->
                         transfer.exportReviewed(reviewed, stream, password, consent)
                     }
@@ -296,7 +296,7 @@ fun WorldArchiveControls(
                             try {
                                 val inspected = withContext(Dispatchers.IO) {
                                     val input = context.contentResolver.openInputStream(uri)
-                                        ?: error("Selected archive cannot be opened")
+                                        ?: throw IllegalStateException("Selected archive cannot be opened")
                                     transfer.inspectForImport(input, password)
                                 }
                                 candidate?.close()
