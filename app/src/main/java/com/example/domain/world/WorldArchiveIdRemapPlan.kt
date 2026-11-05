@@ -112,7 +112,13 @@ object WorldArchiveIdPlanner {
 
         val remappedMessages = requireNotNull(mappings[WorldArchiveIdKind.MESSAGE])
         val variantMap = variantGroups.sorted().associateWith { original ->
-            remappedMessages[original] ?: derive(WorldArchiveIdKind.VARIANT_GROUP, original)
+            // Only alias to the mapped message when that message really belongs to this
+            // variant group. An unrelated message ID with the same text is not its parent.
+            val sameGroupMessage = state.messages.any {
+                it.messageId == original && it.variantGroupId == original
+            }
+            if (sameGroupMessage) remappedMessages.getValue(original)
+            else derive(WorldArchiveIdKind.VARIANT_GROUP, original)
         }
         require(variantMap.values.toSet().size == variantMap.size) {
             "World variant groups would collide after ID remapping"
