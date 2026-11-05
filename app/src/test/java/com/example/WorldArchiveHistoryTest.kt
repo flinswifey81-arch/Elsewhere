@@ -286,6 +286,35 @@ class WorldArchiveHistoryTest {
     }
 
     @Test
+    fun importMustNotSilentlyLoseUnsupportedStructuredSegmentsOrOpaqueExtensions() {
+        val structured = StoryResponseCodec.encode(StoryResponse(segments = listOf(
+            StorySegment(StorySegmentType.CHARACTER, "The story cannot lose this line.",
+                speakerId = character.characterId, speakerName = "Varka"),
+            StorySegment(StorySegmentType.NPC, "Nor this one.",
+                speakerId = npc.npcId, speakerName = "The Porter")
+        )))
+        val altered = structured.replace("\"NPC\"", "\"UNSUPPORTED_NEW_SPEAKER\"")
+        val original = state()
+        val withUnknownSegment = original.copy(messages = original.messages.map {
+            if (it.messageId == reply.messageId) it.copy(content = altered) else it
+        })
+        val plan = WorldArchiveIdPlanner.plan(withUnknownSegment, "world-import-session-778899")
+        assertThrows(IllegalArgumentException::class.java) {
+            WorldArchiveSemanticRemapper.rewrite(withUnknownSegment, plan)
+        }
+
+        val withExtensions = original.copy(
+            characters = listOf(character.copy(
+                extensionFieldsJson = "{\"future_resource_id\":\"unrecognized-local-link\"}"
+            ))
+        )
+        val extensionsPlan = WorldArchiveIdPlanner.plan(withExtensions, "world-import-session-112233")
+        assertThrows(IllegalArgumentException::class.java) {
+            WorldArchiveSemanticRemapper.rewrite(withExtensions, extensionsPlan)
+        }
+    }
+
+    @Test
     fun manifestMatchesEveryAttachmentAndRejectsOrphanedAssets() {
         val original = state()
         fun entry(path: String, kind: WorldArchiveEntryKind, sha: String = "a".repeat(64),
