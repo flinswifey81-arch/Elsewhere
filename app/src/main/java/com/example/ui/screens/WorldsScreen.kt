@@ -259,7 +259,7 @@ fun WorldsScreen(
                 item {
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Text("A World organizes its setting, recurring cast and continuity independently of any one chat or episode.")
-                        Text("World definitions and complete encrypted history archives are different formats. The full-history archive workflow is currently available only in Elsewhere Test.",
+                        Text("World definitions and complete encrypted history archives are different formats. The full-history archive workflow is currently available only in the separate Worlds Preview build.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Button(onClick = {
@@ -330,7 +330,7 @@ fun WorldsScreen(
                             WorldArchiveChatLinks(repository, archiveTransfer, selected)
                             WorldArchiveControls(archiveTransfer, selected, onImported = { selectedId = it })
                         }
-                        Text("Definition JSON excludes episode history. Encrypted World archives include chat history and files when available in Elsewhere Test.",
+                        Text("Definition JSON excludes episode history. Encrypted World archives include chat history and files when available in Worlds Preview.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
