@@ -116,7 +116,7 @@ class WorldArchiveEncryptedIOTest {
             attachmentFile = { row -> if (row.attachmentId == backing.attachmentId) sourceFile else null },
             profileFile = { _, _ -> null }
         )
-        val stagedFile: File
+        lateinit var stagedFile: File
         val encrypted = ByteArrayOutputStream()
         collector.stage(original, listOf(backing), temp.newFolder("staging")).use { staged ->
             assertEquals(1, staged.sources.size)
