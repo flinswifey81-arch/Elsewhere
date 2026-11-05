@@ -1,6 +1,6 @@
 # Elsewhere Worlds — Encrypted Archive Sandbox UI Test Plan
 
-**Status:** Android UI implementation in draft PR #35, stacked on the additive restore work (#34). The feature is only routed in the `.test` application ID. No production import UI is enabled.
+**Status:** Android UI implementation in draft PR #35, stacked on the additive restore work (#34). The feature is enabled only in nonproduction preview builds; the separate `.test.worlds` application ID installs alongside the existing `.test` app. No production import UI is enabled.
 
 ## What is now connected
 
@@ -15,11 +15,11 @@
 - Private unsent drafts require explicit export opt-in; preview of imported file discloses inclusion.
 - Incorrect second import passphrase → no new World or message records.
 - Existing #34 tests prove collision abort, actual Room rollback, orphan-image cleanup, namesake portraits and NPC variant provenance.
-- New workflow assembles a separate sandbox APK `Elsewhere-Test-World-Archives-Preview` after its focused World archive tests pass.
+- New workflow assembles a separate sandbox APK `Elsewhere-Worlds-Preview-Isolated-APK` after its focused World archive tests pass.
 
 ## Device test sequence — use disposable fictional data only
 
-1. Install or upgrade **Elsewhere Test**, not production. Confirm the standard production app remains untouched.
+1. Install **Elsewhere Worlds Preview** as a separate app. Do not replace your existing Elsewhere Test (the build with working Continue and background notifications) or production. Confirm the standard production app remains untouched.
 2. Create a **throwaway World** and attach one **throwaway chat** through the Worlds UI (do not use an irreplaceable RP).
 3. Add a short message, regenerate a variant, and add a small picture if supported. Save the chat and ensure no active generation is running.
 4. In that World, tap **Export encrypted**. Check message, variant and image counts. Review any private-note/draft warning. Choose a unique passphrase you can remember for this disposable test and save the archive.
@@ -30,7 +30,7 @@
 
 ## Not yet release-ready
 
-- This is not background/foreground-service export. Keep Elsewhere Test in foreground during large archive operations.
+- This is not background/foreground-service export. Keep Worlds Preview in foreground during large archive operations.
 - No merge into an existing World; all identities are new.
 - Unknown opaque extension schemas, unsupported NPC portrait storage and invalid co-op provenance fail closed, intentionally.
 - Android process-kill, low-storage, malicious ZIP variants, massive World scale, content-provider failure and full reinstall restore remain final gates.
