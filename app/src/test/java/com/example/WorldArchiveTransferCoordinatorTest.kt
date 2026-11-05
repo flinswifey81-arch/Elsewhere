@@ -144,6 +144,25 @@ class WorldArchiveTransferCoordinatorTest {
         candidate.use { assertTrue(it.preview.containsUnsentDrafts) }
     }
 
+    @Test fun archiveHistoryFollowsExplicitWorldLinksWithoutDeletingTheUnderlyingChat() = runBlocking {
+        seedWorld()
+        assertEquals(1, transfer.previewExport(sourceWorldId).chats)
+        assertEquals(1, transfer.localChatChoices().count { it.chatId == sourceChatId })
+        database.worldDao().deleteMembership(
+            sourceWorldId, WorldResourceType.CHAT.name, sourceChatId
+        )
+        val withoutLink = transfer.previewExport(sourceWorldId)
+        assertEquals(0, withoutLink.chats)
+        assertEquals(0, withoutLink.messages)
+        assertEquals(1, database.backupDao().getChats().size)
+        assertEquals("The clock struck thirteen.",
+            database.backupDao().getMessages().single().content)
+        database.worldDao().insertMembership(
+            WorldMembershipEntity(sourceWorldId, WorldResourceType.CHAT.name, sourceChatId)
+        )
+        assertEquals(1, transfer.previewExport(sourceWorldId).chats)
+    }
+
     @Test fun wrongConfirmationPasswordDoesNotWriteImportedRows() = runBlocking {
         seedWorld()
         val preview = transfer.previewExport(sourceWorldId)
