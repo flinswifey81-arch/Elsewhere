@@ -53,6 +53,21 @@ object WorldArchiveSnapshotSelector {
             it.resourceType != WorldResourceType.CHAT.name || it.resourceId in includedChatIds
         }
         val chats = source.chats.filter { it.chatId in includedChatIds }
+        val globalDefaults = source.engineDefaults.singleOrNull {
+            it.defaultsId == EngineDefaultsEntity.GLOBAL_ID
+        }
+        val selectedSettings = source.chatSettings.filter { it.chatId in includedChatIds }
+            .map { settings ->
+                if (!settings.useGlobalEngineDefaults) settings
+                else {
+                    // A portable World must preserve the effective model/routing settings
+                    // without silently changing the importing device's global defaults.
+                    val defaults = requireNotNull(globalDefaults) {
+                        "A World chat inherits missing global engine settings"
+                    }
+                    settings.withEngineDefaults(defaults).copy(useGlobalEngineDefaults = false)
+                }
+            }
         require(chats.size == includedChatIds.size) { "A selected World chat no longer exists" }
         require(source.coopRooms.none { it.chatId in includedChatIds }) {
             "A World chat is still associated with a co-op room. An explicit offline conversion is required."
@@ -151,8 +166,7 @@ object WorldArchiveSnapshotSelector {
                 npcDossiers.none { it.authorNotes.isNotBlank() || it.secrets.isNotBlank() } &&
                 npcLibraryEntries.none { it.authorNotes.isNotBlank() || it.secrets.isNotBlank() } &&
                 loreEntries.none { it.notes.isNotBlank() } &&
-                source.chatSettings.filter { it.chatId in includedChatIds }
-                    .none { !it.draftMessage.isNullOrBlank() }
+                selectedSettings.none { !it.draftMessage.isNullOrBlank() }
             ) {
                 "World archive contains private notes, secrets or drafts. Require explicit inclusion review."
             }
@@ -175,7 +189,7 @@ object WorldArchiveSnapshotSelector {
             chatParticipants = chatParticipants,
             chatPersonaParticipants = chatPersonaParticipants,
             messages = messages,
-            chatSettings = source.chatSettings.filter { it.chatId in includedChatIds },
+            chatSettings = selectedSettings,
             generationMetadata = source.generationMetadata.filter { it.messageId in messageIds },
             roleplayMemories = memories,
             conversationSummaries = source.conversationSummaries.filter { it.chatId in includedChatIds },
