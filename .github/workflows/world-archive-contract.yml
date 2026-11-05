@@ -7,6 +7,7 @@ on:
       - feature/world-archive-manifest-contract-2026-11-05
       - feature/world-archive-history-closure-2026-11-05
       - feature/world-archive-encrypted-io-2026-11-05
+      - feature/world-archive-semantic-remap-2026-11-05
       - main
   workflow_dispatch:
 
@@ -40,6 +41,7 @@ jobs:
             --tests com.example.WorldArchiveManifestCodecTest \
             --tests com.example.WorldArchiveHistoryTest \
             --tests com.example.WorldArchiveEncryptedIOTest \
+            --tests com.example.WorldArchiveAdditiveRestorerTest \
             --tests com.example.WorldDefinitionCodecTest \
             --tests com.example.WorldRepositoryTest \
             --tests com.example.AppDatabaseMigrationTest

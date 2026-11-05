@@ -14,6 +14,10 @@ interface ScenarioDao {
     suspend fun get(id: String): ScenarioEntity?
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun save(scenario: ScenarioEntity)
+
+    /** World archive import must never overwrite an unrelated existing Scenario. */
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertForWorldImport(scenario: ScenarioEntity)
     @Query("SELECT * FROM scenario_sessions WHERE chatId = :chatId")
     suspend fun session(chatId: String): ScenarioSessionEntity?
     @Insert(onConflict = OnConflictStrategy.ABORT)
