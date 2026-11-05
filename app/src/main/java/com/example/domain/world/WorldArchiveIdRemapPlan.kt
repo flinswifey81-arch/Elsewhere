@@ -8,6 +8,10 @@ import java.util.UUID
  * Namespaces in a selective World import are deliberately separate. A Character and a Persona
  * with the same old ID are NOT the same role or person. Names are never identity keys.
  */
+/** Length prefixes prevent collisions when custom Scenario/NPC IDs contain separators. */
+private fun scopedScenarioNpcKey(scenarioId: String, npcId: String): String =
+    "${scenarioId.length}:$scenarioId${npcId.length}:$npcId"
+
 enum class WorldArchiveIdKind {
     WORLD,
     WORLD_CAST,
@@ -47,7 +51,7 @@ data class WorldArchiveIdRemapPlan(
 
     /** Scenario NPC IDs only have meaning within their own Scenario template. */
     fun scenarioNpcId(scenarioId: String, npcId: String): String =
-        get(WorldArchiveIdKind.SCENARIO_NPC, "$scenarioId|$npcId")
+        get(WorldArchiveIdKind.SCENARIO_NPC, scopedScenarioNpcKey(scenarioId, npcId))
 }
 
 /**
@@ -76,11 +80,11 @@ object WorldArchiveIdPlanner {
         val scenarioNpcIds = (
             state.scenarios.flatMap { scenario ->
                 ScenarioCodec.decode(scenario.definitionJson).npcs.map { npc ->
-                    "${scenario.scenarioId}|${npc.npcId}"
+                    scopedScenarioNpcKey(scenario.scenarioId, npc.npcId)
                 }
             } + state.scenarioSessions.flatMap { session ->
                 ScenarioCodec.decode(session.definitionJson).npcs.map { npc ->
-                    "${session.scenarioId}|${npc.npcId}"
+                    scopedScenarioNpcKey(session.scenarioId, npc.npcId)
                 }
             }
             ).toSet()
