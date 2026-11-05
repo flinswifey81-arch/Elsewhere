@@ -246,6 +246,62 @@ class WorldArchiveHistoryTest {
     }
 
     @Test
+    fun selectorKeepsScenarioSessionSnapshotAndDoesNotRequireAPlayerTurn() {
+        val sceneChat = chat.copy(chatId = "scenario-chat", chatType = ChatType.SCENARIO)
+        val definition = ScenarioDefinition(
+            title = "Episode One", premise = "A strange arrival",
+            npcs = listOf(ScenarioNpc(
+                npcId = "scene-npc", name = "Courier", sourceCharacterId = character.characterId
+            ))
+        )
+        val template = ScenarioEntity(
+            scenarioId = "scenario-template",
+            definitionJson = ScenarioCodec.encode(definition)
+        )
+        val narrator = MessageEntity(
+            messageId = "narrator-1", chatId = sceneChat.chatId,
+            speakerType = SpeakerType.NARRATOR, speakerId = "narrator",
+            speakerDisplayNameSnapshot = "Narrator",
+            content = "A letter arrives at dawn.", orderIndex = 1
+        )
+        val source = sourcePayload().copy(
+            chats = listOf(sceneChat),
+            worldMemberships = listOf(WorldMembershipEntity(world.worldId, "CHAT", sceneChat.chatId)),
+            scenarios = listOf(template),
+            scenarioSessions = listOf(ScenarioSessionEntity(
+                chatId = sceneChat.chatId, scenarioId = template.scenarioId,
+                definitionJson = template.definitionJson
+            )),
+            messages = listOf(narrator),
+            chatSettings = listOf(ChatSettingsEntity(sceneChat.chatId)),
+            chatParticipants = emptyList(),
+            chatPersonaParticipants = emptyList()
+        )
+        val state = WorldArchiveSnapshotSelector.select(source, world.worldId)
+        assertEquals(1, state.scenarioSessions.size)
+        assertEquals(definition, ScenarioCodec.decode(state.scenarioSessions.single().definitionJson))
+        assertEquals(1, state.messages.size)
+        assertEquals(SpeakerType.NARRATOR, state.messages.single().speakerType)
+
+        assertThrows(IllegalArgumentException::class.java) {
+            WorldArchiveSnapshotSelector.select(source.copy(scenarios = emptyList()), world.worldId)
+        }
+    }
+
+    @Test
+    fun selectorCannotDiscardActiveCoopStateSilently() {
+        val room = CoopRoomEntity(
+            chatId = chat.chatId, localRole = CoopRole.HOST,
+            hostParticipantId = "host", localParticipantId = "host"
+        )
+        assertThrows(IllegalArgumentException::class.java) {
+            WorldArchiveSnapshotSelector.select(
+                sourcePayload().copy(coopRooms = listOf(room)), world.worldId
+            )
+        }
+    }
+
+    @Test
     fun selectorRequiresExplicitReviewForPrivateRoleplayNotes() {
         val privateCharacter = character.copy(authorNotesJson = "{\"private\":\"do not share\"}")
         val source = sourcePayload().copy(characters = listOf(privateCharacter))
