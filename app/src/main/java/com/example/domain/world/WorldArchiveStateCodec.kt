@@ -197,11 +197,15 @@ object WorldArchiveStateCodec {
             "Portable World chat settings cannot depend on another device's global engine defaults"
         }
         requireScoped(state.conversationSummaries, chats, "Conversation summaries") { it.chatId }
+        val settingsByChat = state.chatSettings.associateBy { it.chatId }
+        val sessionsByChat = state.scenarioSessions.associateBy { it.chatId }
         require(state.chats.all { chat ->
-            state.chatSettings.count { it.chatId == chat.chatId } == 1 &&
-                (chat.chatType != ChatType.SCENARIO ||
-                    state.scenarioSessions.count { it.chatId == chat.chatId } == 1)
+            chat.chatId in settingsByChat &&
+                (chat.chatType != ChatType.SCENARIO || chat.chatId in sessionsByChat)
         }) { "Selected chat is missing settings or its Scenario snapshot" }
+        require(state.scenarioSessions.all { session ->
+            state.chats.any { it.chatId == session.chatId && it.chatType == ChatType.SCENARIO }
+        }) { "Scenario session is linked to a non-Scenario chat" }
 
         requireScoped(state.messages, chats, "Messages") { it.chatId }
         val messageById = state.messages.associateBy { it.messageId }
@@ -265,9 +269,10 @@ object WorldArchiveStateCodec {
             jsonMap(npc.personaRelationshipsJson, "NPC Persona relationships").keys.all { it in personas } &&
                 jsonMap(npc.characterKnowledgeJson, "NPC Character knowledge").keys.all { it in characters }
         }) { "NPC knowledge refers to an unarchived Persona or Character" }
+        val npcById = state.npcDossiers.associateBy { it.npcId }
         require(state.npcUpdates.all { update ->
             update.npcId in npcs &&
-                state.npcDossiers.first { it.npcId == update.npcId }.chatId == update.chatId &&
+                npcById[update.npcId]?.chatId == update.chatId &&
                 messageById[update.sourceMessageId]?.let {
                     it.chatId == update.chatId && it.variantGroupId == update.variantGroupId
                 } == true &&
