@@ -4,6 +4,10 @@ import com.example.data.model.*
 import com.example.domain.backup.BackupAppearanceSettings
 import com.example.domain.backup.BackupPayload
 import com.example.domain.world.*
+import com.example.domain.story.StoryResponseCodec
+import com.example.domain.story.StoryResponse
+import com.example.domain.story.StorySegment
+import com.example.domain.story.StorySegmentType
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -174,6 +178,139 @@ class WorldArchiveHistoryTest {
             WorldArchiveIdPlanner.plan(original, "import-session-123456", reservedIds = mapOf(
                 WorldArchiveIdKind.CHAT to setOf(first.get(WorldArchiveIdKind.CHAT, chat.chatId))
             ))
+        }
+    }
+
+    @Test
+    fun semanticImportRewritePreservesVariantNpcLoreAndMemoryLinks() {
+        val encoded = StoryResponseCodec.encode(StoryResponse(segments = listOf(
+            StorySegment(StorySegmentType.CHARACTER, "Come home, darling.",
+                speakerId = character.characterId, speakerName = "Varka"),
+            StorySegment(StorySegmentType.NPC, "The carriage is ready.",
+                speakerId = npc.npcId, speakerName = "The Porter")
+        )))
+        val original = state().copy(
+            messages = state().messages.map { if (it.messageId == reply.messageId) {
+                it.copy(content = encoded)
+            } else it },
+            npcUpdates = listOf(npcUpdate.copy(
+                fieldName = "persona_relationship:persona-a", newValue = "Believes Piper is brave"
+            )),
+            npcDossiers = listOf(npc.copy(
+                personaRelationshipsJson = "{\"persona-a\":\"trusted\"}",
+                characterKnowledgeJson = "{\"character-a\":\"the commissioner\"}"
+            ))
+        )
+        val plan = WorldArchiveIdPlanner.plan(original, "world-import-operation-123456")
+        val result = WorldArchiveSemanticRemapper.rewrite(original, plan)
+        val mapped = result.state
+        WorldArchiveStateCodec.validate(mapped)
+
+        assertNotEquals(original.worldId, mapped.worldId)
+        assertEquals(plan.get(WorldArchiveIdKind.CHAT, chat.chatId), mapped.chats.single().chatId)
+        val mappedReply = mapped.messages.single { it.messageId == plan.get(WorldArchiveIdKind.MESSAGE, reply.messageId) }
+        val mappedAlternative = mapped.messages.single { it.messageId ==
+            plan.get(WorldArchiveIdKind.MESSAGE, alternate.messageId) }
+        assertEquals(mappedReply.messageId, mappedAlternative.variantGroupId)
+        assertEquals(1, mapped.messages.count { it.variantGroupId == mappedReply.messageId && it.isPrimaryVariant })
+        assertEquals("Are you home?", mapped.messages.single {
+            it.messageId == plan.get(WorldArchiveIdKind.MESSAGE, playerTurn.messageId)
+        }.content)
+
+        val segments = requireNotNull(StoryResponseCodec.decode(mappedReply.content)).segments
+        assertEquals("Come home, darling.", segments[0].content)
+        assertEquals(plan.get(WorldArchiveIdKind.CHARACTER, character.characterId), segments[0].speakerId)
+        assertEquals(plan.get(WorldArchiveIdKind.NPC_DOSSIER, npc.npcId), segments[1].speakerId)
+        assertEquals("The carriage is ready.", segments[1].content)
+
+        assertEquals(plan.get(WorldArchiveIdKind.MEMORY, "memory-1"), mapped.roleplayMemories.single().memoryId)
+        assertEquals(plan.get(WorldArchiveIdKind.MESSAGE, playerTurn.messageId),
+            mapped.roleplayMemories.single().sourceMessageId)
+        assertEquals(plan.get(WorldArchiveIdKind.MESSAGE, alternate.messageId),
+            mapped.npcUpdates.single().sourceMessageId)
+        assertEquals(plan.variantGroupId(reply.messageId), mapped.npcUpdates.single().variantGroupId)
+        assertEquals("persona_relationship:" + plan.get(WorldArchiveIdKind.PERSONA, persona.personaId),
+            mapped.npcUpdates.single().fieldName)
+        assertTrue(mapped.npcDossiers.single().personaRelationshipsJson.contains(
+            plan.get(WorldArchiveIdKind.PERSONA, persona.personaId)))
+        assertTrue(mapped.npcDossiers.single().characterKnowledgeJson.contains(
+            plan.get(WorldArchiveIdKind.CHARACTER, character.characterId)))
+        assertEquals(plan.get(WorldArchiveIdKind.LOREBOOK_ENTRY, entry.entryId),
+            mapped.chatLorebookOverlays.single().entryId)
+        assertEquals(plan.get(WorldArchiveIdKind.CONTINUITY_EVENT, "event-1"),
+            mapped.continuity.single().eventId)
+        assertEquals(mapOf(attachment.assetPath to mapped.messageAttachments.single().assetPath),
+            result.attachmentFileMoves)
+    }
+
+    @Test
+    fun sameNpcIdInTwoScenarioTemplatesGetsTwoDistinctImportedIdentities() {
+        fun scenario(id: String) = ScenarioEntity(
+            scenarioId = id,
+            definitionJson = ScenarioCodec.encode(ScenarioDefinition(
+                title = id, premise = "The same NPC label appears independently",
+                npcs = listOf(ScenarioNpc(npcId = "npc-1", name = "Messenger"))
+            ))
+        )
+        val original = state().copy(
+            scenarios = listOf(scenario("scenario-one"), scenario("scenario-two")),
+            memberships = state().memberships + listOf(
+                WorldMembershipEntity(world.worldId, "SCENARIO", "scenario-one"),
+                WorldMembershipEntity(world.worldId, "SCENARIO", "scenario-two")
+            )
+        )
+        val plan = WorldArchiveIdPlanner.plan(original, "unique-world-import-567890")
+        assertNotEquals(plan.scenarioNpcId("scenario-one", "npc-1"),
+            plan.scenarioNpcId("scenario-two", "npc-1"))
+
+        val mapped = WorldArchiveSemanticRemapper.rewrite(original, plan).state
+        assertEquals(2, mapped.scenarios.size)
+        val mappedNpcIds = mapped.scenarios.map {
+            ScenarioCodec.decode(it.definitionJson).npcs.single().npcId
+        }
+        assertEquals(2, mappedNpcIds.distinct().size)
+        assertFalse(mappedNpcIds.contains("npc-1"))
+    }
+
+    @Test
+    fun structuredStoryWithUnparseableControlDataFailsClosedBeforeImport() {
+        val broken = state().copy(messages = state().messages.map {
+            if (it.messageId == reply.messageId)
+                it.copy(content = "\u001eelsewhere-story-v1\n{broken")
+            else it
+        })
+        val plan = WorldArchiveIdPlanner.plan(broken, "broken-world-archive-12345")
+        assertThrows(IllegalArgumentException::class.java) {
+            WorldArchiveSemanticRemapper.rewrite(broken, plan)
+        }
+    }
+
+    @Test
+    fun importMustNotSilentlyLoseUnsupportedStructuredSegmentsOrOpaqueExtensions() {
+        val structured = StoryResponseCodec.encode(StoryResponse(segments = listOf(
+            StorySegment(StorySegmentType.CHARACTER, "The story cannot lose this line.",
+                speakerId = character.characterId, speakerName = "Varka"),
+            StorySegment(StorySegmentType.NPC, "Nor this one.",
+                speakerId = npc.npcId, speakerName = "The Porter")
+        )))
+        val altered = structured.replace("\"NPC\"", "\"UNSUPPORTED_NEW_SPEAKER\"")
+        val original = state()
+        val withUnknownSegment = original.copy(messages = original.messages.map {
+            if (it.messageId == reply.messageId) it.copy(content = altered) else it
+        })
+        val plan = WorldArchiveIdPlanner.plan(withUnknownSegment, "world-import-session-778899")
+        assertThrows(IllegalArgumentException::class.java) {
+            WorldArchiveSemanticRemapper.rewrite(withUnknownSegment, plan)
+        }
+
+        val withExtensions = original.copy(
+            characters = listOf(character.copy(
+                extensionFieldsJson = "{\"future_resource_id\":\"unrecognized-local-link\"}"
+            ))
+        )
+        val extensionsPlan = WorldArchiveIdPlanner.plan(withExtensions, "world-import-session-112233")
+        assertThrows(IllegalArgumentException::class.java) {
+            WorldArchiveSemanticRemapper.rewrite(withExtensions, extensionsPlan)
         }
     }
 

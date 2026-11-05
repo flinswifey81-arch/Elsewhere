@@ -8,6 +8,10 @@ import java.util.UUID
  * Namespaces in a selective World import are deliberately separate. A Character and a Persona
  * with the same old ID are NOT the same role or person. Names are never identity keys.
  */
+/** Length prefixes prevent collisions when custom Scenario/NPC IDs contain separators. */
+private fun scopedScenarioNpcKey(scenarioId: String, npcId: String): String =
+    "${scenarioId.length}:$scenarioId${npcId.length}:$npcId"
+
 enum class WorldArchiveIdKind {
     WORLD,
     WORLD_CAST,
@@ -44,6 +48,10 @@ data class WorldArchiveIdRemapPlan(
 
     /** Some older variants use the original message ID for their variant group identity. */
     fun variantGroupId(sourceGroupId: String): String = get(WorldArchiveIdKind.VARIANT_GROUP, sourceGroupId)
+
+    /** Scenario NPC IDs only have meaning within their own Scenario template. */
+    fun scenarioNpcId(scenarioId: String, npcId: String): String =
+        get(WorldArchiveIdKind.SCENARIO_NPC, scopedScenarioNpcKey(scenarioId, npcId))
 }
 
 /**
@@ -70,10 +78,15 @@ object WorldArchiveIdPlanner {
         val messages = state.messages.map { it.messageId }.toSet()
         val variantGroups = state.messages.map { it.variantGroupId }.toSet()
         val scenarioNpcIds = (
-            state.scenarios.flatMap { ScenarioCodec.decode(it.definitionJson).npcs.map { npc -> npc.npcId } } +
-                state.scenarioSessions.flatMap {
-                    ScenarioCodec.decode(it.definitionJson).npcs.map { npc -> npc.npcId }
+            state.scenarios.flatMap { scenario ->
+                ScenarioCodec.decode(scenario.definitionJson).npcs.map { npc ->
+                    scopedScenarioNpcKey(scenario.scenarioId, npc.npcId)
                 }
+            } + state.scenarioSessions.flatMap { session ->
+                ScenarioCodec.decode(session.definitionJson).npcs.map { npc ->
+                    scopedScenarioNpcKey(session.scenarioId, npc.npcId)
+                }
+            }
             ).toSet()
 
         val sourceIds: Map<WorldArchiveIdKind, Set<String>> = linkedMapOf(
