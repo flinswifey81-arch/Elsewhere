@@ -41,6 +41,7 @@ jobs:
           bash ./gradlew :app:testSandboxUnitTest --no-daemon \
             --tests com.example.ChatDetailGenerationTest.streamedResponseIsPersistedAndCompiledContextIncludesMemory \
             --tests com.example.ChatDetailGenerationTest.structuredContinueAppendsToTheSameLogicalResponseWithoutRepeatingSegments \
+            --tests com.example.ChatDetailGenerationTest.continueFromCharacterGreetingNeedsNoPersonaTurn \
             --tests com.example.ChatDetailGenerationTest.retryAndRegenerateReuseOriginImageWhileContinueDoesNotResendIt \
             --tests com.example.LocalGroupGenerationTest.groupRetryRegenerateAndContinueKeepSelectedSpeakerAndNonPersistedDirectorTurn \
             --tests com.example.LocalGroupGenerationTest.groupCharactersAndRegenerationReuseOriginImageButContinueDoesNot \
