@@ -59,7 +59,23 @@ class WorldArchiveEncryptedIO(private val workingRoot: File) {
     }
 
     /**
-     * Writes an AES-GCM encrypted container using the existing audited full-backup crypto
+     * Packages a fully selected World from ONE immutable snapshot, building its definition
+     * from that exact snapshot so cross-file identity/canon cannot drift between reads.
+     */
+    fun exportSelectedEncrypted(
+        state: WorldArchiveStateV1,
+        sources: List<AssetSource>,
+        output: OutputStream,
+        passphrase: CharArray,
+        createdAt: Long = System.currentTimeMillis()
+    ): WorldArchiveManifestV1 = exportEncrypted(
+        state,
+        WorldDefinitionCodec.encode(WorldArchiveDefinitionProjection.fromState(state)),
+        sources, output, passphrase, createdAt
+    )
+
+    /**
+     * Writes an AES-GCM encrypted container using the existing full-app backup crypto
      * primitive; the ZIP schema is independent from the full-app backup schema and has NO
      * application-ID restriction. This must not relax the full-app restore policy.
      *
