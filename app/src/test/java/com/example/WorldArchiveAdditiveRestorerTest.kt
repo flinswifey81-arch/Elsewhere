@@ -6,6 +6,8 @@ import androidx.test.core.app.ApplicationProvider
 import com.example.data.AppDatabase
 import com.example.data.model.*
 import com.example.domain.repository.AppDataMaintenanceCoordinator
+import com.example.domain.repository.ProfileImageKind
+import com.example.domain.repository.ProfileImageRepository
 import com.example.domain.world.*
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -164,6 +166,52 @@ class WorldArchiveAdditiveRestorerTest {
             assertEquals(2, db.worldDao().getWorlds().size)
             assertEquals(2, db.backupDao().getChats().size)
             assertNotNull(db.worldDao().getWorld(one.worldId))
+        }
+    }
+
+    @Test fun matchingCharacterNamesDoNotOverwriteExistingProfilePictures() = runBlocking {
+        existingRecords()
+        val existingCharacter = CharacterEntity(
+            characterId = "character-existing", displayName = "The Porter",
+            characterName = "The Porter", aliases = emptyList(), importSchemaVersion = 1,
+            identityJson = null, appearanceJson = null, personalityJson = null,
+            voiceJson = null, behaviorJson = null, backstoryJson = null,
+            knowledgeJson = null, worldContextJson = null, writingRulesJson = null,
+            examplesJson = null, authorNotesJson = null, extensionFieldsJson = null
+        )
+        val incomingCharacter = existingCharacter.copy(characterId = "character-source")
+        db.backupDao().insertCharacters(listOf(existingCharacter))
+        val existingProfile = File(
+            appFiles, "profile_images/characters/" +
+                ProfileImageRepository.storageKey(ProfileImageKind.CHARACTER, existingCharacter.characterId) + ".png"
+        ).apply { parentFile!!.mkdirs(); writeText("This is the existing owner's picture") }
+
+        val state = history().copy(characters = listOf(incomingCharacter))
+        val originalImage = temp.newFile().apply { writeBytes(fileBytes) }
+        val output = ByteArrayOutputStream()
+        io.exportSelectedEncrypted(
+            state, listOf(WorldArchiveEncryptedIO.AssetSource(
+                "assets/avatars/character/the-porter.png", WorldArchiveEntryKind.CHARACTER_AVATAR,
+                incomingCharacter.characterId, originalImage
+            )),
+            output, "sufficiently-long-password".toCharArray(), 1L
+        )
+        io.inspectEncrypted(ByteArrayInputStream(output.toByteArray()),
+            "sufficiently-long-password".toCharArray()).use { archive ->
+            val namespace = "separate-namesake-import-session-123"
+            val importedCharacterId = archive.planNewWorldImport(namespace)
+                .get(WorldArchiveIdKind.CHARACTER, incomingCharacter.characterId)
+            val result = importer.importAsNewWorld(archive, namespace)
+            assertEquals(1, result.imageFiles)
+            val importedProfile = File(appFiles, "profile_images/characters/" +
+                ProfileImageRepository.storageKey(ProfileImageKind.CHARACTER, importedCharacterId) + ".png")
+            assertTrue(importedProfile.isFile)
+            assertArrayEquals(fileBytes, importedProfile.readBytes())
+            assertEquals("This is the existing owner's picture", existingProfile.readText())
+            assertEquals(2, db.backupDao().getCharacters().size)
+            assertEquals(
+                2, db.backupDao().getCharacters().count { it.characterName == "The Porter" }
+            )
         }
     }
 
