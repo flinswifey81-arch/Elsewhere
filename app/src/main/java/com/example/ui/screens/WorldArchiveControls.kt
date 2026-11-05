@@ -8,6 +8,9 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.AlertDialog
@@ -197,7 +200,10 @@ fun WorldArchiveControls(
             onDismissRequest = { if (!busy) clearExport() },
             title = { Text("Export encrypted World") },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(
+                    modifier = Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
                     Text(preview.title, style = MaterialTheme.typography.titleMedium)
                     Text("${preview.chats} chats · ${preview.messages} messages · " +
                         "${preview.alternatives} alternate variants · ${preview.attachmentCount} attachments")
@@ -281,6 +287,8 @@ fun WorldArchiveControls(
                         visualTransformation = PasswordVisualTransformation(),
                         singleLine = true, enabled = !busy
                     )
+                    error?.let { Text(it, color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall) }
                 }
             },
             confirmButton = {
@@ -327,7 +335,10 @@ fun WorldArchiveControls(
             onDismissRequest = { if (!busy) clearImport() },
             title = { Text("Import as NEW World?") },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(
+                    modifier = Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
                     Text(preview.worldTitle, style = MaterialTheme.typography.titleMedium)
                     Text("${preview.chats} chats · ${preview.messages} messages · " +
                         "${preview.alternativeVariants} alternate variants")
@@ -364,6 +375,8 @@ fun WorldArchiveControls(
                     )
                     Text("Keep Worlds Preview open while importing.",
                         style = MaterialTheme.typography.bodySmall)
+                    error?.let { Text(it, color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall) }
                 }
             },
             confirmButton = {
