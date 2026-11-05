@@ -1,6 +1,7 @@
 package com.example.ui.navigation
 
 import android.net.Uri
+import com.example.BuildConfig
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
@@ -168,7 +169,11 @@ fun ElsewhereApp(container: AppContainer) {
                         Text("Worlds are unavailable in this environment.")
                     }
                 } else {
-                    WorldsScreen(repository)
+                    WorldsScreen(
+                        repository = repository,
+                        archiveTransfer = if (BuildConfig.APPLICATION_ID.endsWith(".test"))
+                            container.worldArchiveTransfer else null
+                    )
                 }
             }
             composable(Screen.Personas.route) { 
