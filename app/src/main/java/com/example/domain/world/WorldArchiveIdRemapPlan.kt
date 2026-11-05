@@ -44,6 +44,10 @@ data class WorldArchiveIdRemapPlan(
 
     /** Some older variants use the original message ID for their variant group identity. */
     fun variantGroupId(sourceGroupId: String): String = get(WorldArchiveIdKind.VARIANT_GROUP, sourceGroupId)
+
+    /** Scenario NPC IDs only have meaning within their own Scenario template. */
+    fun scenarioNpcId(scenarioId: String, npcId: String): String =
+        get(WorldArchiveIdKind.SCENARIO_NPC, "$scenarioId|$npcId")
 }
 
 /**
@@ -70,10 +74,15 @@ object WorldArchiveIdPlanner {
         val messages = state.messages.map { it.messageId }.toSet()
         val variantGroups = state.messages.map { it.variantGroupId }.toSet()
         val scenarioNpcIds = (
-            state.scenarios.flatMap { ScenarioCodec.decode(it.definitionJson).npcs.map { npc -> npc.npcId } } +
-                state.scenarioSessions.flatMap {
-                    ScenarioCodec.decode(it.definitionJson).npcs.map { npc -> npc.npcId }
+            state.scenarios.flatMap { scenario ->
+                ScenarioCodec.decode(scenario.definitionJson).npcs.map { npc ->
+                    "${scenario.scenarioId}|${npc.npcId}"
                 }
+            } + state.scenarioSessions.flatMap { session ->
+                ScenarioCodec.decode(session.definitionJson).npcs.map { npc ->
+                    "${session.scenarioId}|${npc.npcId}"
+                }
+            }
             ).toSet()
 
         val sourceIds: Map<WorldArchiveIdKind, Set<String>> = linkedMapOf(
