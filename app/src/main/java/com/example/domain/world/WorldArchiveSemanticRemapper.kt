@@ -25,6 +25,7 @@ object WorldArchiveSemanticRemapper {
 
     private val moshi = Moshi.Builder().addLast(KotlinJsonAdapterFactory()).build()
     private val linksAdapter = moshi.adapter(WorldLinksV1::class.java).failOnUnknown()
+    private val rawStoryAdapter = moshi.adapter(Any::class.java)
     private val stringsAdapter = moshi.adapter<List<String>>(
         Types.newParameterizedType(List::class.java, String::class.java)
     )
@@ -41,6 +42,17 @@ object WorldArchiveSemanticRemapper {
 
     fun rewrite(source: WorldArchiveStateV1, plan: WorldArchiveIdRemapPlan): RewrittenWorld {
         WorldArchiveStateCodec.validate(source)
+        // Opaque extension fields do not have a published reference schema. Passing old
+        // resource IDs through these fields would create silent broken links after import.
+        // Accept only empty extensions until an explicit typed extension migration exists.
+        fun unsupportedExtension(json: String?): Boolean =
+            json?.trim()?.let { it.isNotBlank() && it != "{}" && it != "null" } == true
+        require(source.characters.none { unsupportedExtension(it.extensionFieldsJson) } &&
+            source.personas.none { unsupportedExtension(it.extensionFieldsJson) } &&
+            source.npcDossiers.none { unsupportedExtension(it.extensionFieldsJson) } &&
+            source.npcLibraryEntries.none { unsupportedExtension(it.extensionFieldsJson) }) {
+            "World contains opaque extension data requiring a schema-aware reference migration"
+        }
         // A plan from another archive or namespace must never silently remap this one.
         require(WorldArchiveIdPlanner.plan(source, plan.namespace).mappings == plan.mappings) {
             "Import identity plan does not match the authenticated World snapshot"
@@ -109,11 +121,29 @@ object WorldArchiveSemanticRemapper {
 
         val freshWorldId = id(WorldArchiveIdKind.WORLD, source.worldId)
         val oldNpcIds = source.npcDossiers.map { it.npcId }.toSet()
+        val selectedChatIds = source.chats.map { it.chatId }.toSet()
         fun content(originalChat: String, raw: String): String {
             if (!StoryResponseCodec.isEncoded(raw)) return raw
             val response = requireNotNull(StoryResponseCodec.decode(raw)) {
                 "Malformed structured story cannot be remapped safely"
             }
+            // The standard decoder deliberately drops unknown or malformed segments for
+            // display recovery. Import cannot do that: not one piece of user history may vanish.
+            val root = decode(
+                raw.substringAfter('\n', missingDelimiterValue = ""),
+                "structured story JSON",
+                rawStoryAdapter::fromJson
+            ) as? Map<*, *> ?: throw IllegalArgumentException("Structured story must be a JSON object")
+            require(root.keys == setOf("schemaVersion", "segments")) {
+                "Structured story has unknown fields requiring an explicit importer"
+            }
+            val rawSegments = root["segments"] as? List<*>
+                ?: throw IllegalArgumentException("Structured story has no segments")
+            require(rawSegments.size == response.segments.size && rawSegments.all { item ->
+                val segment = item as? Map<*, *> ?: return@all false
+                segment.keys.all { it in setOf("type", "content", "speakerId", "speakerName") } &&
+                    (segment["content"] as? String)?.isNotBlank() == true
+            }) { "Structured story contains unsupported or lossy segments" }
             return StoryResponseCodec.encode(response.copy(segments = response.segments.map { segment ->
                 val speaker = segment.speakerId
                 if (speaker == null) segment else segment.copy(
@@ -263,8 +293,7 @@ object WorldArchiveSemanticRemapper {
                 book.copy(
                     lorebookId = id(WorldArchiveIdKind.LOREBOOK, book.lorebookId),
                     storyId = book.storyId?.let { old ->
-                        if (old in source.chats.map { it.chatId }.toSet())
-                            id(WorldArchiveIdKind.CHAT, old) else old
+                        if (old in selectedChatIds) id(WorldArchiveIdKind.CHAT, old) else old
                     }
                 )
             },
