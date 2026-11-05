@@ -153,6 +153,44 @@ class WorldArchiveAdditiveRestorerTest {
         }
     }
 
+    @Test fun regeneratedVariantsAndTheirNpcUpdateProvenanceSurviveRoomCommit() = runBlocking {
+        val alternate = importedMessage.copy(
+            messageId = "message-alternative", variantGroupId = importedMessage.messageId,
+            isPrimaryVariant = false, content = "Instead, the key was in the pocket."
+        )
+        val npc = NpcDossierEntity(
+            npcId = "npc-porter", chatId = importedChat.chatId,
+            displayName = "A helpful porter"
+        )
+        val revision = NpcDossierUpdateEntity(
+            updateId = "npc-revision", chatId = importedChat.chatId, npcId = npc.npcId,
+            sourceMessageId = alternate.messageId, variantGroupId = importedMessage.messageId,
+            sourceOrderIndex = 1, sourceRevision = 1,
+            fieldName = "goals", oldValue = null, newValue = "Protect the key",
+            isApplied = false
+        )
+        val state = history().copy(
+            messages = listOf(importedMessage, alternate),
+            npcDossiers = listOf(npc), npcUpdates = listOf(revision)
+        )
+        io.inspectEncrypted(ByteArrayInputStream(encrypted(state)),
+            "sufficiently-long-password".toCharArray()).use { verified ->
+            val result = importer.importAsNewWorld(verified, "variant-history-session-12345")
+            val messages = db.backupDao().getMessages().filter { it.chatId in
+                db.backupDao().getChats().filter { it.chatId != "existing-chat" }.map { it.chatId }
+            }
+            assertEquals(2, messages.size)
+            assertEquals(1, messages.count { it.isPrimaryVariant })
+            assertEquals(1, messages.map { it.variantGroupId }.distinct().size)
+            val restoredRevision = db.backupDao().getNpcDossierUpdates().single()
+            val restoredAlternate = messages.single { !it.isPrimaryVariant }
+            assertEquals(restoredAlternate.messageId, restoredRevision.sourceMessageId)
+            assertEquals(restoredAlternate.variantGroupId, restoredRevision.variantGroupId)
+            assertEquals("Protect the key", restoredRevision.newValue)
+            assertEquals(result.worldId, db.worldDao().getWorlds().single().worldId)
+        }
+    }
+
     @Test fun sameOperationCannotImportTwiceOrMergeByMatchingDisplayName() = runBlocking {
         existingRecords()
         val bytes = encrypted(history())
