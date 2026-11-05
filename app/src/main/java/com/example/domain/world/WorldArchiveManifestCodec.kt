@@ -124,7 +124,7 @@ object WorldArchiveManifestCodec {
                     require(entry.path.startsWith("assets/") && entry.path.length > "assets/".length) {
                         "World archive assets must be inside the assets directory"
                     }
-                    require(entry.ownerId?.isNotBlank() == true && entry.ownerId.length <= 128) {
+                    require(entry.ownerId?.isNotBlank() == true && entry.ownerId.length <= 200) {
                         "World archive asset owner ID is required"
                     }
                 }
