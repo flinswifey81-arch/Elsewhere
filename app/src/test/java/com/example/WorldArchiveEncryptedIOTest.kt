@@ -95,6 +95,17 @@ class WorldArchiveEncryptedIOTest {
         assertEquals(original, inspected.state)
         assertEquals(definition(), inspected.definition)
         assertEquals(manifest, inspected.manifest)
+        val preview = inspected.preview()
+        assertEquals(1, preview.chats)
+        assertEquals(1, preview.messages)
+        assertEquals(1, preview.messageAttachments)
+        assertFalse(preview.containsPrivateNotes)
+        assertFalse(preview.containsNpcSecrets)
+        val ids = inspected.planNewWorldImport("new-world-session-12345")
+        assertNotEquals(original.worldId,
+            ids.get(WorldArchiveIdKind.WORLD, original.worldId))
+        assertNotEquals(message.messageId,
+            ids.get(WorldArchiveIdKind.MESSAGE, message.messageId))
         val extracted = inspected.assetFiles.getValue("assets/message-attachments/image-a")
         assertArrayEquals(imageBytes, extracted.readBytes())
         inspected.close()
