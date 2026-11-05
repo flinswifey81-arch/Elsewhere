@@ -4,6 +4,7 @@ on:
   pull_request:
     branches:
       - feature/worlds-foundation-2026-11-01
+      - feature/world-archive-manifest-contract-2026-11-05
       - main
   workflow_dispatch:
 
@@ -35,6 +36,7 @@ jobs:
         run: |
           bash ./gradlew :app:testSandboxUnitTest --no-daemon \
             --tests com.example.WorldArchiveManifestCodecTest \
+            --tests com.example.WorldArchiveHistoryTest \
             --tests com.example.WorldDefinitionCodecTest \
             --tests com.example.WorldRepositoryTest \
             --tests com.example.AppDatabaseMigrationTest
