@@ -54,6 +54,9 @@ object WorldArchiveSnapshotSelector {
         }
         val chats = source.chats.filter { it.chatId in includedChatIds }
         require(chats.size == includedChatIds.size) { "A selected World chat no longer exists" }
+        require(source.coopRooms.none { it.chatId in includedChatIds }) {
+            "A World chat is still associated with a co-op room. An explicit offline conversion is required."
+        }
 
         val scenarioSessions = source.scenarioSessions.filter { it.chatId in includedChatIds }
         val links = requireNotNull(linksAdapter.fromJson(world.linksJson)) {
@@ -138,12 +141,14 @@ object WorldArchiveSnapshotSelector {
             it.entryId in overlayEntryIds
         }.map { it.lorebookId })
         val lorebooks = source.lorebooks.filter { it.lorebookId in lorebookIds }
+        val loreEntries = source.lorebookEntries.filter { it.lorebookId in lorebookIds }
 
         if (!privateDataReviewed) {
             require(characters.none { !it.authorNotesJson.isNullOrBlank() } &&
                 personas.none { !it.privateNotesJson.isNullOrBlank() } &&
                 npcDossiers.none { it.authorNotes.isNotBlank() || it.secrets.isNotBlank() } &&
                 npcLibraryEntries.none { it.authorNotes.isNotBlank() || it.secrets.isNotBlank() } &&
+                loreEntries.none { it.notes.isNotBlank() } &&
                 source.chatSettings.filter { it.chatId in includedChatIds }
                     .none { !it.draftMessage.isNullOrBlank() }
             ) {
@@ -174,7 +179,7 @@ object WorldArchiveSnapshotSelector {
             conversationSummaries = source.conversationSummaries.filter { it.chatId in includedChatIds },
             relationships = relationships,
             lorebooks = lorebooks,
-            lorebookEntries = source.lorebookEntries.filter { it.lorebookId in lorebookIds },
+            lorebookEntries = loreEntries,
             chatLorebookAttachments = loreAttachments,
             chatLorebookOverlays = loreOverlays,
             npcDossiers = npcDossiers,
