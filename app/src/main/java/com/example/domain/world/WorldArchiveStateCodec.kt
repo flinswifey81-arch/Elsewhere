@@ -89,17 +89,17 @@ object WorldArchiveStateCodec {
         }
 
         val cast = ids(state.cast, "World cast") { it.worldCharacterId }
-        val events = ids(state.continuity, "World continuity events") { it.eventId }
+        ids(state.continuity, "World continuity events") { it.eventId }
         val characters = ids(state.characters, "Characters") { it.characterId }
         val personas = ids(state.personas, "Personas") { it.personaId }
         val scenarios = ids(state.scenarios, "Scenarios") { it.scenarioId }
         val chats = ids(state.chats, "Chats") { it.chatId }
         val messages = ids(state.messages, "Messages") { it.messageId }
-        val relations = ids(state.relationships, "Relationships") { it.relationshipId }
+        ids(state.relationships, "Relationships") { it.relationshipId }
         val books = ids(state.lorebooks, "Lorebooks") { it.lorebookId }
         val entries = ids(state.lorebookEntries, "Lorebook entries") { it.entryId }
         val npcs = ids(state.npcDossiers, "NPC dossiers") { it.npcId }
-        val npcUpdates = ids(state.npcUpdates, "NPC updates") { it.updateId }
+        ids(state.npcUpdates, "NPC updates") { it.updateId }
         val banks = ids(state.npcLibraryBanks, "NPC library banks") { it.bankId }
         val libraryNpcs = ids(state.npcLibraryEntries, "NPC library entries") { it.libraryNpcId }
         ids(state.messageAttachments, "Message attachments") { it.attachmentId }
@@ -158,7 +158,7 @@ object WorldArchiveStateCodec {
             require(when (link.roleType) {
                 "CHARACTER" -> link.resourceId in characters
                 "PERSONA" -> link.resourceId in personas
-                "SCENARIO_NPC" -> link.resourceId in (scenarioNpcIds[link.scenarioId] ?: emptySet())
+                "SCENARIO_NPC" -> link.resourceId in (link.scenarioId?.let(scenarioNpcIds::get) ?: emptySet())
                 "NPC_LIBRARY" -> link.resourceId in libraryNpcs
                 else -> false
             }) { "World role points to an unarchived resource" }
@@ -287,10 +287,7 @@ object WorldArchiveStateCodec {
                 attachment.assetPath == "assets/message-attachments/${attachment.attachmentId}"
         }) { "An attachment is missing its message or has unportable asset metadata" }
 
-        // The entity ID collections above are kept deliberately separate: a message ID is
-        // *also* the generation-metadata ID; they must be remapped as one identity.
-        @Suppress("UNUSED_VARIABLE")
-        val validatedCounts = events.size + relations.size + npcUpdates.size
+        // Generation metadata shares the source message identity, not an independent ID.
     }
 
     /**
