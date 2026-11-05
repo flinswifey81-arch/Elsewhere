@@ -3,6 +3,7 @@ package com.example.domain.world
 import android.content.Context
 import androidx.room.withTransaction
 import com.example.data.AppDatabase
+import com.example.data.model.ChatEntity
 import com.example.data.model.MessageAttachmentEntity
 import com.example.domain.backup.BackupAppearanceSettings
 import com.example.domain.backup.BackupPayload
@@ -79,6 +80,14 @@ class WorldArchiveTransferCoordinator(
     private val collector get() = WorldArchiveAssetCollector(
         attachmentRepository, profileRepository
     )
+
+    /** Lists existing local chats for the sandbox World membership picker; no writes. */
+    suspend fun localChatChoices(): List<ChatEntity> = withContext(Dispatchers.IO) {
+        dataCoordinator.withSnapshotMaintenance {
+            database.backupDao().getChats()
+                .sortedWith(compareByDescending<ChatEntity> { it.updatedAt }.thenBy { it.chatId })
+        }
+    }
 
     suspend fun previewExport(worldId: String): ExportPreview = withContext(Dispatchers.IO) {
         dataCoordinator.withSnapshotMaintenance {
