@@ -29,12 +29,15 @@ import okhttp3.ResponseBody.Companion.toResponseBody
 import okio.Buffer
 import okio.BufferedSource
 import okio.Pipe
+import okio.Source
+import okio.Timeout
 import okio.buffer
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.IOException
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
@@ -94,6 +97,34 @@ class OpenRouterModelProviderTest {
             .header("Content-Type", "text/event-stream")
             .body(body.toResponseBody("text/event-stream".toMediaType()))
             .build()
+    }
+
+    private class FailingAfterEventsInterceptor(private val body: String) : Interceptor {
+        override fun intercept(chain: Interceptor.Chain): Response {
+            val rawSource = object : Source {
+                private val remaining = Buffer().writeUtf8(body)
+
+                override fun read(sink: Buffer, byteCount: Long): Long =
+                    if (remaining.size > 0L) remaining.read(sink, byteCount)
+                    else throw IOException("Simulated connection loss after SSE events")
+
+                override fun timeout(): Timeout = Timeout.NONE
+                override fun close() {}
+            }
+            val responseBody = object : ResponseBody() {
+                override fun contentType() = "text/event-stream".toMediaType()
+                override fun contentLength(): Long = -1L
+                override fun source(): BufferedSource = rawSource.buffer()
+            }
+            return Response.Builder()
+                .request(chain.request())
+                .protocol(Protocol.HTTP_1_1)
+                .code(200)
+                .message("OK")
+                .header("Content-Type", "text/event-stream")
+                .body(responseBody)
+                .build()
+        }
     }
 
     private class HeldOpenStreamingInterceptor : Interceptor {
@@ -495,6 +526,80 @@ class OpenRouterModelProviderTest {
         assertEquals("mock/requested", metadata.requestedModelId)
         assertEquals("mock/resolved", metadata.resolvedModelId)
         assertEquals("Mock Provider", metadata.provider)
+        assertTrue(events.none { it is StreamEvent.Done })
+    }
+
+    @Test
+    fun lateConnectionFailureAfterStopDoesNotMarkFinishedAnswerIncomplete() = runBlocking {
+        val sse = """
+            data: {"choices":[{"delta":{"content":"The reply is finished."},"finish_reason":null}]}
+
+            data: {"choices":[{"delta":{},"finish_reason":"stop"}]}
+
+        """.trimIndent()
+        val provider = OpenRouterModelProvider(
+            client = OkHttpClient.Builder().addInterceptor(FailingAfterEventsInterceptor(sse)).build(),
+            moshi = Moshi.Builder().build(),
+            apiKeyProvider = { "mock-openrouter-key" }
+        )
+
+        val events = withTimeout(5_000) {
+            provider.streamResponse(
+                listOf(RoleplayMessage(Role.USER, "Hello")),
+                GenerationOptions(modelId = "mock/requested")
+            ).toList()
+        }
+
+        assertEquals("The reply is finished.", events.filterIsInstance<StreamEvent.Content>().joinToString("") { it.text })
+        assertEquals("stop", events.filterIsInstance<StreamEvent.Done>().single().metadata?.finishReason)
+        assertTrue(events.none { it is StreamEvent.Error })
+    }
+
+    @Test
+    fun brokenConnectionBeforeFinishKeepsReceivedTextButReportsIncomplete() = runBlocking {
+        val sse = """
+            data: {"choices":[{"delta":{"content":"Only a partial reply"},"finish_reason":null}]}
+
+        """.trimIndent()
+        val provider = OpenRouterModelProvider(
+            client = OkHttpClient.Builder().addInterceptor(FailingAfterEventsInterceptor(sse)).build(),
+            moshi = Moshi.Builder().build(),
+            apiKeyProvider = { "mock-openrouter-key" }
+        )
+
+        val events = withTimeout(5_000) {
+            provider.streamResponse(
+                listOf(RoleplayMessage(Role.USER, "Hello")),
+                GenerationOptions(modelId = "mock/requested")
+            ).toList()
+        }
+
+        assertEquals("Only a partial reply", events.filterIsInstance<StreamEvent.Content>().joinToString("") { it.text })
+        assertTrue(events.any { it is StreamEvent.Error })
+        assertTrue(events.none { it is StreamEvent.Done })
+    }
+
+    @Test
+    fun cleanConnectionCloseWithoutTerminalEvidenceIsNotSuccessful() = runBlocking {
+        val sse = """
+            data: {"choices":[{"delta":{"content":"Maybe unfinished"},"finish_reason":null}]}
+
+        """.trimIndent()
+        val provider = OpenRouterModelProvider(
+            client = OkHttpClient.Builder().addInterceptor(StreamingInterceptor(sse)).build(),
+            moshi = Moshi.Builder().build(),
+            apiKeyProvider = { "mock-openrouter-key" }
+        )
+
+        val events = withTimeout(5_000) {
+            provider.streamResponse(
+                listOf(RoleplayMessage(Role.USER, "Hello")),
+                GenerationOptions(modelId = "mock/requested")
+            ).toList()
+        }
+
+        assertEquals("Maybe unfinished", events.filterIsInstance<StreamEvent.Content>().joinToString("") { it.text })
+        assertTrue(events.filterIsInstance<StreamEvent.Error>().single().exception.message.orEmpty().contains("before the provider confirmed completion"))
         assertTrue(events.none { it is StreamEvent.Done })
     }
 
