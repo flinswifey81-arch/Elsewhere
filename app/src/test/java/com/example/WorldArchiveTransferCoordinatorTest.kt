@@ -18,6 +18,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
+import java.io.File
 import java.security.MessageDigest
 import java.util.UUID
 
@@ -123,6 +124,48 @@ class WorldArchiveTransferCoordinatorTest {
         assertTrue(failedExport.exceptionOrNull() is IllegalArgumentException)
         assertEquals(0, output.size())
         assertTrue(password.all { it == '\u0000' })
+    }
+
+    @Test fun exportPickerPipelinePreservesActualAttachmentBytesAndOriginalFile() = runBlocking {
+        seedWorld()
+        val bytes = "A disposable picture used only for Worlds test".toByteArray()
+        val relative = "message_attachments/world-source-${sessionId}.png"
+        val original = File(context.filesDir, relative).apply {
+            parentFile!!.mkdirs()
+            writeBytes(bytes)
+        }
+        try {
+            val checksum = MessageDigest.getInstance("SHA-256").digest(bytes)
+                .joinToString("") { "%02x".format(it.toInt() and 0xff) }
+            database.backupDao().insertMessageAttachments(listOf(
+                MessageAttachmentEntity(
+                    attachmentId = "source-image-$sessionId",
+                    chatId = sourceChatId, messageId = messageId,
+                    relativePath = relative, mimeType = "image/png",
+                    byteSize = bytes.size.toLong(), pixelWidth = 1, pixelHeight = 1,
+                    sha256 = checksum, sortPosition = 0, createdAt = 1L
+                )
+            ))
+            val preview = transfer.previewExport(sourceWorldId)
+            assertEquals(1, preview.attachmentCount)
+            val output = ByteArrayOutputStream()
+            transfer.exportReviewed(preview, output,
+                "a secure world password".toCharArray(), includePrivateMaterial = false)
+            transfer.inspectForImport(ByteArrayInputStream(output.toByteArray()),
+                "a secure world password".toCharArray()).use { candidate ->
+                assertEquals(1, candidate.preview.messageAttachments)
+                val restored = transfer.importReviewed(candidate, "a secure world password".toCharArray())
+                assertEquals(1, restored.imageFiles)
+            }
+            assertEquals(2, database.backupDao().getMessageAttachments().size)
+            val imported = database.backupDao().getMessageAttachments()
+                .single { it.chatId != sourceChatId }
+            assertArrayEquals(bytes, File(context.filesDir, imported.relativePath).readBytes())
+            assertEquals(checksum, imported.sha256)
+            assertArrayEquals(bytes, original.readBytes())
+        } finally {
+            original.delete()
+        }
     }
 
     @Test fun privateDraftsRequireExplicitExportConsent() = runBlocking {
