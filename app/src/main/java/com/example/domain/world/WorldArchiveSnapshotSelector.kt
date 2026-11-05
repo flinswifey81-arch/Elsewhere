@@ -95,7 +95,7 @@ object WorldArchiveSnapshotSelector {
 
         fun parseKnowledgeMap(raw: String): Map<String, String> =
             requireNotNull(mapAdapter.fromJson(raw)) { "Invalid NPC knowledge map" }
-        (npcDossiers + emptyList<NpcDossierEntity>()).forEach { npc ->
+        npcDossiers.forEach { npc ->
             characterIds.addAll(parseKnowledgeMap(npc.characterKnowledgeJson).keys)
             personaIds.addAll(parseKnowledgeMap(npc.personaRelationshipsJson).keys)
         }
