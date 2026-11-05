@@ -898,6 +898,16 @@ class ChatDetailGenerationTest {
         assertFalse(visible.contains("<|"))
         assertFalse(visible.contains("broken"))
         assertEquals(1, provider.requests.size)
+        val savedWithWarning = withTimeout(15_000) {
+            harness.viewModel.uiState.first { state ->
+                state is ChatUiState.Success &&
+                    !state.isGenerating &&
+                    state.generationWarning != null &&
+                    state.messages.any { it.messageId == completed.last().messageId }
+            }
+        } as ChatUiState.Success
+        assertNull(savedWithWarning.generationError)
+        assertTrue(savedWithWarning.generationWarning.orEmpty().isNotBlank())
     }
 
     @Test
