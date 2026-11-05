@@ -260,7 +260,7 @@ class WorldArchiveTransferCoordinator(
                 state.lorebookEntries.any { it.notes.isNotBlank() },
             containsUnsentDrafts = state.chatSettings.any { !it.draftMessage.isNullOrBlank() } ||
                 state.messageAttachments.any { it.messageId == null },
-            fingerprint = sha256(bytes)
+            fingerprint = MessageDigest.getInstance("SHA-256").digest(bytes).hex()
         )
     }
 
