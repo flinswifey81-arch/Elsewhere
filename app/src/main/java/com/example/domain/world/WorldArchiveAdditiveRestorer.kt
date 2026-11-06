@@ -237,6 +237,8 @@ class WorldArchiveAdditiveRestorer(
                         ProfileImageKind.CHARACTER -> WorldArchiveIdKind.CHARACTER
                         ProfileImageKind.PERSONA -> WorldArchiveIdKind.PERSONA
                         ProfileImageKind.SCENARIO -> WorldArchiveIdKind.SCENARIO
+                        ProfileImageKind.NPC ->
+                            throw IllegalArgumentException("NPC portrait import requires a verified storage adapter")
                     }
                     val owner = plan.get(ownerType, requireNotNull(entry.ownerId))
                     val key = ProfileImageRepository.storageKey(kind, owner)
