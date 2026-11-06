@@ -192,9 +192,24 @@ fun ElsewhereApp(
                         },
                         onCreateSoloEpisode = { worldId ->
                             navController.navigate("world_create_solo/${Uri.encode(worldId)}")
+                        },
+                        onCreateScenarioEpisode = { worldId ->
+                            navController.navigate("world_scenarios/${Uri.encode(worldId)}")
                         }
                     )
                 }
+            }
+            composable(
+                "world_scenarios/{worldId}",
+                arguments = listOf(navArgument("worldId") { type = NavType.StringType })
+            ) { backStackEntry ->
+                val worldId = backStackEntry.arguments?.getString("worldId").orEmpty()
+                ScenariosScreen(
+                    container,
+                    onChatCreated = { chatId -> navController.navigate("chat_detail/${Uri.encode(chatId)}") },
+                    onPersonas = { navController.navigate(Screen.Personas.route) },
+                    initialWorldId = worldId
+                )
             }
             composable(Screen.Personas.route) { 
                 PersonasScreen(
