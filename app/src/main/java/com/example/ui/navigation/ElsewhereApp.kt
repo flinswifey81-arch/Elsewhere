@@ -9,6 +9,7 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -51,8 +52,19 @@ val bottomNavItems = listOf(
 )
 
 @Composable
-fun ElsewhereApp(container: AppContainer) {
+fun ElsewhereApp(
+    container: AppContainer,
+    requestedChatId: String? = null,
+    onRequestedChatHandled: () -> Unit = {}
+) {
     val navController = rememberNavController()
+    LaunchedEffect(requestedChatId) {
+        val target = requestedChatId?.takeIf(String::isNotBlank) ?: return@LaunchedEffect
+        navController.navigate("chat_detail/${Uri.encode(target)}") {
+            launchSingleTop = true
+        }
+        onRequestedChatHandled()
+    }
     val isLightPalette = MaterialTheme.colorScheme.background.luminance() > 0.5f
     fun navigateTo(screen: Screen) {
         navController.navigate(screen.route) {
