@@ -227,25 +227,25 @@ class WorldArchiveAdditiveRestorer(
                 }
                 WorldArchiveEntryKind.CHARACTER_AVATAR,
                 WorldArchiveEntryKind.PERSONA_AVATAR,
-                WorldArchiveEntryKind.SCENARIO_AVATAR -> {
+                WorldArchiveEntryKind.SCENARIO_AVATAR,
+                WorldArchiveEntryKind.NPC_PORTRAIT -> {
                     val kind = when (entry.kind) {
                         WorldArchiveEntryKind.CHARACTER_AVATAR -> ProfileImageKind.CHARACTER
                         WorldArchiveEntryKind.PERSONA_AVATAR -> ProfileImageKind.PERSONA
-                        else -> ProfileImageKind.SCENARIO
+                        WorldArchiveEntryKind.SCENARIO_AVATAR -> ProfileImageKind.SCENARIO
+                        WorldArchiveEntryKind.NPC_PORTRAIT -> ProfileImageKind.NPC
+                        else -> throw IllegalArgumentException("Unsupported portrait kind")
                     }
                     val ownerType = when (kind) {
                         ProfileImageKind.CHARACTER -> WorldArchiveIdKind.CHARACTER
                         ProfileImageKind.PERSONA -> WorldArchiveIdKind.PERSONA
                         ProfileImageKind.SCENARIO -> WorldArchiveIdKind.SCENARIO
-                        ProfileImageKind.NPC ->
-                            throw IllegalArgumentException("NPC portrait import requires a verified storage adapter")
+                        ProfileImageKind.NPC -> WorldArchiveIdKind.NPC_DOSSIER
                     }
                     val owner = plan.get(ownerType, requireNotNull(entry.ownerId))
                     val key = ProfileImageRepository.storageKey(kind, owner)
                     "profile_images/${kind.directoryName}/$key.png"
                 }
-                WorldArchiveEntryKind.NPC_PORTRAIT ->
-                    throw IllegalArgumentException("NPC portrait restore has no verified storage adapter")
                 else -> throw IllegalArgumentException("Unsupported World asset type")
             }
             require(isManagedImagePath(relative)) { "World asset destination path is unsafe" }
@@ -360,7 +360,7 @@ class WorldArchiveAdditiveRestorer(
             "message_attachments/world-import-[a-f0-9-]{36}\\.(png|jpg|webp)"
         )
         private val PROFILE_PATH = Regex(
-            "profile_images/(characters|personas|scenarios)/[a-f0-9]{64}\\.png"
+            "profile_images/(characters|personas|scenarios|npcs)/[a-f0-9]{64}\\.png"
         )
     }
 }
