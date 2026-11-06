@@ -32,6 +32,8 @@ import com.example.domain.provider.ModelRouting
 import com.example.domain.provider.RoleplayMessage
 import com.example.domain.provider.StreamEvent
 import com.example.domain.npc.NpcStructuredOutputParser
+import com.example.domain.npc.NpcSceneCastResolver
+import com.example.domain.npc.NpcScenePresence
 import com.example.domain.story.StoryOutputParser
 import com.example.domain.story.StoryResponseCodec
 import com.example.domain.story.StorySpeakerIdentity
@@ -1049,7 +1051,13 @@ class ChatDetailViewModel(
                     } else {
                         com.example.domain.npc.ParsedNpcOutput(generatedContent)
                     }
-                    val storyParsed = if (prepared.ensembleNarrationEnabled) {
+                    // A narrator-off reply may still imitate earlier typed speaker labels.
+                    // Normalize clear transcript output, but preserve ordinary Solo prose.
+                    val explicitSpeakerFormat = prepared.character.type == SpeakerType.CHARACTER &&
+                        StoryOutputParser.hasExplicitSpeakerFormatting(
+                            parsed.storyText, fullCharacter.displayName
+                        )
+                    val storyParsed = if (prepared.ensembleNarrationEnabled || explicitSpeakerFormat) {
                         storyOutputParser.parse(
                             output = parsed.storyText,
                             primaryCharacter = StorySpeakerIdentity(fullCharacter.characterId, fullCharacter.displayName),
@@ -1234,21 +1242,37 @@ class ChatDetailViewModel(
         ).orEmpty()
         val activeCoopRoom = coopSessionManager?.state?.value?.room?.takeIf { it.chatId == chatId }
         val npcBankEnabled = activeCoopRoom == null && npcRepository?.getSettings(chatId)?.isEnabled == true
-        val ensembleNarrationEnabled = summary.chat.chatType == ChatType.SOLO &&
-            settings.narratorEnabled && activeCoopRoom == null
         val projectedNpcDossiers = if (npcBankEnabled) {
             npcRepository?.getProjectedDossiers(chatId).orEmpty()
         } else emptyList()
-        val knownNpcSpeakers = projectedNpcDossiers.map { dossier ->
+        val sceneCast = NpcSceneCastResolver.resolve(projectedNpcDossiers, history + currentMessage)
+        val presentNpcs = sceneCast.filter { it.presence == NpcScenePresence.PRESENT }.map { it.dossier }
+        // NPC Bank stores continuity; the active Scene Cast controls whether we need speaker splitting.
+        // Without any present NPC, ordinary Solo prose stays untouched.
+        val ensembleNarrationEnabled = summary.chat.chatType == ChatType.SOLO &&
+            (settings.narratorEnabled || presentNpcs.isNotEmpty()) && activeCoopRoom == null
+        val knownNpcSpeakers = presentNpcs.map { dossier ->
             StorySpeakerIdentity(dossier.npcId, dossier.displayName)
         }
         val coLeadNpcNames = if (ensembleNarrationEnabled && settings.coLeadEnsembleEnabled) {
-            projectedNpcDossiers.filter { it.keepInScene }
+            presentNpcs.filter { it.keepInScene }
                 .take(NpcRepository.SOLO_ENSEMBLE_NPC_CONTEXT_LIMIT)
                 .map { it.displayName }
         } else emptyList()
         val coLeadRebalanceActive = settings.coLeadRebalanceTurnsRemaining > 0 && coLeadNpcNames.isNotEmpty()
-        val supportingCast = if (npcBankEnabled) {
+        val sceneInstructions = if (npcBankEnabled && sceneCast.isNotEmpty()) {
+            val present = presentNpcs.map { it.displayName }
+            val absent = sceneCast.filter { it.presence == NpcScenePresence.AWAY }.map { it.dossier.displayName }
+            buildString {
+                append("[SCENE CAST — physically present supporting characters] ")
+                append("Present: ").append(present.joinToString(", ").ifEmpty { "none confirmed" }).append(". ")
+                if (absent.isNotEmpty()) append("Absent: ").append(absent.joinToString(", ")).append(". ")
+                append("Other remembered NPCs have unknown presence. ")
+                append("Absent or unknown NPCs must not appear or speak until an actual entrance. ")
+                append("Pinned Co-Leads have priority but are not teleported into scenes.")
+            }
+        } else null
+        val activeNpcDossiers = if (npcBankEnabled) {
             npcRepository?.relevantContext(
                 chatId = chatId,
                 recentMessages = history + currentMessage,
@@ -1263,6 +1287,8 @@ class ChatDetailViewModel(
                 }
             )
         } else null
+        val supportingCast = listOfNotNull(sceneInstructions, activeNpcDossiers)
+            .joinToString("\n\n").takeIf(String::isNotBlank)
 
         val contextMessages = if (summary.chat.chatType == ChatType.GROUP) {
             val state = _uiState.value as? ChatUiState.Success
@@ -1506,12 +1532,14 @@ class ChatDetailViewModel(
                     dataCoordinator.withMutation(dataRevision) {
                         if (npcRepository != null) {
                             try {
-                                npcRepository.persistContinuationAtomically(
+                                val report = npcRepository.persistContinuationAtomically(
                                     continuedMessage,
                                     persistedMetadata,
                                     npcUpdates,
-                                    activePersonaId
+                                    activePersonaId,
+                                    skipInvalidNpcMetadata = true
                                 )
+                                report.warning("Continuation")?.let { npcUpdateWarning = it }
                             } catch (npcError: Exception) {
                                 if (npcUpdates.isEmpty()) throw npcError
                                 npcRepository.persistContinuationAtomically(
@@ -1637,13 +1665,15 @@ class ChatDetailViewModel(
                 dataCoordinator.withMutation(dataRevision) {
                     if (npcRepository != null) {
                         try {
-                            npcRepository.persistGeneratedMessageAtomically(
+                            val report = npcRepository.persistGeneratedMessageAtomically(
                                 message = botMsg,
                                 metadata = persistedMetadata,
                                 isNewVariant = variantGroupId != null,
                                 updates = npcUpdates,
-                                activePersonaId = activePersonaId
+                                activePersonaId = activePersonaId,
+                                skipInvalidNpcMetadata = true
                             )
+                            report.warning("Response")?.let { memoryWarning = it }
                         } catch (npcError: Exception) {
                             if (npcUpdates.isEmpty()) throw npcError
                             npcRepository.persistGeneratedMessageAtomically(
@@ -1936,7 +1966,10 @@ class ChatDetailViewModel(
         val storyText = if (prepared.npcBankEnabled) {
             NpcStructuredOutputParser.visibleStoryText(content)
         } else content
-        if (!prepared.ensembleNarrationEnabled) return storyText
+        if (!prepared.ensembleNarrationEnabled &&
+            (prepared.character.type != SpeakerType.CHARACTER ||
+                !StoryOutputParser.hasExplicitSpeakerFormatting(storyText, prepared.character.displayName))
+        ) return storyText
         val parsed = storyOutputParser.parse(
             output = storyText,
             primaryCharacter = StorySpeakerIdentity(
