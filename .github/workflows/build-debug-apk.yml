@@ -57,6 +57,8 @@ jobs:
             --tests com.example.domain.backup.BackupCryptoTest \
             --tests com.example.domain.backup.BackupRepositoryTest \
             --tests com.example.ChatDetailGenerationTest \
+            --tests com.example.RetainedChatViewModelStoresTest \
+            --tests com.example.ReplyNotificationPolicyTest \
             --tests com.example.ChatSettingsScreenInitTest \
             --tests com.example.EndpointSelectionPersistenceTest \
             --tests com.example.LorebookRepositoryTest \
