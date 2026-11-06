@@ -25,6 +25,7 @@ import com.example.data.model.WorldCastEntity
 import com.example.data.model.WorldContinuityEventEntity
 import com.example.data.model.WorldEntity
 import com.example.domain.repository.WorldRepository
+import com.example.domain.repository.ChatRepository
 import com.example.ui.components.elsewhereCardBorder
 import com.example.ui.components.elsewhereTextFieldColors
 import com.example.ui.components.elsewhereTopAppBarColors
@@ -39,6 +40,7 @@ import kotlinx.coroutines.launch
 fun WorldsScreen(
     repository: WorldRepository,
     archiveTransfer: WorldArchiveTransferCoordinator? = null,
+    chatRepository: ChatRepository? = null,
     onOpenChat: ((String) -> Unit)? = null,
     onCreateSoloEpisode: ((String) -> Unit)? = null
 ) {
@@ -328,7 +330,7 @@ fun WorldsScreen(
                                 }
                             }
                         ) { Text("Export World Definition JSON") }
-                        if (archiveTransfer != null) {
+                        if (chatRepository != null) {
                             if (onCreateSoloEpisode != null) {
                                 Button(
                                     onClick = { onCreateSoloEpisode(selected.worldId) },
@@ -336,9 +338,11 @@ fun WorldsScreen(
                                 ) { Text("New solo episode") }
                             }
                             WorldArchiveChatLinks(
-                                repository, archiveTransfer, selected,
+                                repository, chatRepository, selected,
                                 onOpenChat = { chatId -> onOpenChat?.invoke(chatId) }
                             )
+                        }
+                        if (archiveTransfer != null) {
                             WorldArchiveControls(archiveTransfer, selected, onImported = { selectedId = it })
                         }
                         Text("Definition JSON excludes episode history. Encrypted World archives include chat history and files when available in Worlds Preview.",
