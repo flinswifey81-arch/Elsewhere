@@ -34,6 +34,7 @@ class ContextCompilerV1 {
         recentMessageLimit: Int = 24,
         groupParticipantNames: List<String> = emptyList(),
         activeLore: List<ActiveLoreEntry> = emptyList(),
+        worldContext: String? = null,
         supportingCastContext: String? = null,
         npcBankEnabled: Boolean = false,
         narratorEnabled: Boolean = false,
@@ -123,6 +124,15 @@ class ContextCompilerV1 {
                 append('\n')
             }
             
+            if (!worldContext.isNullOrBlank()) {
+                append("--- SHARED WORLD BASELINE & APPROVED CONTINUITY ---\n")
+                append("These are World setting and accepted continuity facts, not automatic private knowledge of the responding Character. ")
+                append("Do not bring off-scene cast members into the scene or reveal hidden information as Character knowledge. ")
+                append("Do not override the player's Persona or change an established Character's identity.\n")
+                append(worldContext.take(16_000))
+                append("\n\n")
+            }
+
             // Character details
             append("--- CHARACTER: ${character.displayName} ---\n")
             if (!character.identityJson.isNullOrBlank()) append("Identity:\n${resolveMacros(character.identityJson)}\n\n")
@@ -341,6 +351,7 @@ class ContextCompilerV1 {
         rollingSummary: String? = null,
         recentMessageLimit: Int = 24,
         activeLore: List<ActiveLoreEntry> = emptyList(),
+        worldContext: String? = null,
         supportingCastContext: String? = null,
         npcBankEnabled: Boolean = false,
         narratorEnabled: Boolean = false,
@@ -361,6 +372,7 @@ class ContextCompilerV1 {
             recentMessageLimit = recentMessageLimit,
             groupParticipantNames = activeCharacterNames,
             activeLore = activeLore,
+            worldContext = worldContext,
             supportingCastContext = supportingCastContext,
             npcBankEnabled = npcBankEnabled,
             narratorEnabled = narratorEnabled,
