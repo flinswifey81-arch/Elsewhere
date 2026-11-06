@@ -253,6 +253,45 @@ class WorldArchiveAdditiveRestorerTest {
         }
     }
 
+    @Test fun npcPortraitSurvivesAsNewDossierImageWithoutTouchingOtherArt() = runBlocking {
+        existingRecords()
+        val npc = NpcDossierEntity(
+            npcId = "npc-portrait-source", chatId = importedChat.chatId,
+            displayName = "The Porter"
+        )
+        val state = history().copy(npcDossiers = listOf(npc))
+        val originalFile = temp.newFile().apply { writeBytes(fileBytes) }
+        val output = ByteArrayOutputStream()
+        io.exportSelectedEncrypted(
+            state,
+            listOf(WorldArchiveEncryptedIO.AssetSource(
+                "assets/avatars/npc/porter.png",
+                WorldArchiveEntryKind.NPC_PORTRAIT, npc.npcId, originalFile
+            )),
+            output, "sufficiently-long-password".toCharArray(), 1L
+        )
+        io.inspectEncrypted(
+            ByteArrayInputStream(output.toByteArray()),
+            "sufficiently-long-password".toCharArray()
+        ).use { verified ->
+            val namespace = "world-npc-artwork-import-12345"
+            val remappedNpcId = verified.planNewWorldImport(namespace)
+                .get(WorldArchiveIdKind.NPC_DOSSIER, npc.npcId)
+            assertEquals(1, verified.preview().otherImageFiles)
+            val result = importer.importAsNewWorld(verified, namespace)
+            assertEquals(1, result.imageFiles)
+            val importedNpcPicture = File(
+                appFiles,
+                "profile_images/npcs/" +
+                    ProfileImageRepository.storageKey(ProfileImageKind.NPC, remappedNpcId) + ".png"
+            )
+            assertArrayEquals(fileBytes, importedNpcPicture.readBytes())
+            assertEquals(remappedNpcId, db.backupDao().getNpcDossiers().single().npcId)
+            assertArrayEquals(fileBytes, originalFile.readBytes())
+            assertNotNull(db.worldDao().getWorld("existing-world"))
+        }
+    }
+
     @Test fun scenarioCollisionCannotReplaceAnExistingTemplate() = runBlocking {
         existingRecords()
         val scenario = ScenarioEntity(
