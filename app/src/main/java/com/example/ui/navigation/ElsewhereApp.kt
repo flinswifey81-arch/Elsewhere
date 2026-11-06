@@ -186,6 +186,7 @@ fun ElsewhereApp(
                         repository = repository,
                         archiveTransfer = if (BuildConfig.WORLD_ARCHIVE_PREVIEW)
                             container.worldArchiveTransfer else null,
+                        chatRepository = container.chatRepository,
                         onOpenChat = { chatId ->
                             navController.navigate("chat_detail/${Uri.encode(chatId)}")
                         },
