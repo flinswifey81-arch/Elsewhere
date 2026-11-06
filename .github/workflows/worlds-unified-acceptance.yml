@@ -4,6 +4,7 @@ on:
   pull_request:
     branches:
       - main
+      - feature/world-archive-test-ui-2026-11-05
   push:
     branches:
       - integration/worlds-and-rp-lifecycle-2026-11-06
