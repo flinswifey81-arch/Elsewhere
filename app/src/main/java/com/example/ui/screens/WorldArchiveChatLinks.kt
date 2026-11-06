@@ -43,7 +43,8 @@ import kotlinx.coroutines.launch
 fun WorldArchiveChatLinks(
     repository: WorldRepository,
     transfer: WorldArchiveTransferCoordinator,
-    world: WorldEntity
+    world: WorldEntity,
+    onOpenChat: (String) -> Unit
 ) {
     val scope = rememberCoroutineScope()
     var chats by remember(world.worldId) { mutableStateOf<List<ChatEntity>>(emptyList()) }
@@ -105,6 +106,11 @@ fun WorldArchiveChatLinks(
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
+                TextButton(
+                    enabled = !busy,
+                    modifier = Modifier.testTag("world_archive_open_chat_" + chat.chatId),
+                    onClick = { onOpenChat(chat.chatId) }
+                ) { Text("Open") }
                 TextButton(enabled = !busy, onClick = { pendingUnlink = chat }) {
                     Text("Unlink")
                 }
