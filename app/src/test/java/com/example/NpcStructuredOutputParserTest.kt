@@ -11,6 +11,15 @@ class NpcStructuredOutputParserTest {
     private val parser = NpcStructuredOutputParser(Moshi.Builder().build())
 
     @Test
+    fun discoveryPromptRequiresNewSpeakingNpcMetadataInSameResponse() {
+        val prompt = NpcStructuredOutputParser.OUTPUT_INSTRUCTION
+        assertTrue(prompt.contains("REQUIRED: Whenever a newly introduced, named supporting NPC speaks"))
+        assertTrue(prompt.contains("If no qualifying NPC is new"))
+        assertTrue(prompt.contains("SAME response"))
+        assertTrue(prompt.contains("passing mentions"))
+    }
+
+    @Test
     fun validTerminalBlockIsRemovedAndParsed() {
         val output = """
             She shuts the archive door behind her.
