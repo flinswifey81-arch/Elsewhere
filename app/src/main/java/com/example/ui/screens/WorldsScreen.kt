@@ -38,7 +38,9 @@ import kotlinx.coroutines.launch
 @Composable
 fun WorldsScreen(
     repository: WorldRepository,
-    archiveTransfer: WorldArchiveTransferCoordinator? = null
+    archiveTransfer: WorldArchiveTransferCoordinator? = null,
+    onOpenChat: ((String) -> Unit)? = null,
+    onCreateSoloEpisode: ((String) -> Unit)? = null
 ) {
     val worlds by repository.observeWorlds().collectAsState(initial = emptyList())
     val scope = rememberCoroutineScope()
@@ -327,7 +329,16 @@ fun WorldsScreen(
                             }
                         ) { Text("Export World Definition JSON") }
                         if (archiveTransfer != null) {
-                            WorldArchiveChatLinks(repository, archiveTransfer, selected)
+                            if (onCreateSoloEpisode != null) {
+                                Button(
+                                    onClick = { onCreateSoloEpisode(selected.worldId) },
+                                    modifier = Modifier.testTag("world_new_solo_episode")
+                                ) { Text("New solo episode") }
+                            }
+                            WorldArchiveChatLinks(
+                                repository, archiveTransfer, selected,
+                                onOpenChat = { chatId -> onOpenChat?.invoke(chatId) }
+                            )
                             WorldArchiveControls(archiveTransfer, selected, onImported = { selectedId = it })
                         }
                         Text("Definition JSON excludes episode history. Encrypted World archives include chat history and files when available in Worlds Preview.",
