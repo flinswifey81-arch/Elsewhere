@@ -1290,6 +1290,9 @@ class ChatDetailViewModel(
         val supportingCast = listOfNotNull(sceneInstructions, activeNpcDossiers)
             .joinToString("\n\n").takeIf(String::isNotBlank)
 
+        // Solo and Group episodes share their World's approved setting and continuity
+        // just as Scenario episodes do. This is a local Room read, not another model call.
+        val activeWorldContext = scenarioRepository?.worldContextForChat(chatId)
         val contextMessages = if (summary.chat.chatType == ChatType.GROUP) {
             val state = _uiState.value as? ChatUiState.Success
             val activeCharacterNames = state?.groupCharacters
@@ -1311,6 +1314,7 @@ class ChatDetailViewModel(
                 durableMemories = durableMemories,
                 rollingSummary = rollingSummary,
                 activeLore = activeLore,
+                worldContext = activeWorldContext,
                 supportingCastContext = supportingCast,
                 npcBankEnabled = npcBankEnabled,
                 narratorEnabled = settings.narratorEnabled,
@@ -1330,6 +1334,7 @@ class ChatDetailViewModel(
                 durableMemories = durableMemories,
                 rollingSummary = rollingSummary,
                 activeLore = activeLore,
+                worldContext = activeWorldContext,
                 supportingCastContext = supportingCast,
                 npcBankEnabled = npcBankEnabled,
                 narratorEnabled = settings.narratorEnabled,
