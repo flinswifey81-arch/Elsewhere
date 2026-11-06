@@ -12,7 +12,9 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalDensity
@@ -183,7 +185,13 @@ fun ElsewhereApp(
                     WorldsScreen(
                         repository = repository,
                         archiveTransfer = if (BuildConfig.WORLD_ARCHIVE_PREVIEW)
-                            container.worldArchiveTransfer else null
+                            container.worldArchiveTransfer else null,
+                        onOpenChat = { chatId ->
+                            navController.navigate("chat_detail/${Uri.encode(chatId)}")
+                        },
+                        onCreateSoloEpisode = { worldId ->
+                            navController.navigate("world_create_solo/${Uri.encode(worldId)}")
+                        }
                     )
                 }
             }
@@ -235,6 +243,77 @@ fun ElsewhereApp(
                 )
             }
             
+            // A World episode uses the existing Solo chat creator, then records its
+            // membership before opening it. A failed link never deletes the new chat.
+            composable(
+                "world_create_solo/{worldId}",
+                arguments = listOf(navArgument("worldId") { type = NavType.StringType })
+            ) { backStackEntry ->
+                val worldId = backStackEntry.arguments?.getString("worldId").orEmpty()
+                val repository = container.worldRepository
+                val scope = rememberCoroutineScope()
+                var createdButUnlinked by remember { mutableStateOf<String?>(null) }
+                var linkError by remember { mutableStateOf<String?>(null) }
+                fun openCreatedChat(chatId: String) {
+                    navController.navigate("chat_detail/${Uri.encode(chatId)}") {
+                        popUpTo("world_create_solo/{worldId}") { inclusive = true }
+                    }
+                }
+                CreateSoloChatScreen(
+                    chatRepository = container.chatRepository,
+                    personaRepository = container.personaRepository,
+                    characterRepository = container.characterRepository,
+                    onChatCreated = { chatId ->
+                        scope.launch {
+                            try {
+                                requireNotNull(repository) { "Worlds repository is unavailable" }
+                                    .attach(worldId, com.example.data.model.WorldResourceType.CHAT, chatId)
+                                openCreatedChat(chatId)
+                            } catch (failure: Exception) {
+                                createdButUnlinked = chatId
+                                linkError = failure.message ?: "Could not link new episode to this World."
+                            }
+                        }
+                    },
+                    onNavigateBack = { navController.popBackStack() }
+                )
+                val unlinkedId = createdButUnlinked
+                if (unlinkedId != null) {
+                    AlertDialog(
+                        onDismissRequest = {},
+                        title = { Text("Episode created but not linked") },
+                        text = {
+                            Text(
+                                (linkError ?: "Linking failed.") +
+                                    " The chat was saved. You can retry linking it or open it " +
+                                    "and attach it to the World later."
+                            )
+                        },
+                        confirmButton = {
+                            TextButton(onClick = {
+                                scope.launch {
+                                    try {
+                                        requireNotNull(repository).attach(
+                                            worldId, com.example.data.model.WorldResourceType.CHAT, unlinkedId
+                                        )
+                                        createdButUnlinked = null
+                                        openCreatedChat(unlinkedId)
+                                    } catch (failure: Exception) {
+                                        linkError = failure.message ?: "Linking still failed."
+                                    }
+                                }
+                            }) { Text("Retry link") }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = {
+                                createdButUnlinked = null
+                                openCreatedChat(unlinkedId)
+                            }) { Text("Open unlinked chat") }
+                        }
+                    )
+                }
+            }
+
             composable(
                 "chat_settings/{chatId}",
                 arguments = listOf(navArgument("chatId") { type = NavType.StringType })
