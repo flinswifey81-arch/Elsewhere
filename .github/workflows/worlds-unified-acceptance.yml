@@ -4,6 +4,9 @@ on:
   pull_request:
     branches:
       - main
+  push:
+    branches:
+      - integration/worlds-and-rp-lifecycle-2026-11-06
   workflow_dispatch:
 
 permissions:
