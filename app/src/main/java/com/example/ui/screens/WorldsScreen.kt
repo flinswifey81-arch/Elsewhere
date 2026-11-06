@@ -42,7 +42,8 @@ fun WorldsScreen(
     archiveTransfer: WorldArchiveTransferCoordinator? = null,
     chatRepository: ChatRepository? = null,
     onOpenChat: ((String) -> Unit)? = null,
-    onCreateSoloEpisode: ((String) -> Unit)? = null
+    onCreateSoloEpisode: ((String) -> Unit)? = null,
+    onCreateScenarioEpisode: ((String) -> Unit)? = null
 ) {
     val worlds by repository.observeWorlds().collectAsState(initial = emptyList())
     val scope = rememberCoroutineScope()
@@ -336,6 +337,12 @@ fun WorldsScreen(
                                     onClick = { onCreateSoloEpisode(selected.worldId) },
                                     modifier = Modifier.testTag("world_new_solo_episode")
                                 ) { Text("New solo episode") }
+                            }
+                            if (onCreateScenarioEpisode != null) {
+                                OutlinedButton(
+                                    onClick = { onCreateScenarioEpisode(selected.worldId) },
+                                    modifier = Modifier.testTag("world_new_scenario_episode")
+                                ) { Text("New Scenario episode") }
                             }
                             WorldArchiveChatLinks(
                                 repository, chatRepository, selected,
