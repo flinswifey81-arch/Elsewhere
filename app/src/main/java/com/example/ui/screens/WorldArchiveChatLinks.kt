@@ -28,7 +28,8 @@ import com.example.data.model.ChatEntity
 import com.example.data.model.WorldEntity
 import com.example.data.model.WorldResourceType
 import com.example.domain.repository.WorldRepository
-import com.example.domain.world.WorldArchiveTransferCoordinator
+import com.example.domain.repository.ChatRepository
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
@@ -42,7 +43,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun WorldArchiveChatLinks(
     repository: WorldRepository,
-    transfer: WorldArchiveTransferCoordinator,
+    chatRepository: ChatRepository,
     world: WorldEntity,
     onOpenChat: (String) -> Unit
 ) {
@@ -55,7 +56,8 @@ fun WorldArchiveChatLinks(
     var error by remember { mutableStateOf<String?>(null) }
 
     suspend fun refresh() {
-        chats = transfer.localChatChoices()
+        chats = chatRepository.getAllChats().first()
+            .sortedWith(compareByDescending<ChatEntity> { it.updatedAt }.thenBy { it.chatId })
         linkedIds = repository.getMemberships(world.worldId)
             .filter { it.resourceType == WorldResourceType.CHAT.name }
             .map { it.resourceId }.toSet()
