@@ -97,7 +97,15 @@ jobs:
               assert libs and all(x.compress_type == ZIP_DEFLATED for x in libs)
           print("Native libraries compressed")
           PY
-          aapt dump badging app/build/outputs/apk/sandbox/app-sandbox.apk | head -3
+          APK=app/build/outputs/apk/sandbox/app-sandbox.apk
+          AAPT="$ANDROID_HOME/build-tools/36.0.0/aapt"
+          APKSIGNER="$ANDROID_HOME/build-tools/36.0.0/apksigner"
+          test -x "$AAPT" && test -x "$APKSIGNER"
+          BADGING="$("$AAPT" dump badging "$APK")"
+          printf '%s\\n' "$BADGING" | grep -m1 "^package:"
+          printf '%s\\n' "$BADGING" | grep -q "name='com.aistudio.elsewhere.abwzy.v15.test'"
+          "$APKSIGNER" verify --print-certs "$APK" | grep -E "Signer #1 certificate SHA-256 digest|Verified using v[123] scheme"
+
 
       - name: Upload unified sandbox APK
         uses: actions/upload-artifact@v4
