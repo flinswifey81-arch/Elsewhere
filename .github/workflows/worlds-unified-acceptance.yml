@@ -54,6 +54,13 @@ jobs:
             --tests com.example.WorldArchiveTransferCoordinatorTest \
             --tests com.example.RetainedChatViewModelStoresTest \
             --tests com.example.ReplyNotificationPolicyTest \
+            --tests com.example.NpcSceneCastResolverTest \
+            --tests com.example.NpcSpeakerPortraitResolverTest \
+            --tests com.example.NpcStructuredOutputParserTest \
+            --tests com.example.StoryResponseTest \
+            --tests com.example.domain.backup.BackupRepositoryTest \
+            --tests com.example.ProfileImageRepositoryTest \
+            --tests com.example.ChatMessageReadingUiTest \
             --tests com.example.OpenRouterModelProviderTest \
             --tests com.example.ChatDetailGenerationTest.continueFromCharacterGreetingNeedsNoPersonaTurn \
             --tests com.example.ChatDetailGenerationTest.malformedNarratedOutputIsSavedWithoutExposingControlMarkers \
