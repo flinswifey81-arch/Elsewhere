@@ -8,6 +8,10 @@ import com.example.data.model.MessageEntity
 import com.example.data.model.NpcDossier
 import com.example.data.model.SpeakerType
 import com.example.domain.npc.NpcStructuredUpdate
+import com.example.domain.story.StoryResponse
+import com.example.domain.story.StoryResponseCodec
+import com.example.domain.story.StorySegment
+import com.example.domain.story.StorySegmentType
 import com.example.domain.repository.NpcRepository
 import com.example.domain.repository.NpcImportCollisionMode
 import com.squareup.moshi.Moshi
@@ -94,6 +98,7 @@ class NpcRepositoryTest {
             )
         )
 
+        repository.setSceneMode("npc", com.example.data.model.NpcSceneMode.HERE)
         val context = repository.relevantContext("chat", emptyList()).orEmpty()
 
         assertTrue(context.contains("Trusted guide"))
@@ -108,7 +113,8 @@ class NpcRepositoryTest {
                 dossier().copy(
                     npcId = "ensemble-npc-$index",
                     displayName = "Partner $index",
-                    personality = "Distinct personality $index"
+                    personality = "Distinct personality $index",
+                    sceneMode = "HERE"
                 )
             )
         }
@@ -170,7 +176,8 @@ class NpcRepositoryTest {
         repository.saveManual(
             dossier(secrets = "STORYTELLER_SECRET").copy(
                 personaRelationships = mapOf("persona-a" to "Trusts A", "persona-b" to "Distrusts B"),
-                characterKnowledge = mapOf("character-a" to "Knows the brass key", "character-b" to "Knows the river route")
+                characterKnowledge = mapOf("character-a" to "Knows the brass key", "character-b" to "Knows the river route"),
+                sceneMode = "HERE"
             )
         )
 
@@ -189,6 +196,19 @@ class NpcRepositoryTest {
         assertFalse(context.contains("Distrusts B"))
         assertFalse(context.contains("river route"))
         assertTrue(context.contains("STORYTELLER_SECRET"))
+    }
+
+    @Test
+    fun explicitSceneModePersistsAndOverridesCoLeadPin() = runBlocking {
+        repository.saveManual(dossier().copy(keepInScene = true))
+        repository.setSceneMode("npc", com.example.data.model.NpcSceneMode.AWAY)
+        assertEquals("AWAY", repository.getProjectedDossiers("chat").single().sceneMode)
+        assertTrue(repository.relevantContext("chat", emptyList()).isNullOrBlank())
+        // Editing a dossier must not silently reset a presence override.
+        repository.saveManual(repository.getProjectedDossiers("chat").single().copy(role = "Updated role"))
+        assertEquals("AWAY", repository.getProjectedDossiers("chat").single().sceneMode)
+        repository.setSceneMode("npc", com.example.data.model.NpcSceneMode.HERE)
+        assertTrue(repository.relevantContext("chat", emptyList()).orEmpty().contains("Name: Mara"))
     }
 
     @Test
@@ -225,6 +245,207 @@ class NpcRepositoryTest {
         assertTrue(database.messageDao().getMessageById("old")?.isPrimaryVariant == true)
         assertTrue(database.npcDao().getDossiers("chat").isEmpty())
     }
+
+    @Test
+    fun invalidMetadataEntryIsSkippedWhileValidNeighborsAndStoryAreSaved() = runBlocking {
+        repository.setEnabled("chat", true)
+        val message = generatedMessage(
+            StorySegment(StorySegmentType.NPC, "I found the message.", "story-npc:temp", "Liora Fen")
+        )
+        val report = repository.persistGeneratedMessageAtomically(
+            message = message,
+            metadata = null,
+            isNewVariant = false,
+            updates = listOf(
+                NpcStructuredUpdate("fabricated-model-id", null, null, "False", null, null, null, null, null),
+                NpcStructuredUpdate(null, "Sorin", null, "Gate guard", null, null, null, null, null),
+                NpcStructuredUpdate(null, "Sorin", null, "Conflicting role", null, null, null, null, null)
+            ),
+            activePersonaId = null,
+            skipInvalidNpcMetadata = true
+        )
+        assertEquals(listOf("unknown NPC ID", "duplicate conflicting fields"), report.skippedReasons)
+        val dossiers = repository.getProjectedDossiers("chat")
+        assertEquals(2, dossiers.size)
+        assertEquals("Gate guard", dossiers.single { it.displayName == "Sorin" }.role)
+        val liora = dossiers.single { it.displayName == "Liora Fen" }
+        val persisted = requireNotNull(database.messageDao().getMessageById(message.messageId))
+        assertEquals(liora.npcId, StoryResponseCodec.decode(persisted.content)?.segments?.single()?.speakerId)
+        assertTrue(report.warning("Response").orEmpty().contains("2 NPC update(s) skipped"))
+    }
+
+    @Test
+    fun invalidMetadataWithNoValidRecordsStillDiscoversAttributedSpeaker() = runBlocking {
+        repository.setEnabled("chat", true)
+        val message = generatedMessage(
+            StorySegment(StorySegmentType.NPC, "A courier speaks.", "story-npc:temporary", "Liora Fen")
+        )
+        val report = repository.persistGeneratedMessageAtomically(
+            message = message, metadata = null, isNewVariant = false,
+            updates = listOf(
+                NpcStructuredUpdate("invented-id", null, null, "Courier", null, null, null, null, null)
+            ),
+            activePersonaId = null, skipInvalidNpcMetadata = true
+        )
+        assertEquals(1, report.skippedReasons.size)
+        val npc = repository.getProjectedDossiers("chat").single()
+        assertEquals("Liora Fen", npc.displayName)
+        assertEquals(npc.npcId, StoryResponseCodec.decode(
+            requireNotNull(database.messageDao().getMessageById(message.messageId)).content
+        )?.segments?.single()?.speakerId)
+    }
+
+    @Test
+    fun attributedNpcSpeakerCreatesDossierWithoutOptionalMetadata() = runBlocking {
+        repository.setEnabled("chat", true)
+        val message = generatedMessage(
+            StorySegment(StorySegmentType.CHARACTER, "Welcome.", "character", "Rowan"),
+            StorySegment(StorySegmentType.NPC, "\"I'm here.\", says Mara.", "story-npc:temporary", "Mara")
+        )
+        repository.persistGeneratedMessageAtomically(message, null, false, emptyList(), null)
+        val npc = repository.getProjectedDossiers("chat").single()
+        val stored = requireNotNull(database.messageDao().getMessageById(message.messageId))
+        val speaker = requireNotNull(StoryResponseCodec.decode(stored.content)).segments.last()
+        assertEquals(npc.npcId, speaker.speakerId)
+        assertEquals("Mara", speaker.speakerName)
+        assertFalse(npc.isManualBase)
+    }
+
+    @Test
+    fun disabledNpcBankDoesNotDiscoverSpeakersFromNarratedOutput() = runBlocking {
+        val message = generatedMessage(StorySegment(
+            StorySegmentType.NPC, "I am the messenger.", "story-npc:temp", "Liora Fen"
+        ))
+        repository.persistGeneratedMessageAtomically(message, null, false, emptyList(), null)
+        assertTrue(repository.getProjectedDossiers("chat").isEmpty())
+    }
+
+    @Test
+    fun existingAliasSpeakerUsesBankIdentityWithoutDuplicate() = runBlocking {
+        repository.saveManual(dossier())
+        val message = generatedMessage(
+            StorySegment(StorySegmentType.NPC, "\"The archives are closed.\"", "story-npc:temp", "Archivist Voss")
+        )
+        repository.persistGeneratedMessageAtomically(message, null, false, emptyList(), null)
+        assertEquals(1, repository.getProjectedDossiers("chat").size)
+        val stored = requireNotNull(database.messageDao().getMessageById(message.messageId))
+        val speaker = requireNotNull(StoryResponseCodec.decode(stored.content)).segments.single()
+        assertEquals("npc", speaker.speakerId)
+        assertEquals("Mara", speaker.speakerName)
+    }
+
+    @Test
+    fun namedNpcSpeakerAndDiscoveryMetadataMakeOneDossier() = runBlocking {
+        repository.setEnabled("chat", true)
+        val message = generatedMessage(
+            StorySegment(StorySegmentType.NPC, "\"There you are.\"", "story-npc:temp", "Liora")
+        )
+        repository.persistGeneratedMessageAtomically(
+            message, null, false,
+            listOf(NpcStructuredUpdate(null, "Liora", null, "Guide", null, null, null, null, null)),
+            null
+        )
+        val all = repository.getProjectedDossiers("chat")
+        assertEquals(1, all.size)
+        assertEquals("Guide", all.single().role)
+        assertEquals(all.single().npcId,
+            StoryResponseCodec.decode(requireNotNull(database.messageDao().getMessageById(message.messageId)).content)
+                ?.segments?.single()?.speakerId)
+    }
+
+    @Test
+    fun duplicateMetadataCreationByKnownAliasDoesNotReplaceCoreProfile() = runBlocking {
+        repository.saveManual(dossier())
+        val message = generatedMessage(StorySegment(StorySegmentType.CHARACTER, "I saw Mara.", "character", "Rowan"))
+        repository.persistGeneratedMessageAtomically(
+            message, null, false,
+            listOf(NpcStructuredUpdate(null, "Archivist Voss", listOf("Wrong alias"), "New role",
+                "Wrong appearance", "Wrong personality", null, null, null)),
+            null
+        )
+        val all = repository.getProjectedDossiers("chat")
+        assertEquals(1, all.size)
+        assertEquals("Mara", all.single().displayName)
+        assertEquals(listOf("Archivist Voss"), all.single().aliases)
+        assertEquals("Ink-stained gloves", all.single().appearance)
+        assertEquals("New role", all.single().role)
+    }
+
+    @Test
+    fun unnamedSupportingCharacterDoesNotCreateGenericNpc() = runBlocking {
+        val message = generatedMessage(
+            StorySegment(StorySegmentType.NPC, "A stranger speaks.", "story-npc:unknown", "Supporting character")
+        )
+        repository.persistGeneratedMessageAtomically(message, null, false, emptyList(), null)
+        assertTrue(repository.getProjectedDossiers("chat").isEmpty())
+    }
+
+    @Test
+    fun ambiguousAliasCannotCaptureAnotherNpcsDialogueOrCreateDuplicate() = runBlocking {
+        repository.setEnabled("chat", true)
+        repository.saveManual(dossier().copy(
+            npcId = "mara", displayName = "Mara", aliases = listOf("The Guide")
+        ))
+        repository.saveManual(dossier().copy(
+            npcId = "rhea", displayName = "Rhea", aliases = listOf("The Guide")
+        ))
+        val message = generatedMessage(
+            StorySegment(StorySegmentType.NPC, "I can help.", "story-npc:placeholder", "The Guide")
+        )
+        // An ambiguous speaker cannot claim either existing ID and should not
+        // create a third NPC with a duplicate alias.
+        repository.persistGeneratedMessageAtomically(message, null, false, emptyList(), null)
+        assertEquals(2, repository.getProjectedDossiers("chat").size)
+        val stored = requireNotNull(database.messageDao().getMessageById(message.messageId))
+        assertEquals("story-npc:placeholder",
+            StoryResponseCodec.decode(stored.content)?.segments?.single()?.speakerId)
+    }
+
+    @Test
+    fun modelProvidedIdCannotAttributeDifferentSpeakerToExistingNpc() = runBlocking {
+        repository.setEnabled("chat", true)
+        repository.saveManual(dossier().copy(npcId = "mara", displayName = "Mara"))
+        val message = generatedMessage(
+            StorySegment(StorySegmentType.NPC, "Hello from Rhea.", "mara", "Rhea")
+        )
+        repository.persistGeneratedMessageAtomically(message, null, false, emptyList(), null)
+        val rhea = repository.getProjectedDossiers("chat").single { it.displayName == "Rhea" }
+        val stored = requireNotNull(database.messageDao().getMessageById(message.messageId))
+        assertEquals(rhea.npcId, StoryResponseCodec.decode(stored.content)?.segments?.single()?.speakerId)
+        assertTrue(rhea.npcId != "mara")
+    }
+
+    @Test
+    fun ambiguousAliasWithRealIdDoesNotTakeWrongPortrait() = runBlocking {
+        repository.saveManual(dossier().copy(npcId = "mara", displayName = "Mara", aliases = listOf("Guide")))
+        repository.saveManual(dossier().copy(npcId = "rhea", displayName = "Rhea", aliases = listOf("Guide")))
+        val message = generatedMessage(
+            StorySegment(StorySegmentType.NPC, "I will help.", "mara", "Guide")
+        )
+        repository.persistGeneratedMessageAtomically(message, null, false, emptyList(), null)
+        assertEquals(2, repository.getProjectedDossiers("chat").size)
+        val stored = requireNotNull(database.messageDao().getMessageById(message.messageId))
+        assertEquals(null, StoryResponseCodec.decode(stored.content)?.segments?.single()?.speakerId)
+    }
+
+    @Test
+    fun mentioningSomeoneInOrdinaryProseDoesNotCreateNpc() = runBlocking {
+        val message = MessageEntity(
+            messageId = "plain", chatId = "chat", speakerType = SpeakerType.CHARACTER,
+            speakerId = "character", speakerDisplayNameSnapshot = "Rowan",
+            content = "I wonder whether Mara is still in town.", orderIndex = 2L
+        )
+        repository.persistGeneratedMessageAtomically(message, null, false, emptyList(), null)
+        assertTrue(repository.getProjectedDossiers("chat").isEmpty())
+    }
+
+    private fun generatedMessage(vararg segments: StorySegment) = MessageEntity(
+        messageId = java.util.UUID.randomUUID().toString(), chatId = "chat",
+        speakerType = SpeakerType.CHARACTER, speakerId = "character",
+        speakerDisplayNameSnapshot = "Rowan",
+        content = StoryResponseCodec.encode(StoryResponse(segments = segments.toList())),
+        orderIndex = 2L
+    )
 
     @Test
     fun shareSafeExportOmitsPrivateFieldsAndPrivateExportIncludesThem() = runBlocking {
