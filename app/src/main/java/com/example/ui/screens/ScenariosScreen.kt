@@ -17,7 +17,12 @@ import java.util.UUID
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ScenariosScreen(container: AppContainer, onChatCreated: (String) -> Unit, onPersonas: () -> Unit) {
+fun ScenariosScreen(
+    container: AppContainer,
+    onChatCreated: (String) -> Unit,
+    onPersonas: () -> Unit,
+    initialWorldId: String? = null
+) {
     val repository = container.scenarioRepository ?: return
     val scenarios by repository.observeAll().collectAsState(emptyList())
     val personas by container.personaRepository.getAllPersonas().collectAsState(emptyList())
@@ -27,7 +32,7 @@ fun ScenariosScreen(container: AppContainer, onChatCreated: (String) -> Unit, on
     var draftJson by rememberSaveable { mutableStateOf(ScenarioCodec.encode(ScenarioDefinition())) }
     var startingId by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedPersonaId by rememberSaveable { mutableStateOf<String?>(null) }
-    var selectedWorldId by rememberSaveable { mutableStateOf<String?>(null) }
+    var selectedWorldId by rememberSaveable(initialWorldId) { mutableStateOf(initialWorldId) }
     var error by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
     var query by rememberSaveable { mutableStateOf("") }
@@ -80,7 +85,7 @@ fun ScenariosScreen(container: AppContainer, onChatCreated: (String) -> Unit, on
                         if (d.publicDescription.isNotBlank()) Text(d.publicDescription)
                         if (d.tags.isNotBlank()) Text(d.tags, style = MaterialTheme.typography.labelMedium)
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button(onClick = { startingId = scenario.scenarioId; selectedPersonaId = null; selectedWorldId = null; error = null }) { Text("New playthrough") }
+                            Button(onClick = { startingId = scenario.scenarioId; selectedPersonaId = null; selectedWorldId = initialWorldId; error = null }) { Text("New playthrough") }
                             TextButton(onClick = { editingId = scenario.scenarioId; draftJson = scenario.definitionJson; error = null }) { Text("Edit") }
                         }
                     }
