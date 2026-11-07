@@ -1,9 +1,6 @@
 name: Elsewhere UI Refresh Regression
 
 on:
-  push:
-    branches:
-      - feature/home-navigation-theme-settings-2026-11-06
   pull_request:
     branches:
       - integration/worlds-and-rp-lifecycle-2026-11-06

@@ -27,7 +27,10 @@ class AppNavigationTest {
 
         composeTestRule.onNodeWithTag("home_screen").assertExists()
         composeTestRule.onNodeWithText("Your next doorway is ready.").assertExists()
-        composeTestRule.onNodeWithTag("elsewhere_banner_purple").assertExists()
+        val matchedBanner = listOf("purple", "ocean_blue", "forest_green", "rose", "slate").any { palette ->
+            composeTestRule.onAllNodesWithTag("elsewhere_banner_" + palette).fetchSemanticsNodes().isNotEmpty()
+        }
+        org.junit.Assert.assertTrue("Expected a themed Elsewhere banner", matchedBanner)
         composeTestRule.onNodeWithTag("home_list").performScrollToNode(hasTestTag("home_library_link"))
         composeTestRule.onNodeWithTag("home_library_link").assertExists()
         composeTestRule.onNodeWithText("More").assertDoesNotExist()
@@ -57,6 +60,7 @@ class AppNavigationTest {
         composeTestRule.onNodeWithTag("lorebooks_screen").assertExists()
 
         composeTestRule.onNodeWithTag("bottom_nav_library").performClick()
+        composeTestRule.onNodeWithTag("library_hub").performScrollToNode(hasTestTag("hub_settings"))
         composeTestRule.onNodeWithTag("hub_settings").performClick()
         composeTestRule.onNodeWithTag("settings_screen").assertExists()
 

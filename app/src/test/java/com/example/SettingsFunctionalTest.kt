@@ -88,6 +88,7 @@ class SettingsFunctionalTest {
         // Back to normal
         composeTestRule.onNodeWithTag("api_key_input").assertExists()
 
+        composeTestRule.onNodeWithTag("settings_tabs").performScrollToNode(hasTestTag("settings_tab_about"))
         composeTestRule.onNodeWithTag("settings_tab_about").performClick()
         composeTestRule.onNodeWithTag("settings_app_version").assertTextContains(BuildConfig.VERSION_NAME)
         composeTestRule.onNodeWithTag("settings_app_version").assertTextContains(BuildConfig.VERSION_CODE.toString())
