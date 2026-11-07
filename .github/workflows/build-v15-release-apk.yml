@@ -52,6 +52,14 @@ jobs:
             --tests com.example.AppDatabaseMigrationTest \
             --tests com.example.domain.backup.BackupRepositoryTest
 
+      - name: Verify Home, Library, Create, Settings and theme preservation
+        run: |
+          bash ./gradlew :app:testDebugUnitTest --no-daemon --no-configuration-cache \
+            --tests com.example.AppNavigationTest \
+            --tests com.example.SettingsFunctionalTest \
+            --tests com.example.AppearanceRepositoryTest \
+            --tests com.example.ElsewhereThemeBannerTest
+
       - name: Verify Worlds archives and existing RP lifecycle together
         run: |
           bash ./gradlew :app:testSandboxUnitTest --no-daemon \
@@ -107,8 +115,10 @@ jobs:
           apk_path="app/build/outputs/apk/release/app-release.apk"
           build_tools="$ANDROID_HOME/build-tools/36.0.0"
           expected_package="com.aistudio.elsewhere.abwzy.v15"
-          expected_version_code="2"
-          expected_version_name="1.5.1"
+          expected_version_code="3"
+          expected_version_name="1.5.2"
+          # Baseline signer from verified v1.5 and v1.5.1 production APKs.
+          expected_legacy_signer="7c1fa02f0732d179d509d5333afa40933743e3c5dc8b70ef0aff2607c1e759f5"
 
           actual_package="$($build_tools/aapt dump badging "$apk_path" | sed -n "s/^package: name='\([^']*\)'.*/\1/p")"
           if [ "$actual_package" != "$expected_package" ]; then
@@ -140,10 +150,14 @@ jobs:
             echo "The APK signing certificate does not match the upload key." >&2
             exit 1
           fi
+          if [ "$actual_certificate" != "$expected_legacy_signer" ]; then
+            echo "Signer differs from existing Elsewhere production releases: refusing to publish an incompatible update." >&2
+            exit 1
+          fi
 
           {
             echo "Package: $actual_package"
-            echo "Version: 1.5.1 (2)"
+            echo "Version: 1.5.2 (3)"
             echo "Signer certificate SHA-256: $actual_certificate"
           } | tee "$RUNNER_TEMP/elsewhere-v15-verification.txt"
 
@@ -157,7 +171,7 @@ jobs:
       - name: Upload verified release APK
         uses: actions/upload-artifact@v4
         with:
-          name: Elsewhere-Production-Worlds-Integrated-Candidate-APK
+          name: Elsewhere-Production-Worlds-UI-Combined-Candidate-APK
           path: |
             app/build/outputs/apk/release/app-release.apk
             ${{ runner.temp }}/elsewhere-v15-verification.txt

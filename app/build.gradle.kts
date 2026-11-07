@@ -26,8 +26,9 @@ android {
     minSdk = 33
     targetSdk = 36
     // In-place update of regular Elsewhere v1.5; preserve app ID, data and signing key.
-    versionCode = 2
-    versionName = "1.5.1"
+    // Increment for a safe in-place update from the signed 1.5.1 production candidate.
+    versionCode = 3
+    versionName = "1.5.2"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     buildConfigField(
