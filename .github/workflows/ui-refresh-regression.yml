@@ -1,0 +1,57 @@
+name: Elsewhere UI Refresh Regression
+
+on:
+  push:
+    branches:
+      - feature/home-navigation-theme-settings-2026-11-06
+  pull_request:
+    branches:
+      - integration/worlds-and-rp-lifecycle-2026-11-06
+
+concurrency:
+  group: ui-refresh-branch
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  ui-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools
+      - run: sdkmanager "platforms;android-36.1" "build-tools;36.0.0"
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Check theme settings, navigation, banner, real version and database compatibility
+        run: |
+          bash ./gradlew :app:testDebugUnitTest --no-daemon --no-configuration-cache \
+            --tests com.example.AppNavigationTest \
+            --tests com.example.SettingsFunctionalTest \
+            --tests com.example.AppearanceRepositoryTest \
+            --tests com.example.ElsewhereThemeBannerTest \
+            --tests com.example.ProductionIdentityTest \
+            --tests com.example.AppDatabaseMigrationTest
+      - name: Print focused test errors
+        if: failure()
+        run: |
+          python3 - <<'PY'
+          import glob
+          import xml.etree.ElementTree as ET
+          for path in glob.glob("app/build/test-results/testDebugUnitTest/TEST-*.xml"):
+              tree = ET.parse(path)
+              for case in tree.iter("testcase"):
+                  for failed in (*case.findall("failure"), *case.findall("error")):
+                      print("FAIL", case.get("classname"), case.get("name"))
+                      print(failed.get("message", ""))
+                      print((failed.text or "")[:4000])
+          PY
