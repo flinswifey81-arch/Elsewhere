@@ -1,196 +1,214 @@
 package com.example.ui.components
 
+import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Color as AndroidColor
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.luminance
-import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
-import com.example.R
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontStyle
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import com.example.R
 import com.example.domain.repository.ColorPalette
+import kotlin.math.abs
 
 /**
- * Palette-driven Elsewhere doorway. One composition, five distinct atmospheres,
- * and separate light/dark treatments, without duplicating the wordmark in bitmaps.
- * Decorative content is excluded from accessibility: the text is real Compose text.
+ * The original Elsewhere illustration is the single source of truth: doorway,
+ * moon, flora, wordmark and tagline are preserved for every palette.
+ *
+ * Palettes recolor the original violet/rose environment, but deliberately
+ * preserve the warm orange-gold doorway. No remote images, network requests,
+ * or theme-specific assets are required.
  */
-private data class DoorwayColors(
-    val start: Color, val end: Color, val frame: Color,
-    val foliage: Color, val text: Color, val glow: Color
+private data class PaletteMood(
+    val hue: Float,
+    val saturation: Float,
+    val border: Color,
+    val motif: Color
 )
 
-private fun doorwayColors(palette: ColorPalette, dark: Boolean): DoorwayColors {
-    val backgrounds = when (palette) {
-        ColorPalette.PURPLE -> if (dark) 0xFF23132E to 0xFF35213D else 0xFFF0DCEC to 0xFFE3C8E6
-        ColorPalette.OCEAN_BLUE -> if (dark) 0xFF062B3C to 0xFF0B4150 else 0xFFD0EDF3 to 0xFFEAF6F6
-        ColorPalette.FOREST_GREEN -> if (dark) 0xFF0D3025 to 0xFF224432 else 0xFFE0EDDB to 0xFFF1F3D8
-        ColorPalette.ROSE -> if (dark) 0xFF422139 to 0xFF603148 else 0xFFF4D4E0 to 0xFFFFE8E2
-        ColorPalette.SLATE -> if (dark) 0xFF172C40 to 0xFF2E4052 else 0xFFD8E3EE to 0xFFF0F2F8
-    }
-    val accent = when (palette) {
-        ColorPalette.PURPLE -> 0xFFC78AAA
-        ColorPalette.OCEAN_BLUE -> 0xFF79C5D9
-        ColorPalette.FOREST_GREEN -> 0xFF9AC49B
-        ColorPalette.ROSE -> 0xFFEFABB9
-        ColorPalette.SLATE -> 0xFFB2C9DD
-    }
-    val text = if (dark) Color(0xFFFFF1E6) else when (palette) {
-        ColorPalette.PURPLE -> Color(0xFF412949)
-        ColorPalette.OCEAN_BLUE -> Color(0xFF13364D)
-        ColorPalette.FOREST_GREEN -> Color(0xFF253D31)
-        ColorPalette.ROSE -> Color(0xFF583143)
-        ColorPalette.SLATE -> Color(0xFF233A4C)
-    }
-    return DoorwayColors(
-        start = Color(backgrounds.first), end = Color(backgrounds.second),
-        frame = Color(0xFFD9B38B), foliage = Color(accent),
-        text = text, glow = if (dark) Color(0xFFFFD4A0) else Color(0xFFCD8C53)
-    )
+private fun mood(palette: ColorPalette): PaletteMood = when (palette) {
+    ColorPalette.PURPLE -> PaletteMood(282f, 1f, Color(0xFFC39AB9), Color(0xFFDBB0D2))
+    ColorPalette.OCEAN_BLUE -> PaletteMood(191f, 0.9f, Color(0xFF8BCFE1), Color(0xFF81D8EC))
+    ColorPalette.FOREST_GREEN -> PaletteMood(139f, 0.82f, Color(0xFFB6CFA4), Color(0xFFAAD5A0))
+    ColorPalette.ROSE -> PaletteMood(330f, 0.8f, Color(0xFFF3BAD0), Color(0xFFF5ABC8))
+    ColorPalette.SLATE -> PaletteMood(210f, 0.36f, Color(0xFFC3CFE0), Color(0xFFC2D8E8))
 }
 
+private fun recoloredDoorway(
+    context: Context, palette: ColorPalette, dark: Boolean
+): androidx.compose.ui.graphics.ImageBitmap? {
+    // The purple dark theme always uses the unmodified original PNG.
+    if (palette == ColorPalette.PURPLE && dark) return null
+    val source = BitmapFactory.decodeResource(
+        context.resources, R.drawable.elsewhere_logo,
+        BitmapFactory.Options().apply { inScaled = false }
+    ) ?: return null
+    try {
+        val width = source.width
+        val height = source.height
+        val pixels = IntArray(width * height)
+        source.getPixels(pixels, 0, width, 0, 0, width, height)
+        val hsv = FloatArray(3)
+        val target = mood(palette)
+        for (index in pixels.indices) {
+            val argb = pixels[index]
+            val alpha = AndroidColor.alpha(argb)
+            if (alpha == 0) continue
+
+            AndroidColor.colorToHSV(argb, hsv)
+            val originalHue = hsv[0]
+            val isWarmDoorway = originalHue in 14f..79f &&
+                hsv[1] > 0.17f && hsv[2] > 0.19f
+            val isVioletOrRose = originalHue >= 240f ||
+                originalHue <= 14f && hsv[1] > 0.24f
+
+            if (!isWarmDoorway && isVioletOrRose && hsv[1] > 0.10f) {
+                // Vary tint with original hue variation, preserving the hand-
+                // painted texture instead of replacing the image with flat color.
+                val variation = if (originalHue > 240f)
+                    (originalHue - 302f) * 0.11f
+                else (originalHue + 58f) * 0.11f
+                hsv[0] = (target.hue + variation + 360f) % 360f
+                hsv[1] = (hsv[1] * target.saturation).coerceIn(0f, 1f)
+            } else if (!isWarmDoorway && palette == ColorPalette.SLATE) {
+                hsv[1] *= 0.72f
+            }
+            if (!dark) {
+                // A subtle, less saturated daytime treatment, without washing
+                // out the light type on the right side of the illustration.
+                hsv[1] *= 0.80f
+                hsv[2] = (hsv[2] * 0.90f + 0.055f).coerceIn(0f, 1f)
+            }
+            pixels[index] = AndroidColor.HSVToColor(alpha, hsv)
+        }
+        val result = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        result.setPixels(pixels, 0, width, 0, 0, width, height)
+        return result.asImageBitmap()
+    } finally {
+        source.recycle()
+    }
+}
+
+/**
+ * Each theme retains the original editorial artwork, enhanced by subtle,
+ * palette-specific foreground accents. The art is scaled in the exact aspect
+ * ratio used by the original Home banner.
+ */
 @Composable
 fun ElsewhereThemeBanner(
     palette: ColorPalette,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
-    val colors = doorwayColors(palette, dark)
+    val colors = mood(palette)
+    val themedBitmap = remember(context, palette, dark) {
+        recoloredDoorway(context, palette, dark)
+    }
     val shape = RoundedCornerShape(18.dp)
-    BoxWithConstraints(
+
+    Box(
         modifier = modifier.fillMaxWidth().height(126.dp)
             .clip(shape)
-            .background(Brush.horizontalGradient(listOf(colors.start, colors.end)))
-            .border(1.dp, colors.foliage.copy(alpha = 0.65f), shape)
+            .background(MaterialTheme.colorScheme.surface)
+            .border(1.dp, colors.border.copy(alpha = 0.75f), shape)
             .testTag("elsewhere_banner_" + palette.storageId)
+            .semantics {
+                contentDescription = "Elsewhere. Private stories, your way."
+            }
     ) {
-        if (palette == ColorPalette.PURPLE && dark) {
-            // The original artwork remains unchanged for the Original dark theme.
+        if (themedBitmap == null) {
             Image(
                 painter = painterResource(R.drawable.elsewhere_logo),
-                contentDescription = "Elsewhere — Private stories, your way.",
+                contentDescription = null,
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.FillBounds
             )
         } else {
-            val bannerWidth = maxWidth
+            Image(
+                bitmap = themedBitmap,
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.FillBounds
+            )
+        }
+
+        if (palette != ColorPalette.PURPLE) {
             Canvas(Modifier.fillMaxSize()) {
-            val w = size.width
-            val h = size.height
-            val cx = w * 0.185f
-            val archLeft = w * 0.095f
-            val archRight = w * 0.275f
-            val archTop = h * 0.12f
-            val floor = h * 0.91f
-
-            drawCircle(
-                brush = Brush.radialGradient(
-                    listOf(colors.glow.copy(alpha = 0.62f), Color.Transparent),
-                    center = Offset(cx, h * 0.67f), radius = h * 0.7f
-                ),
-                radius = h * 0.7f,
-                center = Offset(cx, h * 0.67f)
-            )
-            val arch = Path().apply {
-                moveTo(archLeft, floor)
-                lineTo(archLeft, h * 0.36f)
-                cubicTo(archLeft, -h * 0.06f, archRight, -h * 0.06f, archRight, h * 0.36f)
-                lineTo(archRight, floor)
-                close()
+                val w = size.width
+                val h = size.height
+                val accent = colors.motif.copy(alpha = if (dark) 0.66f else 0.45f)
+                when (palette) {
+                    ColorPalette.OCEAN_BLUE -> {
+                        // Small moonlit ripples in the water at the threshold.
+                        for (n in 0 until 3) {
+                            val path = Path()
+                            val y = h * (0.83f + 0.05f * n)
+                            path.moveTo(w * 0.025f, y)
+                            path.cubicTo(w * 0.080f, y - h * 0.024f,
+                                w * 0.125f, y + h * 0.024f, w * 0.18f, y)
+                            path.cubicTo(w * 0.23f, y - h * 0.02f,
+                                w * 0.29f, y + h * 0.02f, w * 0.35f, y)
+                            drawPath(path, accent, style = Stroke(width = 1.8f))
+                        }
+                    }
+                    ColorPalette.FOREST_GREEN -> {
+                        // Leaf clusters grow along the left side of the doorway.
+                        for (n in 0 until 7) {
+                            val x = w * (0.055f + 0.016f * (n % 3))
+                            val y = h * (0.32f + 0.088f * n)
+                            drawOval(accent, topLeft = Offset(x, y),
+                                size = androidx.compose.ui.geometry.Size(9f, 4f))
+                            drawOval(accent, topLeft = Offset(x + 11f, y + 8f),
+                                size = androidx.compose.ui.geometry.Size(5f, 9f))
+                        }
+                    }
+                    ColorPalette.ROSE -> {
+                        // Falling blossom petals rather than generic stars.
+                        for (n in 0 until 9) {
+                            val x = w * (0.33f + (n % 4) * 0.12f)
+                            val y = h * (0.15f + (n / 4) * 0.25f)
+                            drawOval(accent, topLeft = Offset(x, y),
+                                size = androidx.compose.ui.geometry.Size(5f, 8f))
+                        }
+                    }
+                    ColorPalette.SLATE -> {
+                        // Icy starlight and little glints in the stone.
+                        for (n in 0 until 7) {
+                            val x = w * (0.39f + (n % 4) * 0.16f)
+                            val y = h * (0.18f + (n / 4) * 0.23f)
+                            drawLine(accent, Offset(x - 3f, y), Offset(x + 3f, y), 1.4f)
+                            drawLine(accent, Offset(x, y - 3f), Offset(x, y + 3f), 1.4f)
+                        }
+                    }
+                    ColorPalette.PURPLE -> Unit
+                }
             }
-            drawPath(arch, color = colors.frame.copy(alpha = 0.95f))
-            val inside = Path().apply {
-                moveTo(archLeft + w * 0.012f, floor - h * 0.017f)
-                lineTo(archLeft + w * 0.012f, h * 0.37f)
-                cubicTo(archLeft + w * 0.012f, h * 0.055f, archRight - w * 0.012f, h * 0.055f, archRight - w * 0.012f, h * 0.37f)
-                lineTo(archRight - w * 0.012f, floor - h * 0.017f)
-                close()
-            }
-            drawPath(
-                inside, Brush.verticalGradient(
-                    listOf(colors.start.copy(alpha = 0.9f), colors.glow.copy(alpha = 0.9f))
-                )
-            )
-            drawPath(inside, color = colors.end.copy(alpha = 0.8f), style = Stroke(width = 3f))
-            // A partly opened door keeps the original "another world is waiting" invitation.
-            val door = Path().apply {
-                moveTo(archLeft + w * 0.016f, floor - h * 0.045f)
-                lineTo(archLeft + w * 0.016f, h * 0.39f)
-                quadraticTo(cx * 0.75f, h * 0.22f, cx * 0.93f, h * 0.23f)
-                lineTo(cx * 0.92f, floor - h * 0.12f)
-                close()
-            }
-            drawPath(door, color = colors.start.copy(alpha = 0.96f))
-            drawPath(door, color = colors.frame.copy(alpha = 0.85f), style = Stroke(width = 2.5f))
-            drawCircle(colors.glow, radius = 2.2f, center = Offset(cx * 0.83f, h * 0.59f))
-            // Threshold: a few luminous steps.
-            for (step in 0..2) {
-                val y = h * (0.89f + step * 0.032f)
-                drawLine(colors.glow.copy(alpha = 0.8f - step * 0.13f), Offset(w * 0.07f, y), Offset(w * 0.30f, y), strokeWidth = 2.5f)
-            }
-
-            // Botanical silhouettes echo the original border art across all five palettes.
-            listOf(
-                0.04f to 0.84f, 0.06f to 0.67f, 0.30f to 0.81f, 0.32f to 0.62f
-            ).forEachIndexed { index, (x, y) ->
-                val bottom = Offset(w * x, floor)
-                val top = Offset(w * (x + if (index < 2) 0.014f else -0.013f), h * y)
-                drawLine(colors.foliage.copy(alpha = 0.84f), bottom, top, strokeWidth = 2.4f)
-                drawOval(colors.foliage.copy(alpha = 0.76f), topLeft = top - Offset(w * 0.009f, h * 0.045f), size = Size(w * 0.018f, h * 0.075f))
-            }
-            // Crescent and points of light keep the night-sky motif.
-            val moon = Offset(w * 0.35f, h * 0.22f)
-            drawCircle(colors.text.copy(alpha = 0.92f), radius = h * 0.046f, center = moon)
-            drawCircle(colors.end, radius = h * 0.041f, center = moon + Offset(h * 0.029f, -h * 0.013f))
-            listOf(0.055f to 0.15f, 0.39f to 0.57f, 0.62f to 0.20f, 0.89f to 0.14f, 0.94f to 0.72f).forEach { (x,y) ->
-                drawCircle(colors.text.copy(alpha = 0.58f), radius = 1.9f, center = Offset(w * x, h * y))
-            }
-        }
-        Column(
-            modifier = Modifier.align(Alignment.CenterEnd).fillMaxWidth(0.67f)
-                .padding(end = 12.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(3.dp)
-        ) {
-            Text(
-                "Elsewhere",
-                color = colors.text,
-                fontFamily = FontFamily.Serif,
-                fontWeight = FontWeight.Normal,
-                fontSize = if (bannerWidth < 380.dp) 34.sp else 42.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Clip
-            )
-            Text(
-                "Private stories, your way.",
-                color = colors.text.copy(alpha = 0.92f),
-                fontFamily = FontFamily.Serif,
-                fontStyle = FontStyle.Italic,
-                fontSize = if (bannerWidth < 380.dp) 13.sp else 15.sp,
-                maxLines = 1
-            )
-        }
         }
     }
 }
