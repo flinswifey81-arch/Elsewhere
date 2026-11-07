@@ -52,3 +52,17 @@ jobs:
                       print(failed.get("message", ""))
                       print((failed.text or "")[:4000])
           PY
+
+      - name: Render actual Compose screen screenshots (no phone installation)
+        run: |
+          bash ./gradlew :app:testDebugUnitTest --no-daemon --no-configuration-cache \
+            -Proborazzi.test.record=true \
+            --tests com.example.ElsewhereVisualReviewTest
+      - name: Upload reviewable Elsewhere screen captures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Elsewhere-UI-Visual-Review-Screenshots
+          path: app/build/outputs/roborazzi/ui-review/*.png
+          if-no-files-found: warn
+          retention-days: 21
