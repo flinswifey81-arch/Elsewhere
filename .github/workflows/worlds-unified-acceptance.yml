@@ -83,8 +83,38 @@ jobs:
                       print((failure.text or "")[:2500])
           PY
 
-      - name: Assemble unified Elsewhere Test
-        run: bash ./gradlew :app:assembleSandbox --no-daemon
+      # Never publish a debug-signed APK as an update for an existing Elsewhere Test.
+      # The same dedicated keystore is used by build-testing-apk.yml.
+      - name: Restore dedicated testing signing key
+        env:
+          TEST_KEYSTORE_BASE64: ${{ secrets.ELSEWHERE_TEST_KEYSTORE_BASE64 }}
+          TEST_STORE_PASSWORD: ${{ secrets.ELSEWHERE_TEST_STORE_PASSWORD }}
+          TEST_KEY_ALIAS: ${{ secrets.ELSEWHERE_TEST_KEY_ALIAS }}
+          TEST_KEY_PASSWORD: ${{ secrets.ELSEWHERE_TEST_KEY_PASSWORD }}
+        run: |
+          for value in TEST_KEYSTORE_BASE64 TEST_STORE_PASSWORD TEST_KEY_ALIAS TEST_KEY_PASSWORD; do
+            if [ -z "${!value}" ]; then
+              echo "Missing required testing-signing secret: $value" >&2
+              exit 1
+            fi
+          done
+          umask 077
+          printf '%s' "$TEST_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/elsewhere-test.jks"
+
+      - name: Assemble unified Elsewhere Test with stable signing
+        env:
+          ELSEWHERE_TEST_KEYSTORE_PATH: ${{ runner.temp }}/elsewhere-test.jks
+          ELSEWHERE_TEST_STORE_PASSWORD: ${{ secrets.ELSEWHERE_TEST_STORE_PASSWORD }}
+          ELSEWHERE_TEST_KEY_ALIAS: ${{ secrets.ELSEWHERE_TEST_KEY_ALIAS }}
+          ELSEWHERE_TEST_KEY_PASSWORD: ${{ secrets.ELSEWHERE_TEST_KEY_PASSWORD }}
+        run: bash ./gradlew :app:assembleSandbox --no-daemon --no-configuration-cache
+
+      - name: Remove temporary testing signing key
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/elsewhere-test.jks" ]; then
+            shred --remove "$RUNNER_TEMP/elsewhere-test.jks" 2>/dev/null || rm -f "$RUNNER_TEMP/elsewhere-test.jks"
+          fi
 
       - name: Verify sandbox app ID and native packaging
         run: |
