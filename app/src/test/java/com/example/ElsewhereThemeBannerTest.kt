@@ -29,8 +29,11 @@ class ElsewhereThemeBannerTest {
         ColorPalette.selectable.forEach { palette ->
             composeRule.onNodeWithTag("elsewhere_banner_" + palette.storageId).assertExists()
         }
-        composeRule.onAllNodesWithText("Elsewhere").assertCountEquals(5)
-        composeRule.onAllNodesWithText("Private stories, your way.").assertCountEquals(5)
+        // The illustrated wordmark and tagline are part of the original PNG.
+        // Screen readers receive their text through the banner semantics.
+        composeRule.onAllNodesWithContentDescription(
+            "Elsewhere. Private stories, your way."
+        ).assertCountEquals(5)
     }
 
     @Test
