@@ -1,6 +1,7 @@
 package com.example.ui.components
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
@@ -19,6 +20,9 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
+import com.example.R
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -81,8 +85,17 @@ fun ElsewhereThemeBanner(
             .border(1.dp, colors.foliage.copy(alpha = 0.65f), shape)
             .testTag("elsewhere_banner_" + palette.storageId)
     ) {
-        val bannerWidth = maxWidth
-        Canvas(Modifier.fillMaxSize()) {
+        if (palette == ColorPalette.PURPLE && dark) {
+            // The original artwork remains unchanged for the Original dark theme.
+            Image(
+                painter = painterResource(R.drawable.elsewhere_logo),
+                contentDescription = "Elsewhere — Private stories, your way.",
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.FillBounds
+            )
+        } else {
+            val bannerWidth = maxWidth
+            Canvas(Modifier.fillMaxSize()) {
             val w = size.width
             val h = size.height
             val cx = w * 0.185f
@@ -177,6 +190,7 @@ fun ElsewhereThemeBanner(
                 fontSize = if (bannerWidth < 380.dp) 13.sp else 15.sp,
                 maxLines = 1
             )
+        }
         }
     }
 }
