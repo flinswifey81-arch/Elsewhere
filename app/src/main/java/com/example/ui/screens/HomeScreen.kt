@@ -14,6 +14,7 @@ import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Bookmarks
 import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -28,6 +29,9 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import com.example.R
 import com.example.domain.repository.ChatRepository
+import com.example.domain.repository.ColorPalette
+import com.example.ui.components.ElsewhereThemeBanner
+import androidx.compose.ui.text.style.TextOverflow
 import com.example.ui.components.elsewhereCardBorder
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -42,7 +46,8 @@ fun HomeScreen(
     onNewSoloChat: () -> Unit,
     onNewGroupChat: () -> Unit,
     modifier: Modifier = Modifier,
-    onScenarios: (() -> Unit)? = null
+    onScenarios: (() -> Unit)? = null,
+    palette: ColorPalette = ColorPalette.PURPLE
 ) {
     var recentChats by remember(chatRepository) {
         mutableStateOf<List<com.example.data.model.ChatSummary>?>(null)
@@ -55,108 +60,117 @@ fun HomeScreen(
         modifier = modifier.testTag("home_screen"),
         containerColor = MaterialTheme.colorScheme.background
     ) { padding ->
-        Box(modifier = Modifier.fillMaxSize()) {
-            // Subtle abstract window/portal background gradient at top
+        Box(Modifier.fillMaxSize()) {
             Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(300.dp)
-                    .background(
-                        brush = Brush.verticalGradient(
-                            colors = listOf(
-                                MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
-                                Color.Transparent
-                            )
-                        )
+                Modifier.fillMaxWidth().height(270.dp).background(
+                    Brush.verticalGradient(
+                        listOf(MaterialTheme.colorScheme.primary.copy(alpha = 0.10f), Color.Transparent)
                     )
+                )
             )
-
             LazyColumn(
                 modifier = Modifier.fillMaxSize().padding(padding).testTag("home_list"),
-                contentPadding = PaddingValues(top = 28.dp, start = 16.dp, end = 16.dp, bottom = 24.dp),
-                verticalArrangement = Arrangement.spacedBy(20.dp)
+                contentPadding = PaddingValues(top = 12.dp, start = 16.dp, end = 16.dp, bottom = 24.dp),
+                verticalArrangement = Arrangement.spacedBy(18.dp)
             ) {
-                // Header
-                item {
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest),
-                        border = elsewhereCardBorder()
-                    ) {
-                        Image(
-                            painter = painterResource(R.drawable.elsewhere_logo),
-                            contentDescription = "Elsewhere — Private stories, your way.",
-                            modifier = Modifier.fillMaxWidth().heightIn(max = 112.dp),
-                            contentScale = ContentScale.FillWidth
-                        )
+                item(key = "branding") {
+                    Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            TextButton(
+                                onClick = onNavigateToSettings,
+                                modifier = Modifier.testTag("home_open_settings")
+                            ) {
+                                Icon(Icons.Filled.Settings, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text("Settings")
+                            }
+                        }
+                        ElsewhereThemeBanner(palette = palette)
                     }
                 }
 
-                // Continue Section
-                item {
-                    Column {
+                item(key = "continue") {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Text(
-                            text = "Continue",
+                            "Continue",
                             style = MaterialTheme.typography.titleMedium,
                             color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.padding(bottom = 12.dp, start = 8.dp)
+                            modifier = Modifier.padding(start = 6.dp)
                         )
-                        
                         val loadedChats = recentChats
-                        if (loadedChats == null) {
-                            Card(
+                        when {
+                            loadedChats == null -> Card(
                                 modifier = Modifier.fillMaxWidth(),
-                                colors = CardDefaults.cardColors(
-                                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
-                                ),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
                                 border = elsewhereCardBorder()
                             ) {
                                 Row(
-                                    modifier = Modifier.fillMaxWidth().padding(24.dp),
+                                    Modifier.padding(20.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                                 ) {
-                                    CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                                    CircularProgressIndicator(Modifier.size(22.dp))
                                     Text("Opening your local archive…")
                                 }
                             }
-                        } else if (loadedChats.isEmpty()) {
-                            Card(
+                            loadedChats.isEmpty() -> Card(
                                 modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(16.dp),
-                                colors = CardDefaults.cardColors(
-                                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
-                                ),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
                                 border = elsewhereCardBorder()
                             ) {
-                                Box(
-                                    modifier = Modifier.padding(24.dp).fillMaxWidth(),
-                                    contentAlignment = Alignment.CenterStart
-                                ) {
-                                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        Text("Your next doorway is ready.", style = MaterialTheme.typography.titleSmall)
-                                        Text(
-                                            text = "Start a Solo or Group chat below. Characters, Personas, and Lorebooks stay in your local library.",
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
+                                Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                                    Text("Your next doorway is ready.", style = MaterialTheme.typography.titleSmall)
+                                    Text(
+                                        "Begin a Solo, Group or Scenario story whenever you're ready.",
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        style = MaterialTheme.typography.bodyMedium
+                                    )
                                 }
                             }
-                        } else {
-                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                val latest = loadedChats.first()
+                            else -> {
                                 Text("Resume your latest story", style = MaterialTheme.typography.bodySmall)
+                                val latest = loadedChats.first()
                                 ChatCard(
                                     chatSummary = latest,
                                     onClick = { onNavigateToChat(latest.chat.chatId) }
                                 )
-                                if (loadedChats.size > 1) {
-                                    Text("Other recent chats", style = MaterialTheme.typography.bodySmall)
-                                    loadedChats.drop(1).forEach { chatSummary ->
-                                        ChatCard(
-                                            chatSummary = chatSummary,
-                                            onClick = { onNavigateToChat(chatSummary.chat.chatId) }
+                            }
+                        }
+                    }
+                }
+
+                if (recentChats?.size ?: 0 > 1) {
+                    item(key = "recent") {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Row(
+                                Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("Recently played", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+                                TextButton(onClick = onNavigateToChats, modifier = Modifier.testTag("home_see_all_chats")) {
+                                    Text("See all")
+                                }
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                recentChats.orEmpty().drop(1).forEach { summary ->
+                                    Card(
+                                        onClick = { onNavigateToChat(summary.chat.chatId) },
+                                        modifier = Modifier.weight(1f).heightIn(min = 76.dp)
+                                            .testTag("home_recent_" + summary.chat.chatId),
+                                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+                                        border = elsewhereCardBorder()
+                                    ) {
+                                        Text(
+                                            summary.chat.displayName,
+                                            modifier = Modifier.padding(14.dp),
+                                            style = MaterialTheme.typography.titleSmall,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis
                                         )
                                     }
                                 }
@@ -165,54 +179,52 @@ fun HomeScreen(
                     }
                 }
 
-                // Start Something New Section
-                item {
-                    Column {
+                item(key = "create") {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Text(
-                            text = "Start Something New",
+                            "Start something new",
                             style = MaterialTheme.typography.titleMedium,
                             color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.padding(bottom = 12.dp, start = 8.dp)
+                            modifier = Modifier.padding(start = 6.dp)
                         )
                         BoxWithConstraints(Modifier.fillMaxWidth()) {
-                            val stackActions = maxWidth < 360.dp || LocalDensity.current.fontScale > 1.25f
-                            if (stackActions) {
+                            val vertical = maxWidth < 340.dp || LocalDensity.current.fontScale > 1.3f
+                            if (vertical) {
                                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    ActionCard("New Solo Chat", Icons.Filled.Add, onNewSoloChat, Modifier.fillMaxWidth(), horizontal = true)
-                                    ActionCard("New Group Chat", Icons.Filled.AutoAwesome, onNewGroupChat, Modifier.fillMaxWidth(), horizontal = true)
+                                    ActionCard("Solo", Icons.Filled.Add, onNewSoloChat, Modifier.fillMaxWidth(), horizontal = true)
+                                    ActionCard("Group", Icons.Filled.AutoAwesome, onNewGroupChat, Modifier.fillMaxWidth(), horizontal = true)
+                                    onScenarios?.let { ActionCard("Scenario", Icons.Filled.AutoStories, it, Modifier.fillMaxWidth(), horizontal = true) }
                                 }
                             } else {
-                                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                    ActionCard("New Solo Chat", Icons.Filled.Add, onNewSoloChat, Modifier.weight(1f))
-                                    ActionCard("New Group Chat", Icons.Filled.AutoAwesome, onNewGroupChat, Modifier.weight(1f))
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    ActionCard("Solo", Icons.Filled.Add, onNewSoloChat, Modifier.weight(1f))
+                                    ActionCard("Group", Icons.Filled.AutoAwesome, onNewGroupChat, Modifier.weight(1f))
+                                    onScenarios?.let { ActionCard("Scenario", Icons.Filled.AutoStories, it, Modifier.weight(1f)) }
                                 }
                             }
                         }
                     }
                 }
-                
-                onScenarios?.let { openScenarios ->
-                    item { ActionCard("Scenarios · Quick Scene or Sandbox", Icons.Filled.AutoStories, openScenarios, Modifier.fillMaxWidth(), horizontal = true) }
-                }
-                // Library Section
-                item {
-                    Column {
-                        Text(
-                            text = "Library & Setup",
-                            style = MaterialTheme.typography.titleMedium,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.padding(bottom = 12.dp, start = 8.dp)
-                        )
-                        Card(
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-                            border = elsewhereCardBorder()
+
+                item(key = "library") {
+                    Card(
+                        onClick = onNavigateToLibrary,
+                        modifier = Modifier.fillMaxWidth().testTag("home_library_link"),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+                        border = elsewhereCardBorder()
+                    ) {
+                        Row(
+                            Modifier.fillMaxWidth().padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(14.dp)
                         ) {
-                            ManagementLink("Characters & Personas", "Build and organize your cast", Icons.Filled.Bookmarks, onNavigateToLibrary)
-                            HorizontalDivider()
-                            ManagementLink("Lorebooks", "Manage reusable world context", Icons.Filled.MenuBook, onNavigateToLorebooks)
-                            HorizontalDivider()
-                            ManagementLink("Settings", "Appearance and local model credentials", Icons.Filled.Settings, onNavigateToSettings)
+                            Icon(Icons.Filled.Bookmarks, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                            Column(Modifier.weight(1f)) {
+                                Text("Your Library", style = MaterialTheme.typography.titleMedium)
+                                Text("Characters, Personas, Lorebooks and NPCs", style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            Icon(Icons.Filled.ChevronRight, contentDescription = null)
                         }
                     }
                 }
