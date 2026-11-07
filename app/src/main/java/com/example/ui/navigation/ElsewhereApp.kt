@@ -1,7 +1,6 @@
 package com.example.ui.navigation
 
 import android.net.Uri
-import com.example.BuildConfig
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
@@ -184,8 +183,8 @@ fun ElsewhereApp(
                 } else {
                     WorldsScreen(
                         repository = repository,
-                        archiveTransfer = if (BuildConfig.WORLD_ARCHIVE_PREVIEW)
-                            container.worldArchiveTransfer else null,
+                        // Full Worlds archive UI belongs in normal Elsewhere, not a preview APK.
+                        archiveTransfer = container.worldArchiveTransfer,
                         chatRepository = container.chatRepository,
                         onOpenChat = { chatId ->
                             navController.navigate("chat_detail/${Uri.encode(chatId)}")

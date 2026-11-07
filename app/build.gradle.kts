@@ -25,9 +25,9 @@ android {
     applicationId = legacyApplicationId
     minSdk = 33
     targetSdk = 36
-    versionCode = 1
-    versionName = "1.5"
-    buildConfigField("boolean", "WORLD_ARCHIVE_PREVIEW", "false")
+    // In-place update of regular Elsewhere v1.5; preserve app ID, data and signing key.
+    versionCode = 2
+    versionName = "1.5.1"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     buildConfigField(
@@ -68,7 +68,6 @@ android {
     }
     create("sandbox") {
       initWith(getByName("debug"))
-      buildConfigField("boolean", "WORLD_ARCHIVE_PREVIEW", "true")
       applicationIdSuffix = ".test"
       versionNameSuffix = "-test"
       buildConfigField(
@@ -84,7 +83,6 @@ android {
       // Preserve the already-separate Worlds Preview package ID.
       applicationIdSuffix = ".v15.test.worlds"
       versionNameSuffix = "-worlds-preview"
-      buildConfigField("boolean", "WORLD_ARCHIVE_PREVIEW", "true")
       matchingFallbacks += listOf("sandbox", "debug")
       signingConfigs.findByName("testing")?.let { signingConfig = it }
     }
@@ -105,6 +103,10 @@ android {
 }
 
 androidComponents {
+  onVariants(selector().withBuildType("release")) { variant ->
+    // Keep production native libraries installable on devices using 16 KB pages.
+    variant.packaging.jniLibs.useLegacyPackaging.set(true)
+  }
   beforeVariants(selector().withBuildType("sandbox")) { variantBuilder ->
     (variantBuilder as com.android.build.api.variant.HasUnitTestBuilder).enableUnitTest = true
   }

@@ -14,8 +14,8 @@ class ProductionIdentityTest {
         val context = ApplicationProvider.getApplicationContext<Context>()
 
         assertEquals("com.aistudio.elsewhere.abwzy.v15", BuildConfig.APPLICATION_ID)
-        assertEquals("1.5", BuildConfig.VERSION_NAME)
-        assertEquals(1, BuildConfig.VERSION_CODE)
+        assertEquals("1.5.1", BuildConfig.VERSION_NAME)
+        assertEquals(2, BuildConfig.VERSION_CODE)
         assertEquals("Elsewhere v1.5", context.getString(R.string.app_name))
         assertEquals(
             "com.aistudio.elsewhere.abwzy",

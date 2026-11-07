@@ -13,7 +13,7 @@ class TestingVariantTest {
     fun testingVariantHasSeparateIdentityAndProductionBackupImportCompatibility() {
         val context = ApplicationProvider.getApplicationContext<Context>()
 
-        assertEquals("com.aistudio.elsewhere.abwzy.v15.test", BuildConfig.APPLICATION_ID)
+        assertEquals("com.aistudio.elsewhere.abwzy.test", BuildConfig.APPLICATION_ID)
         assertEquals("Elsewhere Test", context.getString(R.string.app_name))
         assertEquals(
             "com.aistudio.elsewhere.abwzy.v15",
