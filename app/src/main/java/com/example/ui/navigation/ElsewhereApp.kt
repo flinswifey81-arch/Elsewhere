@@ -76,7 +76,7 @@ fun ElsewhereApp(
         // child page as the selected destination.
         val libraryChild = currentRoute in listOf(
             Screen.Characters.route, Screen.Personas.route,
-            Screen.Lorebooks.route, Screen.Settings.route
+            Screen.Lorebooks.route, Screen.Settings.route, "npc_bank_picker"
         )
         val createChild = currentRoute in listOf(
             Screen.Scenarios.route, "create_solo_chat", "create_group_chat"
@@ -114,7 +114,7 @@ fun ElsewhereApp(
                 bottomNavItems.forEach { screen ->
                     val selected = currentDestination?.hierarchy?.any { it.route == screen.route } == true ||
                         (screen == Screen.Library && activeRoute in listOf(
-                            Screen.Characters.route, Screen.Personas.route, Screen.Lorebooks.route, Screen.Settings.route
+                            Screen.Characters.route, Screen.Personas.route, Screen.Lorebooks.route, Screen.Settings.route, "npc_bank_picker"
                         )) ||
                         (screen == Screen.Create && activeRoute in listOf(
                             Screen.Scenarios.route, "create_solo_chat", "create_group_chat"
@@ -165,8 +165,16 @@ fun ElsewhereApp(
                     onCharacters = { navController.navigate(Screen.Characters.route) },
                     onPersonas = { navController.navigate(Screen.Personas.route) },
                     onLorebooks = { navController.navigate(Screen.Lorebooks.route) },
-                    onNpcChats = { navController.navigate(Screen.Chats.route) },
+                    onNpcChats = { navController.navigate("npc_bank_picker") },
                     onSettings = { navController.navigate(Screen.Settings.route) }
+                )
+            }
+            composable("npc_bank_picker") {
+                NpcBankChatPickerScreen(
+                    chatRepository = container.chatRepository,
+                    onOpenNpcBank = { chatId ->
+                        navController.navigate("chat_npc_bank/" + Uri.encode(chatId))
+                    }
                 )
             }
             composable(Screen.Characters.route) { 

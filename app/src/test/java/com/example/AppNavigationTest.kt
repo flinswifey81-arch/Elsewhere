@@ -64,6 +64,13 @@ class AppNavigationTest {
         composeTestRule.onNodeWithTag("lorebooks_screen").assertExists()
 
         composeTestRule.onNodeWithTag("bottom_nav_library").performClick()
+        composeTestRule.onNodeWithTag("library_hub").performScrollToNode(hasTestTag("hub_npc_bank"))
+        composeTestRule.onNodeWithTag("hub_npc_bank").performClick()
+        composeTestRule.onNodeWithTag("npc_bank_chat_picker").assertExists()
+        composeTestRule.onNodeWithText("No chats yet. Start a story first, then return here to manage its NPC Bank.").assertExists()
+
+        composeTestRule.onNodeWithTag("bottom_nav_library").performClick()
+        composeTestRule.onNodeWithTag("library_hub").assertExists()
         composeTestRule.onNodeWithTag("library_hub").performScrollToNode(hasTestTag("hub_settings"))
         composeTestRule.onNodeWithTag("hub_settings").performClick()
         composeTestRule.onNodeWithTag("settings_screen").assertExists()

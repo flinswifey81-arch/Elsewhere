@@ -108,12 +108,8 @@ class ElsewhereVisualReviewTest {
         compose.onNodeWithTag("hub_settings").performClick()
         compose.onNodeWithTag("settings_screen").assertExists()
         shot("settings_appearance")
-        compose.onNodeWithTag("settings_tabs")
-            .performScrollToNode(hasTestTag("settings_tab_connection"))
         compose.onNodeWithTag("settings_tab_connection").performClick()
         shot("settings_connection")
-        compose.onNodeWithTag("settings_tabs")
-            .performScrollToNode(hasTestTag("settings_tab_about"))
         compose.onNodeWithTag("settings_tab_about").performClick()
         shot("settings_about")
     }

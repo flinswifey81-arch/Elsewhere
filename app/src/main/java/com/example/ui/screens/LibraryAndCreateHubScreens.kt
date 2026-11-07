@@ -3,6 +3,10 @@ package com.example.ui.screens
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import com.example.domain.repository.ChatRepository
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
@@ -57,7 +61,7 @@ fun LibraryHubScreen(
             item { HubLink("Characters", "Create and manage your AI cast", Icons.Default.People, "hub_characters", onCharacters) }
             item { HubLink("Personas", "Your identities across stories", Icons.Default.Face, "hub_personas", onPersonas) }
             item { HubLink("Lorebooks", "Reusable setting and story context", Icons.Default.MenuBook, "hub_lorebooks", onLorebooks) }
-            item { HubLink("NPC Bank", "Manage supporting cast from inside each chat", Icons.AutoMirrored.Filled.Chat, "hub_npc_bank", onNpcChats) }
+            item { HubLink("NPC Bank", "Choose a chat to manage its supporting cast", Icons.AutoMirrored.Filled.Chat, "hub_npc_bank", onNpcChats) }
             item { HorizontalDivider() }
             item { HubLink("Settings", "Themes, model connections and backups", Icons.Default.Settings, "hub_settings", onSettings) }
         }
@@ -85,6 +89,59 @@ fun CreateHubScreen(
             item { HubLink("Group chat", "Multiple AI Characters, independent voices", Icons.Default.Groups, "create_group_hub", onGroup) }
             item { HubLink("Scenario", "Quick Scene or a full narrative sandbox", Icons.Default.AutoStories, "create_scenario_hub", onScenario) }
             item { HubLink("World", "Build a setting, cast and linked episodes", Icons.Default.Public, "create_world_hub", onWorlds) }
+        }
+    }
+}
+
+
+/**
+ * NPC Bank data belongs to an individual chat, never to a global cast.
+ * The Library entry explicitly asks which existing chat to manage.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun NpcBankChatPickerScreen(
+    chatRepository: ChatRepository,
+    onOpenNpcBank: (String) -> Unit
+) {
+    val chats by chatRepository.getAllChatSummaries().collectAsState(initial = emptyList())
+    Scaffold(
+        topBar = {
+            CenterAlignedTopAppBar(
+                title = { Text("NPC Bank", style = MaterialTheme.typography.titleLarge) },
+                colors = elsewhereTopAppBarColors()
+            )
+        }
+    ) { padding ->
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().padding(padding).testTag("npc_bank_chat_picker"),
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            item {
+                Text(
+                    "Choose a chat to manage its supporting cast. NPCs remain private to that chat.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            if (chats.isEmpty()) {
+                item {
+                    Text(
+                        "No chats yet. Start a story first, then return here to manage its NPC Bank.",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+            } else {
+                items(chats, key = { it.chat.chatId }) { summary ->
+                    HubLink(
+                        summary.chat.displayName,
+                        "Open this chat's NPC Bank",
+                        Icons.AutoMirrored.Filled.Chat,
+                        "npc_bank_chat_" + summary.chat.chatId
+                    ) { onOpenNpcBank(summary.chat.chatId) }
+                }
+            }
         }
     }
 }

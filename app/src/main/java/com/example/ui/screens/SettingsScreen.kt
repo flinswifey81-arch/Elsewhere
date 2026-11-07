@@ -7,7 +7,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -48,7 +47,7 @@ private enum class SettingsTab(val label: String) {
     ABOUT("About")
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun SettingsScreen(
     settingsRepository: ApiKeyRepository,
@@ -88,21 +87,21 @@ fun SettingsScreen(
         containerColor = MaterialTheme.colorScheme.background
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
-            // A stable tab strip replaces the many-screen-height pile of settings cards.
-            LazyRow(
-                modifier = Modifier.fillMaxWidth().testTag("settings_tabs"),
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            // Wrap all destination labels rather than cutting tabs off-screen.
+            // This also expands naturally at large accessibility font sizes.
+            FlowRow(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)
+                    .testTag("settings_tabs"),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(0.dp)
             ) {
                 tabs.forEach { tab ->
-                    item(key = tab.name) {
-                        FilterChip(
-                            selected = selectedTab == tab,
-                            onClick = { selectedTab = tab },
-                            label = { Text(tab.label, maxLines = 1) },
-                            modifier = Modifier.testTag("settings_tab_" + tab.name.lowercase())
-                        )
-                    }
+                    FilterChip(
+                        selected = selectedTab == tab,
+                        onClick = { selectedTab = tab },
+                        label = { Text(tab.label, maxLines = 1) },
+                        modifier = Modifier.testTag("settings_tab_" + tab.name.lowercase())
+                    )
                 }
             }
             LazyColumn(
