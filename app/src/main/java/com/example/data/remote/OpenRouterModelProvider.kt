@@ -230,10 +230,22 @@ class OpenRouterModelProvider(
         var cachedTokens: Int? = null
         var reportedCost: Double? = null
         var finishReason: String? = null
+        var receivedDoneMarker = false
+
+        // An SSE socket can fail after the model has already finished. Confirm completion
+        // using provider terminal evidence, not merely whether the transport stayed open.
+        fun hasTerminalEvidence(): Boolean =
+            receivedDoneMarker || finishReason?.lowercase() in setOf(
+                "stop", "length", "content_filter", "tool_calls"
+            )
+
+        fun completedMetadata(): GenerationMetadataEntity? =
+            finalMetadata?.copy(generationTimeMs = System.currentTimeMillis() - startTime)
+
         val listener = object : EventSourceListener() {
             override fun onEvent(eventSource: EventSource, id: String?, type: String?, data: String) {
-                if (data == "[DONE]") {
-                    // Normal finish, wait for closed
+                if (data.trim() == "[DONE]") {
+                    receivedDoneMarker = true
                     return
                 }
                 try {
@@ -303,15 +315,21 @@ class OpenRouterModelProvider(
             }
 
             override fun onClosed(eventSource: EventSource) {
-                finalMetadata = finalMetadata?.copy(
-                    generationTimeMs = System.currentTimeMillis() - startTime
-                )
-                trySend(StreamEvent.Done(finalMetadata))
+                if (hasTerminalEvidence()) {
+                    trySend(StreamEvent.Done(completedMetadata()))
+                } else {
+                    trySend(StreamEvent.Error(IOException(
+                        "The stream ended before the provider confirmed completion. You can keep or discard the partial reply."
+                    )))
+                }
                 close()
             }
 
             override fun onFailure(eventSource: EventSource, t: Throwable?, response: Response?) {
-                if (t != null) {
+                if (hasTerminalEvidence()) {
+                    // A late SSE transport failure is not an incomplete model answer.
+                    trySend(StreamEvent.Done(completedMetadata()))
+                } else if (t != null) {
                     trySend(StreamEvent.Error(t))
                 } else if (response != null && !response.isSuccessful) {
                     val err = runCatching { response.body?.string() }

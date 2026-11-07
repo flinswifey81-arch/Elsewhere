@@ -14,6 +14,7 @@ import com.example.data.model.PersonaEntity
 import com.example.data.model.ResponseLengthProfile
 import com.example.data.model.SpeakerType
 import com.example.domain.compiler.ContextCompilerV1
+import com.example.domain.generation.GenerationLifecycleReporter
 import com.example.domain.memory.AutomaticMemoryManager
 import com.example.domain.memory.ContextResetPolicy
 import com.example.domain.coop.CoopGenerationCommand
@@ -139,6 +140,7 @@ sealed class ChatUiState {
         val partialResolutionInProgress: Boolean = false,
         val generationDetails: com.example.ui.screens.GenerationDetailsState = com.example.ui.screens.GenerationDetailsState(),
         val generationError: String? = null,
+        val generationWarning: String? = null,
         val inChatToolStatus: InChatToolStatus? = null,
         val attachments: List<MessageAttachmentEntity> = emptyList(),
         val draftAttachments: List<MessageAttachmentEntity> = emptyList()
@@ -160,7 +162,8 @@ class ChatDetailViewModel(
     private val npcOutputParser: NpcStructuredOutputParser? = null,
     private val dataCoordinator: AppDataMaintenanceCoordinator = AppDataMaintenanceCoordinator.Global,
     private val scenarioRepository: com.example.domain.repository.ScenarioRepository? = null,
-    private val storyOutputParserFactory: () -> StoryOutputParser = ::StoryOutputParser
+    private val storyOutputParserFactory: () -> StoryOutputParser = ::StoryOutputParser,
+    private val generationLifecycle: GenerationLifecycleReporter? = null
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow<ChatUiState>(ChatUiState.Loading)
@@ -393,6 +396,9 @@ class ChatDetailViewModel(
                     ?: throw IllegalStateException("The chat no longer exists.")
                 val updatedSummary = (chatSummary ?: state.chatSummary).copy(chat = updatedChat)
                 chatSummary = updatedSummary
+                // Clear the tool gate before showing a terminal status: an immediate next action
+                // must not be silently rejected after the UI says the tool has finished.
+                inChatToolInProgress = false
                 updateSuccessState {
                     it.copy(
                         chatSummary = updatedSummary,
@@ -405,6 +411,9 @@ class ChatDetailViewModel(
             } catch (cancellation: kotlinx.coroutines.CancellationException) {
                 throw cancellation
             } catch (error: Exception) {
+                // Clear the tool gate before showing a terminal status: an immediate next action
+                // must not be silently rejected after the UI says the tool has finished.
+                inChatToolInProgress = false
                 updateSuccessState {
                     it.copy(
                         inChatToolStatus = InChatToolStatus(
@@ -459,12 +468,18 @@ class ChatDetailViewModel(
                     else ->
                         "Memory update finished for $characterName. No new durable memory was saved, and no rolling summary was needed."
                 }
+                // Clear the tool gate before showing a terminal status: an immediate next action
+                // must not be silently rejected after the UI says the tool has finished.
+                inChatToolInProgress = false
                 updateSuccessState {
                     it.copy(inChatToolStatus = InChatToolStatus(InChatToolStatusKind.SUCCESS, message))
                 }
             } catch (cancellation: kotlinx.coroutines.CancellationException) {
                 throw cancellation
             } catch (error: Exception) {
+                // Clear the tool gate before showing a terminal status: an immediate next action
+                // must not be silently rejected after the UI says the tool has finished.
+                inChatToolInProgress = false
                 updateSuccessState {
                     it.copy(
                         inChatToolStatus = InChatToolStatus(
@@ -625,7 +640,7 @@ class ChatDetailViewModel(
             }
 
             sendInProgress = false
-            updateSuccessState { it.copy(generationError = null) }
+            updateSuccessState { it.copy(generationError = null, generationWarning = null) }
             if (summary.chat.chatType == ChatType.GROUP) {
                 dataCoordinator.withMutation(dataRevision) {
                     chatRepository.updateChat(summary.chat.copy(updatedAt = System.currentTimeMillis()))
@@ -947,6 +962,7 @@ class ChatDetailViewModel(
                 partialStopped = false,
                 partialResolutionInProgress = false,
                 generationError = null,
+                generationWarning = null,
                 generationCharacterId = fullCharacter.characterId
             )
         }
@@ -969,11 +985,15 @@ class ChatDetailViewModel(
             coLeadRebalanceActive = prepared.coLeadRebalanceActive
         )
         
+        runCatching {
+            generationLifecycle?.started(chatId, chatSummary?.chat?.displayName ?: "Chat")
+        }
         generationJob = viewModelScope.launch {
             // Generation preparation is complete once the provider job starts. Clear this before
             // any terminal UI state can be published so an immediately tapped Retry is not lost.
             generationStartInProgress = false
             try {
+                try {
                 modelProvider.streamResponse(prepared.messages, prepared.options).collect { event ->
                     when (event) {
                         is StreamEvent.Content -> {
@@ -1090,6 +1110,9 @@ class ChatDetailViewModel(
                     errorMessage = "The response could not be processed safely. Generated text was retained so you can keep or discard it."
                 )
             }
+            } finally {
+                runCatching { generationLifecycle?.finished(chatId) }
+            }
         }
     }
 
@@ -1168,7 +1191,8 @@ class ChatDetailViewModel(
                 memory.sourceMessageId == null || (history + current).any { it.messageId == memory.sourceMessageId }
             },
             lore = lorebookRepository?.resolveActiveLore(chatId, history, current, AutomaticMemoryManager.DEFAULT_RECENT_MESSAGE_LIMIT).orEmpty(),
-            continuation = continuation
+            continuation = continuation,
+            worldContext = scenarioRepository?.worldContextForChat(chatId)
         ).map { if (it.sourceMessageId == source?.messageId && images.isNotEmpty()) it.copy(images = images) else it }
         return PreparedGeneration(ResponseSpeaker("narrator:$chatId", "Narrator", SpeakerType.NARRATOR), messages,
             GenerationOptions(modelId = modelId, routing = ModelRouting.fromSettings(settings.providerRoutingMode, settings.providerEndpoint),
@@ -1278,6 +1302,9 @@ class ChatDetailViewModel(
         val supportingCast = listOfNotNull(sceneInstructions, activeNpcDossiers)
             .joinToString("\n\n").takeIf(String::isNotBlank)
 
+        // Solo and Group episodes share their World's approved setting and continuity
+        // just as Scenario episodes do. This is a local Room read, not another model call.
+        val activeWorldContext = scenarioRepository?.worldContextForChat(chatId)
         val contextMessages = if (summary.chat.chatType == ChatType.GROUP) {
             val state = _uiState.value as? ChatUiState.Success
             val activeCharacterNames = state?.groupCharacters
@@ -1299,6 +1326,7 @@ class ChatDetailViewModel(
                 durableMemories = durableMemories,
                 rollingSummary = rollingSummary,
                 activeLore = activeLore,
+                worldContext = activeWorldContext,
                 supportingCastContext = supportingCast,
                 npcBankEnabled = npcBankEnabled,
                 narratorEnabled = settings.narratorEnabled,
@@ -1318,6 +1346,7 @@ class ChatDetailViewModel(
                 durableMemories = durableMemories,
                 rollingSummary = rollingSummary,
                 activeLore = activeLore,
+                worldContext = activeWorldContext,
                 supportingCastContext = supportingCast,
                 npcBankEnabled = npcBankEnabled,
                 narratorEnabled = settings.narratorEnabled,
@@ -1591,9 +1620,19 @@ class ChatDetailViewModel(
                     isGenerating = false,
                     streamingContent = null,
                     generationCharacterId = null,
-                    generationError = syncError?.let { "The approved continuation could not be confirmed by the room: ${it.message}" }
-                        ?: npcUpdateWarning
+                    generationError = syncError?.let { "The approved continuation could not be confirmed by the room: ${it.message}" },
+                    generationWarning = if (syncError == null) npcUpdateWarning else null
                 )
+            }
+            if (syncError == null && completionError == null && !isCoopGeneration &&
+                !retainPartialOnCoopFailure && metadata?.isPartial != true
+            ) {
+                runCatching {
+                    generationLifecycle?.replySaved(
+                        chatId, chatSummary?.chat?.displayName ?: "Chat",
+                        character.displayName, continuedMessage.messageId
+                    )
+                }
             }
             refreshChatTimestamp(dataRevision)
             return syncError == null && completionError == null
@@ -1733,8 +1772,8 @@ class ChatDetailViewModel(
                 isGenerating = false,
                 streamingContent = null,
                 generationCharacterId = null,
-                generationError = syncError?.let { "The approved response could not be confirmed by the room: ${it.message}" }
-                    ?: memoryWarning
+                generationError = syncError?.let { "The approved response could not be confirmed by the room: ${it.message}" },
+                generationWarning = if (syncError == null) memoryWarning else null
             )
         }
         
@@ -1750,6 +1789,16 @@ class ChatDetailViewModel(
                 throw cancellation
             } catch (_: Exception) {
                 // The reply is already saved. Never lose it over a counter update.
+            }
+        }
+        if (syncError == null && completionError == null && !isCoopGeneration &&
+            !retainPartialOnCoopFailure && metadata?.isPartial != true
+        ) {
+            runCatching {
+                generationLifecycle?.replySaved(
+                    chatId, chatSummary?.chat?.displayName ?: "Chat",
+                    character.displayName, botMsg.messageId
+                )
             }
         }
         refreshChatTimestamp(dataRevision)
@@ -1768,7 +1817,7 @@ class ChatDetailViewModel(
         } catch (_: Exception) {
             updateSuccessState { state ->
                 state.copy(
-                    generationError = state.generationError
+                    generationWarning = state.generationWarning
                         ?: "The response was saved, but the chat's updated time could not be refreshed."
                 )
             }
@@ -1805,6 +1854,18 @@ class ChatDetailViewModel(
             activeCoopGenerationExecutionId = null
         }
         return error
+    }
+
+    /**
+     * Navigation must not destroy a chat's generation job, unsaved send, or unresolved partial.
+     * The application-scoped ViewModel owner consults this before releasing a hidden chat.
+     */
+    fun hasPendingGenerationWork(): Boolean {
+        val state = _uiState.value as? ChatUiState.Success
+        return sendInProgress || generationStartInProgress ||
+            sendJob?.isActive == true || generationJob?.isActive == true ||
+            state?.isGenerating == true || state?.partialStopped == true ||
+            partialResolutionInProgress || inChatToolInProgress
     }
 
     fun stopGeneration() {
@@ -1944,6 +2005,19 @@ class ChatDetailViewModel(
     fun retryGeneration() {
         val state = _uiState.value as? ChatUiState.Success ?: return
         if (inChatToolInProgress || generationStartInProgress || state.isGenerating) return
+        // Wack already marks the visible tail as out of context. Reject this known
+        // invalid Retry synchronously, before claiming the generation-start gate:
+        // otherwise the old-message lookup can race and silently block a new Send.
+        val resetBoundary = state.chatSummary.chat.contextResetOrderIndex
+        val visibleTail = state.messages.lastOrNull { it.isPrimaryVariant }
+        if (resetBoundary != null && visibleTail != null &&
+            !ContextResetPolicy.includes(visibleTail, resetBoundary)
+        ) {
+            updateSuccessState {
+                it.copy(generationError = "Retry is unavailable because the last message is before the Wack context boundary.")
+            }
+            return
+        }
         if (state.chatSummary.chat.chatType == ChatType.GROUP) {
             generateGroupResponse(state.generationCharacterId ?: state.selectedGroupCharacterId)
             return
@@ -1967,16 +2041,33 @@ class ChatDetailViewModel(
             }
             return
         }
-        val lastMessage = state.messages.lastOrNull()
-        if (lastMessage != null && !ContextResetPolicy.includes(lastMessage, chatSummary?.chat?.contextResetOrderIndex)) {
-            updateSuccessState {
-                it.copy(generationError = "Retry is unavailable because the last message is before the Wack context boundary.")
-            }
-            return
-        }
-        if (lastMessage?.speakerType == SpeakerType.PERSONA) {
-            viewModelScope.launch {
-                startGeneration(lastMessage)
+        // A fast provider failure may be reported before Room's Flow has emitted the
+        // saved Persona turn to the UI. Read persisted history (as Scenario retry does)
+        // instead of relying on state.messages, otherwise Retry silently does nothing.
+        generationStartInProgress = true
+        val revision = dataCoordinator.captureRevision()
+        viewModelScope.launch {
+            try {
+                val primaryMessages = messageRepository.getMessagesForChatOnce(chatId)
+                    .filter { it.isPrimaryVariant }
+                val lastMessage = primaryMessages.lastOrNull() ?: return@launch
+                val boundary = chatSummary?.chat?.contextResetOrderIndex
+                if (!ContextResetPolicy.includes(lastMessage, boundary)) {
+                    updateSuccessState {
+                        it.copy(generationError = "Retry is unavailable because the last message is before the Wack context boundary.")
+                    }
+                    return@launch
+                }
+                if (lastMessage.speakerType != SpeakerType.PERSONA) return@launch
+                val history = ContextResetPolicy.eligiblePrimaryMessages(primaryMessages, boundary)
+                val current = history.lastOrNull() ?: return@launch
+                startGenerationInternal(current, history.dropLast(1), dataRevision = revision)
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                updateSuccessState { it.copy(generationError = "Unable to retry response: ${error.message}") }
+            } finally {
+                generationStartInProgress = false
             }
         }
     }
@@ -2067,6 +2158,12 @@ class ChatDetailViewModel(
                 continuationTarget = targetMessage,
                 characterId = targetMessage.speakerId
             )
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                updateSuccessState {
+                    it.copy(generationError = "Continue could not start: ${error.message ?: "unknown error"}. The existing reply was not changed.")
+                }
             } finally {
                 generationStartInProgress = false
             }
@@ -2233,7 +2330,8 @@ class ChatDetailViewModel(
         private val messageAttachmentRepository: MessageAttachmentRepository? = null,
         private val npcRepository: NpcRepository? = null,
         private val npcOutputParser: NpcStructuredOutputParser? = null,
-        private val scenarioRepository: com.example.domain.repository.ScenarioRepository? = null
+        private val scenarioRepository: com.example.domain.repository.ScenarioRepository? = null,
+        private val generationLifecycle: GenerationLifecycleReporter? = null
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
@@ -2244,7 +2342,8 @@ class ChatDetailViewModel(
                 messageAttachmentRepository,
                 npcRepository,
                 npcOutputParser,
-                scenarioRepository = scenarioRepository
+                scenarioRepository = scenarioRepository,
+                generationLifecycle = generationLifecycle
             ) as T
         }
     }

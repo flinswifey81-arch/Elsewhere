@@ -20,11 +20,14 @@ android {
   compileSdk { version = release(36) { minorApiLevel = 1 } }
 
   defaultConfig {
-    applicationId = productionApplicationId
+    // Keep the original Elsewhere Test package stable across production version bumps.
+    // Release and debug explicitly retain their v1.5 suffixes below.
+    applicationId = legacyApplicationId
     minSdk = 33
     targetSdk = 36
-    versionCode = 1
-    versionName = "1.5"
+    // In-place update of regular Elsewhere v1.5; preserve app ID, data and signing key.
+    versionCode = 2
+    versionName = "1.5.1"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     buildConfigField(
@@ -54,12 +57,15 @@ android {
 
   buildTypes {
     release {
+      applicationIdSuffix = ".v15"
       isCrunchPngs = false
       isMinifyEnabled = false
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
       signingConfig = signingConfigs.getByName("release")
     }
-    debug { }
+    debug {
+      applicationIdSuffix = ".v15"
+    }
     create("sandbox") {
       initWith(getByName("debug"))
       applicationIdSuffix = ".test"
@@ -70,6 +76,14 @@ android {
         "\"$productionApplicationId\""
       )
       matchingFallbacks += listOf("debug")
+      signingConfigs.findByName("testing")?.let { signingConfig = it }
+    }
+    create("worldsPreview") {
+      initWith(getByName("sandbox"))
+      // Preserve the already-separate Worlds Preview package ID.
+      applicationIdSuffix = ".v15.test.worlds"
+      versionNameSuffix = "-worlds-preview"
+      matchingFallbacks += listOf("sandbox", "debug")
       signingConfigs.findByName("testing")?.let { signingConfig = it }
     }
   }
@@ -89,14 +103,31 @@ android {
 }
 
 androidComponents {
+  onVariants(selector().withBuildType("release")) { variant ->
+    // Keep production native libraries installable on devices using 16 KB pages.
+    variant.packaging.jniLibs.useLegacyPackaging.set(true)
+  }
   beforeVariants(selector().withBuildType("sandbox")) { variantBuilder ->
     (variantBuilder as com.android.build.api.variant.HasUnitTestBuilder).enableUnitTest = true
   }
   onVariants(selector().withBuildType("sandbox")) { variant ->
-    // 4 KB-aligned, uncompressed .so entries can be rejected by 16 KB page-size devices.
     // Compress/extract sandbox native libraries; leave production APK packaging unchanged.
     variant.packaging.jniLibs.useLegacyPackaging.set(true)
   }
+  onVariants(selector().withBuildType("worldsPreview")) { variant ->
+    // Worlds Preview is also isolated testing and needs the same 16 KB compatibility.
+    variant.packaging.jniLibs.useLegacyPackaging.set(true)
+  }
+}
+
+// Robolectric/Compose tests build large Android text/layout graphs. Give their
+// isolated workers enough heap and periodically restart the worker so an entire
+// suite cannot accumulate stale ShadowTrace/layout objects until it OOMs.
+// This does not skip or soften any tests.
+tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
+  maxHeapSize = "1536m"
+  maxParallelForks = 1
+  forkEvery = 24
 }
 
 // Some unused dependencies are commented out below instead of being removed.

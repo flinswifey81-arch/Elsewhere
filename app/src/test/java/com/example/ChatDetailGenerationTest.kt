@@ -26,6 +26,7 @@ import com.example.data.model.ProviderRoutingMode
 import com.example.data.model.RoleplayMemoryEntity
 import com.example.data.model.ResponseLengthProfile
 import com.example.data.model.SpeakerType
+import com.example.domain.generation.GenerationLifecycleReporter
 import com.example.domain.provider.GenerationOptions
 import com.example.domain.provider.ModelProvider
 import com.example.domain.provider.OpenRouterModel
@@ -126,6 +127,16 @@ class ChatDetailGenerationTest {
         )
 
         val provider = RecordingStreamingProvider()
+        val savedReplyIds = mutableListOf<String>()
+        val generationEvents = object : GenerationLifecycleReporter {
+            override fun started(chatId: String, chatTitle: String) {}
+            override fun replySaved(
+                chatId: String, chatTitle: String, speakerName: String, messageId: String
+            ) {
+                savedReplyIds.add(messageId)
+            }
+            override fun finished(chatId: String) {}
+        }
         val viewModel = viewModels.create(ChatDetailViewModel::class.java) {
             ChatDetailViewModel(
                 chatId,
@@ -135,7 +146,8 @@ class ChatDetailGenerationTest {
                 personaRepository,
                 provider,
                 memoryRepository,
-                dataCoordinator = dataCoordinator
+                dataCoordinator = dataCoordinator,
+                generationLifecycle = generationEvents
             )
         }
         withTimeout(15_000) { viewModel.uiState.first { it is ChatUiState.Success } }
@@ -184,9 +196,46 @@ class ChatDetailGenerationTest {
         }
         assertEquals(2, continuedMessages.size)
         val continuationRequest = provider.requests.last()
-        assertEquals(1, continuationRequest.count { it.role == Role.USER })
+        assertEquals(2, continuationRequest.count { it.role == Role.USER })
         assertEquals(1, continuationRequest.count { it.role == Role.ASSISTANT })
+        assertEquals(Role.USER, continuationRequest.last().role)
+        assertTrue(continuationRequest.last().content.startsWith("[DIRECTOR TURN CONTROL"))
         assertTrue(continuationRequest.last().content.contains("Continue the previous message"))
+        assertTrue(continuationRequest.last().content.contains("Do not invent dialogue"))
+        assertFalse(continuationRequest.drop(1).any { it.role == Role.SYSTEM })
+        withTimeout(5_000) { while (savedReplyIds.size < 2) yield() }
+        // A saved Continue updates the existing message instead of inventing a new chat turn.
+        assertEquals(listOf(persisted.last().messageId, persisted.last().messageId), savedReplyIds)
+    }
+
+    @Test
+    fun continueFromCharacterGreetingNeedsNoPersonaTurn() = runBlocking {
+        val provider = SequentialResponseProvider(listOf(" And then the door opened."))
+        val harness = createHarness(
+            provider = provider,
+            responseLengthProfile = ResponseLengthProfile.NORMAL,
+            initialStoredCharacterContent = "The door closed."
+        )
+        val greeting = harness.messageRepository.getMessagesForChatOnce(harness.chatId).single()
+        assertEquals(SpeakerType.CHARACTER, greeting.speakerType)
+
+        harness.viewModel.continueMessage(greeting.messageId)
+
+        val continued = withTimeout(15_000) {
+            harness.messageRepository.getMessagesForChat(harness.chatId).first { messages ->
+                messages.size == 1 &&
+                    messages.single().messageId == greeting.messageId &&
+                    messages.single().content.contains("And then the door opened.")
+            }
+        }
+        assertEquals(1, continued.size)
+        assertEquals(0, continued.count { it.speakerType == SpeakerType.PERSONA })
+        assertEquals(1, provider.requests.size)
+        val prompt = provider.requests.single()
+        assertEquals(Role.ASSISTANT, prompt[prompt.lastIndex - 1].role)
+        assertEquals(Role.USER, prompt.last().role)
+        assertTrue(prompt.last().content.startsWith("[DIRECTOR TURN CONTROL"))
+        assertFalse(prompt.drop(1).any { it.role == Role.SYSTEM })
     }
 
     @Test
@@ -898,6 +947,16 @@ class ChatDetailGenerationTest {
         assertFalse(visible.contains("<|"))
         assertFalse(visible.contains("broken"))
         assertEquals(1, provider.requests.size)
+        val savedWithWarning = withTimeout(15_000) {
+            harness.viewModel.uiState.first { state ->
+                state is ChatUiState.Success &&
+                    !state.isGenerating &&
+                    state.generationWarning != null &&
+                    state.messages.any { it.messageId == completed.last().messageId }
+            }
+        } as ChatUiState.Success
+        assertNull(savedWithWarning.generationError)
+        assertTrue(savedWithWarning.generationWarning.orEmpty().isNotBlank())
     }
 
     @Test
