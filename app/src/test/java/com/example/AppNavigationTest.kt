@@ -52,10 +52,14 @@ class AppNavigationTest {
         composeTestRule.onNodeWithTag("characters_screen").assertExists()
 
         composeTestRule.onNodeWithTag("bottom_nav_library").performClick()
+        composeTestRule.onNodeWithTag("library_hub").assertExists()
+        composeTestRule.onNodeWithTag("library_hub").performScrollToNode(hasTestTag("hub_personas"))
         composeTestRule.onNodeWithTag("hub_personas").performClick()
         composeTestRule.onNodeWithTag("personas_screen").assertExists()
 
         composeTestRule.onNodeWithTag("bottom_nav_library").performClick()
+        composeTestRule.onNodeWithTag("library_hub").assertExists()
+        composeTestRule.onNodeWithTag("library_hub").performScrollToNode(hasTestTag("hub_lorebooks"))
         composeTestRule.onNodeWithTag("hub_lorebooks").performClick()
         composeTestRule.onNodeWithTag("lorebooks_screen").assertExists()
 

@@ -70,10 +70,27 @@ fun ElsewhereApp(
     val isLightPalette = MaterialTheme.colorScheme.background.luminance() > 0.5f
     val appearanceSettings by container.appearanceRepository.appearanceSettings.collectAsState(initial = AppearanceSettings())
     fun navigateTo(screen: Screen) {
+        val currentRoute = navController.currentDestination?.route
+        // A child page (Characters, Personas, Lorebooks or Settings) belongs to the
+        // Library tab. Tapping the tab must return to its hub, not restore the
+        // child page as the selected destination.
+        val libraryChild = currentRoute in listOf(
+            Screen.Characters.route, Screen.Personas.route,
+            Screen.Lorebooks.route, Screen.Settings.route
+        )
+        val createChild = currentRoute in listOf(
+            Screen.Scenarios.route, "create_solo_chat", "create_group_chat"
+        )
+        if ((screen == Screen.Library && libraryChild) ||
+            (screen == Screen.Create && createChild)
+        ) {
+            if (navController.popBackStack(screen.route, inclusive = false)) return
+        }
         navController.navigate(screen.route) {
             popUpTo(navController.graph.findStartDestination().id) { saveState = true }
             launchSingleTop = true
-            restoreState = true
+            restoreState = !(screen == Screen.Library && libraryChild) &&
+                !(screen == Screen.Create && createChild)
         }
     }
     
