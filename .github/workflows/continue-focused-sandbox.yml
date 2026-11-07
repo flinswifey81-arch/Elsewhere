@@ -1,4 +1,4 @@
-name: Continue Regression and Sandbox APK
+name: Continue Regression Tests
 
 on:
   pull_request:
@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   continue-regression:
-    name: Validate Continue and assemble isolated sandbox
+    name: Validate Continue and notifications integration
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -51,13 +51,4 @@ jobs:
             --tests com.example.LocalGroupGenerationTest.groupCharactersAndRegenerationReuseOriginImageButContinueDoesNot \
             --tests com.example.ScenarioModeTest.oneRequestPortraysMultipleNpcsAndPreservesModelSettingsAndNarratorIdentity
 
-      - name: Assemble Elsewhere Test APK
-        run: bash ./gradlew :app:assembleSandbox --no-daemon
-
-      - name: Upload Continue plus notifications sandbox APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: Elsewhere-Continue-Notifications-Test-APK
-          path: app/build/outputs/apk/sandbox/app-sandbox.apk
-          if-no-files-found: error
-          retention-days: 14
+      # Test-only CI gate. Integrated signed production APK is the sole automatic build artifact.

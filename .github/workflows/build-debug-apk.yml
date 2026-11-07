@@ -1,4 +1,4 @@
-name: Build Temporary Elsewhere Test APK
+name: Pre-freeze Regression Tests (manual Test APK optional)
 
 on:
   workflow_dispatch:
@@ -21,7 +21,7 @@ permissions:
 
 jobs:
   build-debug-apk:
-    name: Build temporary app-sandbox.apk
+    name: Run pre-freeze compatibility regression tests
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -83,10 +83,12 @@ jobs:
                       print((failure.text or "")[:5000])
           PY
 
-      - name: Build temporary sandbox APK
+      - name: Build temporary sandbox APK only when manually requested
+        if: github.event_name == 'workflow_dispatch'
         run: bash ./gradlew :app:assembleSandbox --no-daemon
 
       - name: Verify native libraries are compressed for device installation
+        if: github.event_name == 'workflow_dispatch'
         run: |
           python3 - <<'PY'
           from zipfile import ZipFile, ZIP_DEFLATED
@@ -102,7 +104,8 @@ jobs:
               print(f"Verified {len(libraries)} native libraries packaged compressed.")
           PY
 
-      - name: Upload temporary test APK
+      - name: Upload temporary test APK only when manually requested
+        if: github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v4
         with:
           name: Elsewhere-Temporary-Test-APK

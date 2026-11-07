@@ -48,12 +48,5 @@ jobs:
             --tests com.example.WorldRepositoryTest \
             --tests com.example.AppDatabaseMigrationTest
 
-      - name: Assemble separate Worlds Preview APK
-        run: bash ./gradlew :app:assembleWorldsPreview --no-daemon
-      - name: Publish isolated Worlds Preview APK (never production or existing Test)
-        uses: actions/upload-artifact@v4
-        with:
-          name: Elsewhere-Worlds-Preview-Isolated-APK
-          path: app/build/outputs/apk/worldsPreview/*.apk
-          if-no-files-found: error
-          retention-days: 14
+      # This contract gate validates archive format and migration only.
+      # Production candidates are assembled and signed in build-v15-release-apk.yml.
