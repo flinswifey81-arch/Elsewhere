@@ -396,6 +396,9 @@ class ChatDetailViewModel(
                     ?: throw IllegalStateException("The chat no longer exists.")
                 val updatedSummary = (chatSummary ?: state.chatSummary).copy(chat = updatedChat)
                 chatSummary = updatedSummary
+                // Clear the tool gate before showing a terminal status: an immediate next action
+                // must not be silently rejected after the UI says the tool has finished.
+                inChatToolInProgress = false
                 updateSuccessState {
                     it.copy(
                         chatSummary = updatedSummary,
@@ -408,6 +411,9 @@ class ChatDetailViewModel(
             } catch (cancellation: kotlinx.coroutines.CancellationException) {
                 throw cancellation
             } catch (error: Exception) {
+                // Clear the tool gate before showing a terminal status: an immediate next action
+                // must not be silently rejected after the UI says the tool has finished.
+                inChatToolInProgress = false
                 updateSuccessState {
                     it.copy(
                         inChatToolStatus = InChatToolStatus(
@@ -462,12 +468,18 @@ class ChatDetailViewModel(
                     else ->
                         "Memory update finished for $characterName. No new durable memory was saved, and no rolling summary was needed."
                 }
+                // Clear the tool gate before showing a terminal status: an immediate next action
+                // must not be silently rejected after the UI says the tool has finished.
+                inChatToolInProgress = false
                 updateSuccessState {
                     it.copy(inChatToolStatus = InChatToolStatus(InChatToolStatusKind.SUCCESS, message))
                 }
             } catch (cancellation: kotlinx.coroutines.CancellationException) {
                 throw cancellation
             } catch (error: Exception) {
+                // Clear the tool gate before showing a terminal status: an immediate next action
+                // must not be silently rejected after the UI says the tool has finished.
+                inChatToolInProgress = false
                 updateSuccessState {
                     it.copy(
                         inChatToolStatus = InChatToolStatus(
