@@ -13,12 +13,12 @@ private val Context.dataStore by preferencesDataStore(name = "appearance_setting
 
 enum class ThemeMode { SYSTEM, LIGHT, DARK }
 
-enum class ColorPalette(val storageId: String, val displayName: String) {
-    PURPLE("purple", "Purple"),
-    OCEAN_BLUE("ocean_blue", "Ocean Blue"),
-    FOREST_GREEN("forest_green", "Forest Green"),
-    ROSE("rose", "Rose"),
-    SLATE("slate", "Slate");
+enum class ColorPalette(val storageId: String, val displayName: String, val themeName: String) {
+    PURPLE("purple", "Purple", "The Original"),
+    OCEAN_BLUE("ocean_blue", "Ocean Blue", "Moonlit Waters"),
+    FOREST_GREEN("forest_green", "Forest Green", "Enchanted Woodland"),
+    ROSE("rose", "Rose", "Twilight Garden"),
+    SLATE("slate", "Slate", "Starlit Stone");
 
     companion object {
         val selectable = entries.toList()

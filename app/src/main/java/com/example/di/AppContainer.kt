@@ -3,6 +3,8 @@ package com.example.di
 import android.content.Context
 import androidx.room.Room
 import com.example.data.AppDatabase
+import com.example.domain.generation.RetainedChatViewModelStores
+import com.example.domain.generation.AndroidGenerationNotifications
 import com.example.domain.repository.AppearanceRepository
 import com.example.domain.repository.AppDataMaintenanceCoordinator
 import com.example.domain.repository.CharacterRepository
@@ -22,11 +24,16 @@ import com.example.domain.coop.AndroidCoopRoomIdentityStore
 import com.example.domain.coop.AndroidCoopParticipantIdentityStore
 import com.example.domain.npc.NpcStructuredOutputParser
 import com.example.domain.backup.BackupRepository
+import com.example.domain.world.WorldArchiveAdditiveRestorer
+import com.example.domain.world.WorldArchiveTransferCoordinator
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 
 interface AppContainer {
+    val retainedChatViewModelStores: RetainedChatViewModelStores? get() = null
+    val generationNotifications: AndroidGenerationNotifications? get() = null
     val scenarioRepository: com.example.domain.repository.ScenarioRepository? get() = null
+    val worldRepository: com.example.domain.repository.WorldRepository? get() = null
     val modelProvider: com.example.domain.provider.ModelProvider
     val characterRepository: CharacterRepository
     val personaRepository: PersonaRepository
@@ -43,9 +50,15 @@ interface AppContainer {
     val npcRepository: NpcRepository? get() = null
     val npcOutputParser: NpcStructuredOutputParser? get() = null
     val backupRepository: BackupRepository? get() = null
+    val worldArchiveRestorer: WorldArchiveAdditiveRestorer? get() = null
+    val worldArchiveTransfer: WorldArchiveTransferCoordinator? get() = null
 }
 
 class DefaultAppContainer(private val context: Context) : AppContainer {
+    override val retainedChatViewModelStores = RetainedChatViewModelStores()
+    override val generationNotifications by lazy {
+        AndroidGenerationNotifications(context, retainedChatViewModelStores)
+    }
     private val dataCoordinator = AppDataMaintenanceCoordinator.Global
 
     private val okHttpClient: okhttp3.OkHttpClient by lazy {
@@ -74,12 +87,26 @@ class DefaultAppContainer(private val context: Context) : AppContainer {
                 AppDatabase.MIGRATION_9_10,
                 AppDatabase.MIGRATION_10_11,
                 AppDatabase.MIGRATION_11_12,
-                AppDatabase.MIGRATION_12_13
+                AppDatabase.MIGRATION_12_13,
+                AppDatabase.MIGRATION_13_14,
+                AppDatabase.MIGRATION_14_15
             )
             .build()
     }
 
+    override val worldArchiveRestorer by lazy {
+        WorldArchiveAdditiveRestorer(database, context.filesDir, dataCoordinator)
+    }
+
+    override val worldArchiveTransfer by lazy {
+        WorldArchiveTransferCoordinator(
+            context, database, messageAttachmentRepository, profileImageRepository,
+            worldArchiveRestorer, dataCoordinator
+        )
+    }
+
     override val scenarioRepository by lazy { com.example.domain.repository.ScenarioRepository(database, dataCoordinator) }
+    override val worldRepository by lazy { com.example.domain.repository.WorldRepository(database, dataCoordinator) }
 
     override val characterRepository: CharacterRepository by lazy {
         CharacterRepository(database.characterDao(), moshi, profileImageRepository, dataCoordinator)

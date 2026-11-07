@@ -1,0 +1,52 @@
+name: World Archive Manifest Contract
+
+on:
+  pull_request:
+    branches:
+      - feature/worlds-foundation-2026-11-01
+      - feature/world-archive-manifest-contract-2026-11-05
+      - feature/world-archive-history-closure-2026-11-05
+      - feature/world-archive-encrypted-io-2026-11-05
+      - feature/world-archive-semantic-remap-2026-11-05
+      - feature/world-archive-additive-restore-2026-11-05
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-contract:
+    name: Validate World archive manifest and existing World records
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools
+      - name: Install required SDK
+        run: sdkmanager "platforms;android-36.1" "build-tools;36.0.0"
+      - name: Gradle
+        uses: gradle/actions/setup-gradle@v4
+      - name: Run World format and repository tests offline
+        run: |
+          bash ./gradlew :app:testSandboxUnitTest --no-daemon \
+            --tests com.example.WorldArchiveManifestCodecTest \
+            --tests com.example.WorldArchiveHistoryTest \
+            --tests com.example.WorldArchiveEncryptedIOTest \
+            --tests com.example.WorldArchiveAdditiveRestorerTest \
+            --tests com.example.WorldArchiveTransferCoordinatorTest \
+            --tests com.example.WorldDefinitionCodecTest \
+            --tests com.example.WorldRepositoryTest \
+            --tests com.example.AppDatabaseMigrationTest
+
+      # This contract gate validates archive format and migration only.
+      # Production candidates are assembled and signed in build-v15-release-apk.yml.

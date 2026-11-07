@@ -17,15 +17,22 @@ import java.util.UUID
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ScenariosScreen(container: AppContainer, onChatCreated: (String) -> Unit, onPersonas: () -> Unit) {
+fun ScenariosScreen(
+    container: AppContainer,
+    onChatCreated: (String) -> Unit,
+    onPersonas: () -> Unit,
+    initialWorldId: String? = null
+) {
     val repository = container.scenarioRepository ?: return
     val scenarios by repository.observeAll().collectAsState(emptyList())
     val personas by container.personaRepository.getAllPersonas().collectAsState(emptyList())
+    val worlds = container.worldRepository?.observeWorlds()?.collectAsState(initial = emptyList())?.value.orEmpty()
     val scope = rememberCoroutineScope()
     var editingId by rememberSaveable { mutableStateOf<String?>(null) }
     var draftJson by rememberSaveable { mutableStateOf(ScenarioCodec.encode(ScenarioDefinition())) }
     var startingId by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedPersonaId by rememberSaveable { mutableStateOf<String?>(null) }
+    var selectedWorldId by rememberSaveable(initialWorldId) { mutableStateOf(initialWorldId) }
     var error by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
     var query by rememberSaveable { mutableStateOf("") }
@@ -78,7 +85,7 @@ fun ScenariosScreen(container: AppContainer, onChatCreated: (String) -> Unit, on
                         if (d.publicDescription.isNotBlank()) Text(d.publicDescription)
                         if (d.tags.isNotBlank()) Text(d.tags, style = MaterialTheme.typography.labelMedium)
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button(onClick = { startingId = scenario.scenarioId; selectedPersonaId = null; error = null }) { Text("New playthrough") }
+                            Button(onClick = { startingId = scenario.scenarioId; selectedPersonaId = null; selectedWorldId = initialWorldId; error = null }) { Text("New playthrough") }
                             TextButton(onClick = { editingId = scenario.scenarioId; draftJson = scenario.definitionJson; error = null }) { Text("Edit") }
                         }
                     }
@@ -91,6 +98,17 @@ fun ScenariosScreen(container: AppContainer, onChatCreated: (String) -> Unit, on
         title = { Text("Select a player persona") },
         text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Starts an independent story using this scenario's current configuration.")
+            Text("Shared World (optional)", style = MaterialTheme.typography.titleSmall)
+            SelectionCard("Independent story · no World", selectedWorldId == null) { selectedWorldId = null }
+            if (worlds.isNotEmpty()) {
+                LazyColumn(Modifier.heightIn(max = 150.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    items(worlds, key = { it.worldId }) { world ->
+                        SelectionCard(world.title, selectedWorldId == world.worldId) { selectedWorldId = world.worldId }
+                    }
+                }
+                Text("The selected World contributes setting, cast and accepted continuity to narration.",
+                    style = MaterialTheme.typography.bodySmall)
+            }
             LazyColumn(Modifier.heightIn(max = 320.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(personas, key = { it.personaId }) { persona -> SelectionCard(persona.displayName, selectedPersonaId == persona.personaId) { selectedPersonaId = persona.personaId } }
             }
@@ -100,7 +118,7 @@ fun ScenariosScreen(container: AppContainer, onChatCreated: (String) -> Unit, on
         confirmButton = { TextButton(enabled = selectedPersonaId != null && !busy, onClick = {
             scope.launch {
                 busy = true
-                try { val id = repository.start(requireNotNull(startingId), requireNotNull(selectedPersonaId)); startingId = null; onChatCreated(id) }
+                try { val id = repository.start(requireNotNull(startingId), requireNotNull(selectedPersonaId), selectedWorldId); startingId = null; onChatCreated(id) }
                 catch (e: Exception) { error = e.message ?: "Unable to start playthrough." }
                 finally { busy = false }
             }

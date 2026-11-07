@@ -132,7 +132,7 @@ class AppDatabaseMigrationTest {
     }
 
     @Test
-    fun migrationFrom3To13ValidatesAgainstRoomAndPreservesExistingChatData() = runBlocking {
+    fun migrationFrom3To15ValidatesAgainstRoomAndPreservesExistingChatData() = runBlocking {
         val helper = FrameworkSQLiteOpenHelperFactory().create(
             SupportSQLiteOpenHelper.Configuration.builder(context)
                 .name(databaseName)
@@ -172,12 +172,14 @@ class AppDatabaseMigrationTest {
                 AppDatabase.MIGRATION_9_10,
                 AppDatabase.MIGRATION_10_11,
                 AppDatabase.MIGRATION_11_12,
-                AppDatabase.MIGRATION_12_13
+                AppDatabase.MIGRATION_12_13,
+                AppDatabase.MIGRATION_13_14,
+                AppDatabase.MIGRATION_14_15
             )
             .allowMainThreadQueries()
             .build()
         try {
-            // Opening through Room executes every migration through 13 and validates the resulting schema.
+            // Opening through Room executes every migration through 15 and validates the resulting schema.
             migrated.openHelper.writableDatabase
             assertEquals("Keep Me", migrated.chatDao().getChatById("chat-keep")?.displayName)
             assertEquals("Preserve this", migrated.messageDao().getMessagesForChatOnce("chat-keep").single().content)
@@ -192,6 +194,7 @@ class AppDatabaseMigrationTest {
             assertTrue(migrated.messageAttachmentDao().getForChat("chat-keep").isEmpty())
             assertTrue(migrated.npcDao().getDossiers("chat-keep").isEmpty())
             assertTrue(migrated.npcDao().getLibraryBanks().isEmpty())
+            assertTrue(migrated.worldDao().getWorlds().isEmpty())
             assertTrue(migrated.chatDao().getChatById("chat-keep")?.contextResetOrderIndex == null)
         } finally {
             migrated.close()
@@ -199,28 +202,95 @@ class AppDatabaseMigrationTest {
     }
 
     @Test
-    fun migrationFrom12To13AddsScenePresenceWithoutLosingOldNpcIdentity() {
+    fun migrationFrom13To14AddsEmptyWorldTablesWithoutChangingExistingChats() {
         val helper = FrameworkSQLiteOpenHelperFactory().create(
-            SupportSQLiteOpenHelper.Configuration.builder(context)
-                .name(databaseName)
-                .callback(object : SupportSQLiteOpenHelper.Callback(12) {
+            SupportSQLiteOpenHelper.Configuration.builder(context).name(databaseName)
+                .callback(object : SupportSQLiteOpenHelper.Callback(13) {
                     override fun onCreate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
-                        db.execSQL("CREATE TABLE npc_dossiers (npcId TEXT NOT NULL PRIMARY KEY, displayName TEXT NOT NULL)")
+                        db.execSQL("CREATE TABLE chats (chatId TEXT NOT NULL PRIMARY KEY, displayName TEXT NOT NULL)")
                     }
                     override fun onUpgrade(db: androidx.sqlite.db.SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
-                })
-                .build()
+                }).build()
         )
-        helper.writableDatabase.apply {
-            execSQL("INSERT INTO npc_dossiers (npcId, displayName) VALUES ('old-npc', 'Mara')")
-            AppDatabase.MIGRATION_12_13.migrate(this)
-            query("SELECT displayName, sceneMode FROM npc_dossiers WHERE npcId = 'old-npc'").use { cursor ->
-                assertTrue(cursor.moveToFirst())
-                assertEquals("Mara", cursor.getString(0))
-                assertEquals("AUTO", cursor.getString(1))
+        try {
+            helper.writableDatabase.apply {
+                execSQL("INSERT INTO chats (chatId, displayName) VALUES ('existing', 'Preserve')")
+                AppDatabase.MIGRATION_13_14.migrate(this)
+                query("SELECT displayName FROM chats WHERE chatId = 'existing'").use { cursor ->
+                    assertTrue(cursor.moveToFirst())
+                    assertEquals("Preserve", cursor.getString(0))
+                }
+                query("SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('worlds', 'world_memberships', 'world_cast', 'world_continuity_events')").use { cursor ->
+                    assertEquals(4, cursor.count)
+                }
+                query("SELECT name FROM sqlite_master WHERE type = 'index' AND name IN ('index_world_memberships_worldId', 'index_world_cast_worldId', 'index_world_continuity_events_worldId')").use { cursor ->
+                    assertEquals(3, cursor.count)
+                }
             }
+        } finally {
+            helper.close()
         }
-        helper.close()
+    }
+
+    @Test
+    fun migrationFrom14To15AddsWorldLinksWithoutLosingWorldMetadata() {
+        val helper = FrameworkSQLiteOpenHelperFactory().create(
+            SupportSQLiteOpenHelper.Configuration.builder(context).name(databaseName)
+                .callback(object : SupportSQLiteOpenHelper.Callback(14) {
+                    override fun onCreate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                        db.execSQL("CREATE TABLE worlds (worldId TEXT NOT NULL PRIMARY KEY, title TEXT NOT NULL, description TEXT NOT NULL, settingSummary TEXT NOT NULL, worldRules TEXT NOT NULL, genreTagsJson TEXT NOT NULL, createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL)")
+                    }
+                    override fun onUpgrade(db: androidx.sqlite.db.SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+                }).build()
+        )
+        try {
+            helper.writableDatabase.apply {
+                execSQL("INSERT INTO worlds VALUES ('world-old', 'Old Mondstadt', '', 'A city', '', '[]', 1, 2)")
+                AppDatabase.MIGRATION_14_15.migrate(this)
+                query("SELECT title, linksJson, defaultLorebookIdsJson FROM worlds WHERE worldId = 'world-old'").use { cursor ->
+                    assertTrue(cursor.moveToFirst())
+                    assertEquals("Old Mondstadt", cursor.getString(0))
+                    assertTrue(cursor.getString(1).contains("relationships"))
+                    assertEquals("[]", cursor.getString(2))
+                }
+            }
+        } finally {
+            helper.close()
+        }
+    }
+
+    @Test
+    fun migrationFrom12To13PreservesExistingNpcAndAddsSceneModeDefault() {
+        val helper = FrameworkSQLiteOpenHelperFactory().create(
+            SupportSQLiteOpenHelper.Configuration.builder(context).name(databaseName)
+                .callback(object : SupportSQLiteOpenHelper.Callback(12) {
+                    override fun onCreate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                        db.execSQL(
+                            "CREATE TABLE npc_dossiers (npcId TEXT NOT NULL PRIMARY KEY, " +
+                                "chatId TEXT NOT NULL, displayName TEXT NOT NULL)"
+                        )
+                    }
+                    override fun onUpgrade(
+                        db: androidx.sqlite.db.SupportSQLiteDatabase,
+                        oldVersion: Int, newVersion: Int
+                    ) = Unit
+                }).build()
+        )
+        try {
+            helper.writableDatabase.apply {
+                execSQL("INSERT INTO npc_dossiers (npcId, chatId, displayName) " +
+                    "VALUES ('npc-keep', 'chat-keep', 'The Porter')")
+                AppDatabase.MIGRATION_12_13.migrate(this)
+                query("SELECT displayName, sceneMode FROM npc_dossiers WHERE npcId = 'npc-keep'")
+                    .use { cursor ->
+                        assertTrue(cursor.moveToFirst())
+                        assertEquals("The Porter", cursor.getString(0))
+                        assertEquals("AUTO", cursor.getString(1))
+                    }
+            }
+        } finally {
+            helper.close()
+        }
     }
 
     @Test

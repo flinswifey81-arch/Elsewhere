@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import android.net.Uri
+import com.example.BuildConfig
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.selection.selectable
@@ -9,6 +10,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -37,7 +39,15 @@ import com.example.ui.components.elsewhereTextFieldColors
 import com.example.ui.components.elsewhereTopAppBarColors
 import com.example.ui.theme.getLightColorScheme
 
-@OptIn(ExperimentalMaterial3Api::class)
+private enum class SettingsTab(val label: String) {
+    APPEARANCE("Appearance"),
+    CONNECTION("Connection"),
+    ENGINE("Default engine"),
+    BACKUP("Backup"),
+    ABOUT("About")
+}
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun SettingsScreen(
     settingsRepository: ApiKeyRepository,
@@ -51,14 +61,21 @@ fun SettingsScreen(
     var apiKey by remember { mutableStateOf("") }
     var savedKey by remember { mutableStateOf<String?>(null) }
     var isLoaded by remember { mutableStateOf(false) }
-
+    var selectedTab by rememberSaveable { mutableStateOf(SettingsTab.APPEARANCE) }
     val appearanceSettings by appearanceRepository.appearanceSettings.collectAsState(initial = AppearanceSettings())
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(settingsRepository) {
         savedKey = settingsRepository.getApiKey()
         isLoaded = true
     }
 
+    val tabs = SettingsTab.entries.filter {
+        when (it) {
+            SettingsTab.ENGINE -> chatRepository != null
+            SettingsTab.BACKUP -> backupRepository != null
+            else -> true
+        }
+    }
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
@@ -69,197 +86,185 @@ fun SettingsScreen(
         modifier = modifier.testTag("settings_screen"),
         containerColor = MaterialTheme.colorScheme.background
     ) { padding ->
-        LazyColumn(
-            modifier = Modifier.fillMaxSize().padding(padding).testTag("settings_list"),
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(24.dp)
-        ) {
-            // Appearance Section
-            item {
-                Text(
-                    text = "Appearance",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(bottom = 8.dp, start = 8.dp)
-                )
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-                    border = elsewhereCardBorder()
-                ) {
-                    Column(modifier = Modifier.padding(20.dp)) {
-                        Text("Appearance mode", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Column(
-                            modifier = Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 16.dp),
-                            verticalArrangement = Arrangement.spacedBy(6.dp)
+        Column(Modifier.fillMaxSize().padding(padding)) {
+            // Wrap all destination labels rather than cutting tabs off-screen.
+            // This also expands naturally at large accessibility font sizes.
+            FlowRow(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)
+                    .testTag("settings_tabs"),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(0.dp)
+            ) {
+                tabs.forEach { tab ->
+                    FilterChip(
+                        selected = selectedTab == tab,
+                        onClick = { selectedTab = tab },
+                        label = { Text(tab.label, maxLines = 1) },
+                        modifier = Modifier.testTag("settings_tab_" + tab.name.lowercase())
+                    )
+                }
+            }
+            LazyColumn(
+                modifier = Modifier.fillMaxSize().testTag("settings_list"),
+                contentPadding = PaddingValues(start = 16.dp, top = 8.dp, end = 16.dp, bottom = 32.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                when (selectedTab) {
+                    SettingsTab.APPEARANCE -> item {
+                        SettingsSectionHeader("Appearance", "Choose how the doorway to Elsewhere looks and reads.")
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(16.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+                            border = elsewhereCardBorder()
                         ) {
-                            listOf(
-                                ThemeMode.SYSTEM to "System",
-                                ThemeMode.LIGHT to "Light",
-                                ThemeMode.DARK to "Dark"
-                            ).forEach { (mode, label) ->
-                                FilterChip(
-                                    selected = appearanceSettings.themeMode == mode,
-                                    onClick = {
-                                        coroutineScope.launch { appearanceRepository.updateThemeMode(mode) }
-                                    },
-                                    label = { Text(label) },
-                                    modifier = Modifier.fillMaxWidth().testTag("appearance_mode_${mode.name.lowercase()}")
-                                )
-                            }
-                        }
-
-                        Text(
-                            "Color palette",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            "Stored locally and included in encrypted backups.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(top = 2.dp, bottom = 8.dp)
-                        )
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            ColorPalette.selectable.forEach { palette ->
-                                PaletteChoice(
-                                    palette = palette,
-                                    selected = appearanceSettings.colorPalette == palette &&
-                                        appearanceSettings.legacyAccentOverride == null,
-                                    onClick = {
-                                        coroutineScope.launch { appearanceRepository.updateColorPalette(palette) }
+                            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                Text("Appearance mode", style = MaterialTheme.typography.titleSmall)
+                                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                                    val modes = listOf(
+                                        ThemeMode.SYSTEM to "System",
+                                        ThemeMode.LIGHT to "Light",
+                                        ThemeMode.DARK to "Dark"
+                                    )
+                                    modes.forEachIndexed { index, (mode, label) ->
+                                        SegmentedButton(
+                                            selected = appearanceSettings.themeMode == mode,
+                                            onClick = { coroutineScope.launch { appearanceRepository.updateThemeMode(mode) } },
+                                            shape = SegmentedButtonDefaults.itemShape(index, modes.size),
+                                            modifier = Modifier.testTag("appearance_mode_" + mode.name.lowercase())
+                                        ) { Text(label) }
                                     }
+                                }
+                                HorizontalDivider()
+                                Text("Theme collection", style = MaterialTheme.typography.titleSmall)
+                                Text(
+                                    "The illustrated doorway matches each palette in light and dark mode. Stored locally and included in encrypted backups.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                ColorPalette.selectable.forEach { palette ->
+                                    PaletteChoice(
+                                        palette = palette,
+                                        selected = appearanceSettings.colorPalette == palette &&
+                                            appearanceSettings.legacyAccentOverride == null,
+                                        onClick = { coroutineScope.launch { appearanceRepository.updateColorPalette(palette) } }
+                                    )
+                                }
+                                appearanceSettings.legacyAccentOverride?.let { legacy ->
+                                    Text(
+                                        "Your existing " + legacy + " customization is preserved until you choose another palette.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                HorizontalDivider()
+                                Text("Reading text size: " + appearanceSettings.fontSize.toInt() + "sp")
+                                Slider(
+                                    value = appearanceSettings.fontSize,
+                                    onValueChange = { coroutineScope.launch { appearanceRepository.updateFontSize(it) } },
+                                    valueRange = 12f..24f,
+                                    steps = 11,
+                                    modifier = Modifier.testTag("appearance_font_size")
                                 )
                             }
                         }
-                        appearanceSettings.legacyAccentOverride?.let { legacy ->
-                            Text(
-                                "Existing $legacy customization is preserved until you choose a palette above.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(top = 8.dp)
-                            )
-                        }
-
-                        Text("Font Size: ${appearanceSettings.fontSize.toInt()}sp", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Slider(
-                            value = appearanceSettings.fontSize,
-                            onValueChange = {
-                                coroutineScope.launch { appearanceRepository.updateFontSize(it) }
-                            },
-                            valueRange = 12f..24f,
-                            steps = 11,
-                            modifier = Modifier.padding(top = 8.dp)
-                        )
                     }
-                }
-            }
-
-            // Model & API Section
-            item {
-                Text(
-                    text = "Model & API",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(bottom = 8.dp, start = 8.dp)
-                )
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-                    border = elsewhereCardBorder()
-                ) {
-                    Column(modifier = Modifier.padding(20.dp)) {
-                        Text("OpenRouter Integration", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
-                        Spacer(modifier = Modifier.height(16.dp))
-                        
-                        if (isLoaded) {
-                            if (savedKey != null) {
-                                Text("API Key configured.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                Spacer(modifier = Modifier.height(16.dp))
-                                Button(
-                                    onClick = {
-                                        coroutineScope.launch {
-                                            settingsRepository.deleteApiKey()
-                                            savedKey = null
-                                        }
-                                    },
-                                    shape = RoundedCornerShape(12.dp),
-                                    colors = elsewhereDestructiveButtonColors()
-                                ) {
-                                    Text("Remove Key")
-                                }
-                            } else {
-                                OutlinedTextField(
-                                    value = apiKey,
-                                    onValueChange = { apiKey = it },
-                                    label = { Text("API Key") },
-                                    visualTransformation = PasswordVisualTransformation(),
-                                    singleLine = true,
-                                    shape = RoundedCornerShape(12.dp),
-                                    colors = elsewhereTextFieldColors(),
-                                    modifier = Modifier.fillMaxWidth().testTag("api_key_input")
-                                )
-                                Spacer(modifier = Modifier.height(16.dp))
-                                Button(
-                                    onClick = {
-                                        coroutineScope.launch {
-                                            if (apiKey.isNotBlank()) {
-                                                settingsRepository.saveApiKey(apiKey)
-                                                savedKey = apiKey
-                                                apiKey = ""
+                    SettingsTab.CONNECTION -> item {
+                        SettingsSectionHeader("OpenRouter", "Manage your private model connection.")
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(16.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+                            border = elsewhereCardBorder()
+                        ) {
+                            Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                if (!isLoaded) {
+                                    CircularProgressIndicator()
+                                } else if (savedKey != null) {
+                                    Text("API Key configured.", style = MaterialTheme.typography.bodyMedium)
+                                    Button(
+                                        onClick = {
+                                            coroutineScope.launch {
+                                                settingsRepository.deleteApiKey()
+                                                savedKey = null
                                             }
-                                        }
-                                    },
-                                    shape = RoundedCornerShape(12.dp),
-                                    modifier = Modifier.testTag("save_key_button")
-                                ) {
-                                    Text("Save Key")
+                                        },
+                                        colors = elsewhereDestructiveButtonColors()
+                                    ) { Text("Remove Key") }
+                                } else {
+                                    OutlinedTextField(
+                                        value = apiKey,
+                                        onValueChange = { apiKey = it },
+                                        label = { Text("API Key") },
+                                        visualTransformation = PasswordVisualTransformation(),
+                                        singleLine = true,
+                                        colors = elsewhereTextFieldColors(),
+                                        modifier = Modifier.fillMaxWidth().testTag("api_key_input")
+                                    )
+                                    Button(
+                                        enabled = apiKey.isNotBlank(),
+                                        onClick = {
+                                            coroutineScope.launch {
+                                                val value = apiKey.trim()
+                                                if (value.isNotEmpty()) {
+                                                    settingsRepository.saveApiKey(value)
+                                                    savedKey = value
+                                                    apiKey = ""
+                                                }
+                                            }
+                                        },
+                                        modifier = Modifier.testTag("save_key_button")
+                                    ) { Text("Save Key") }
                                 }
+                                Text(
+                                    "Your key stays on this device and is excluded from encrypted backups.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                             }
-                        } else {
-                            CircularProgressIndicator(modifier = Modifier.align(Alignment.CenterHorizontally))
                         }
                     }
-                }
-            }
-
-            if (chatRepository != null) {
-                item { EngineDefaultsCard(chatRepository, modelProvider) }
-            }
-
-            // About Section
-            if (backupRepository != null) {
-                item {
-                    BackupRestoreSettingsCard(backupRepository)
-                }
-            }
-
-            // About Section
-            item {
-                Text(
-                    text = "About",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(bottom = 8.dp, start = 8.dp)
-                )
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-                    border = elsewhereCardBorder()
-                ) {
-                    Column(modifier = Modifier.padding(20.dp)) {
-                        Text("Elsewhere", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text("Private stories, your way.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text("Version 1.0", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    SettingsTab.ENGINE -> item {
+                        chatRepository?.let { EngineDefaultsCard(it, modelProvider) }
+                    }
+                    SettingsTab.BACKUP -> item {
+                        backupRepository?.let { BackupRestoreSettingsCard(it) }
+                    }
+                    SettingsTab.ABOUT -> item {
+                        SettingsSectionHeader("About Elsewhere", "Private stories, your way.")
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+                            border = elsewhereCardBorder()
+                        ) {
+                            Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text("Elsewhere", style = MaterialTheme.typography.titleLarge)
+                                Text("Private stories, your way.", style = MaterialTheme.typography.bodyMedium)
+                                Text(
+                                    "Version " + BuildConfig.VERSION_NAME + " (build " + BuildConfig.VERSION_CODE + ")",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.testTag("settings_app_version")
+                                )
+                                Text(
+                                    "Your characters, Worlds and chats stay private on your device.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
                     }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun SettingsSectionHeader(title: String, description: String) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(title, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+        Text(description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -714,7 +719,10 @@ private fun PaletteChoice(
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 RadioButton(selected = selected, onClick = null)
-                Text(palette.displayName, modifier = Modifier.weight(1f))
+                Column(Modifier.weight(1f)) {
+                    Text(palette.displayName, style = MaterialTheme.typography.bodyLarge)
+                    Text(palette.themeName, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
             }
             Row(
                 modifier = Modifier.padding(start = 50.dp),

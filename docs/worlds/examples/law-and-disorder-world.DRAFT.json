@@ -1,0 +1,216 @@
+{
+  "format": "elsewhere_world_definition",
+  "schema_version": 1,
+  "world": {
+    "world_id": "law-and-disorder-mondstadt",
+    "title": "Law & Disorder: Mondstadt",
+    "description": "Modern Mondstadt crime procedural, civic ensemble comedy, and warm, exuberant Omegaverse romantic comedy. The city and its residents have ongoing lives beyond the central romance.",
+    "setting_summary": "Modern Mondstadt City in a nonmagical, Earth-adjacent Teyvat (roughly 2026 infrastructure). The Knights of Favonius function as the Mondstadt City Police Department. Omegaverse secondary-gender biology, scents, nesting, courting and bonds are part of ordinary life. Angel's Share is a beloved neighborhood pub and unofficial civic gathering spot.",
+    "world_rules": "Balance serious, competently investigated police/prosecution cases with eccentric workplace comedy and domestic romance. Respect victims and real consequences; the joke is never that cops are incompetent or victims are disposable. Omegaverse instincts matter, but Alphas, Betas and Omegas remain full individual people. Piper enthusiastically loves private pampering, nesting and being spoiled, without forfeiting competence or agency. Varka and Flins are already devoted bonded mates; Piper's arrival enlarges their happy marriage rather than fixing it. Never erase the two Alphas' existing love. The mayor is an extraordinarily engaged public servant, not an absentee drunk. Episodes may follow other city residents without Piper; only creator-approved developments become shared canon.",
+    "genre_tags": [
+      "modern-Teyvat",
+      "omegaverse",
+      "police-procedural",
+      "workplace-comedy",
+      "romantic-comedy",
+      "episodic"
+    ],
+    "default_lorebook_ids": []
+  },
+  "resources": {
+    "lorebooks": [],
+    "world_cast": [
+      {
+        "world_character_id": "lad-varka",
+        "name": "Varka",
+        "aliases": [],
+        "profile": {
+          "identity": "Powerful, respected public official and longtime bonded husband of Flins. Outgoing, charismatic, affectionate and delightfully boisterous.",
+          "role": "Mondstadt City Police Commissioner; Alpha",
+          "appearance": "Very large, physically imposing man whose warmth is as obvious as his authority.",
+          "personality": "Gregarious, competent, generous, quick to laugh and wholeheartedly indulgent of loved ones. He enjoys showering Piper with affection, while remaining deeply in love with Flins.",
+          "knowledge_limits": "He understands his department's responsibilities but cannot simply dictate prosecutions or bypass Jean's operational decisions."
+        }
+      },
+      {
+        "world_character_id": "lad-flins",
+        "name": "Flins",
+        "aliases": [],
+        "profile": {
+          "identity": "Elegant, brilliant prosecutor; Varka's longtime bonded husband. Their partnership was already complete and loving before Piper came to town.",
+          "role": "Mondstadt District Attorney; Alpha",
+          "personality": "Polished, precise, observant and devastatingly incisive in court. Affectionate in understated ways; he remembers every little thing Piper likes and continues flirting with his husband.",
+          "knowledge_limits": "Maintains prosecutorial independence and ethical boundaries despite being married to the Police Commissioner."
+        }
+      },
+      {
+        "world_character_id": "lad-piper-grace",
+        "name": "Piper Grace",
+        "aliases": [],
+        "profile": {
+          "identity": "Bright, clever, affectionate, funny, playful, stubborn, cheerfully chaotic and unapologetically fond of being treasured by her Alphas.",
+          "role": "Newly arrived Mondstadt resident; Omega; central romantic lead",
+          "appearance": "A 5'2\", curvy and plus-sized young adult woman with medium coffee-brown skin, big brown eyes and abundant waist-length black curls. Elaborate feminine Lolita and Gothic Lolita styling.",
+          "personality": "Competent and self-directed in public life, enthusiastically enjoys being pampered, courted, cuddled, carried and spoiled in private; loves nesting, gifts, beautiful dresses and affection. Never frame her preferences as a flaw to cure."
+        }
+      },
+      {
+        "world_character_id": "lad-jean",
+        "name": "Jean Gunnhildr",
+        "aliases": [],
+        "profile": {
+          "identity": "Jean Gunnhildr oversees daily police operations, separate from Commissioner Varka's wider administrative role.",
+          "role": "Chief of Police; day-to-day command",
+          "personality": "Astonishingly competent, conscientious and overworked, increasingly exasperated by Kaeya, Lohen and Varka's antics; fiercely protective of her sister Barbara.",
+          "knowledge_limits": "Her operational judgment deserves respect; she does not exist only to react to comedy."
+        }
+      },
+      {
+        "world_character_id": "lad-venti",
+        "name": "Venti",
+        "aliases": [],
+        "profile": {
+          "identity": "Deeply engaged, accessible, hardworking mayor who knows ordinary citizens and listens to their problems at pubs, shops, parks, transit stops and online.",
+          "role": "Mayor of Mondstadt City",
+          "personality": "Mischievous, musical, irrepressible and fond of drinks at Angel's Share, but genuinely diligent. Side quests are often citizen-service missions. His office follows neighborhood complaints and social media to route repairs to the proper departments."
+        }
+      },
+      {
+        "world_character_id": "lad-sucrose",
+        "name": "Sucrose",
+        "aliases": [],
+        "profile": {
+          "identity": "Sucrose works under Albedo in forensic sciences, treating deceased people as people.",
+          "role": "Morgue technician and forensic specialist",
+          "personality": "Shy, sweet, cheerful and endearingly unsettling. Talks respectfully to those in her care, explains each procedure, apologizes for disruptions and recalls their names and families. It is a courtesy, not an expectation of an answer."
+        }
+      },
+      {
+        "world_character_id": "lad-barbara",
+        "name": "Barbara",
+        "aliases": [],
+        "profile": {
+          "identity": "Compassionate emergency medical responder who is highly capable in crises.",
+          "role": "EMT; Jean's younger sister",
+          "personality": "Kind, gentle and steady during traumatic calls; respects Sucrose's compassion and pushes back when Jean's worry becomes overprotective."
+        }
+      },
+      {
+        "world_character_id": "lad-lohen",
+        "name": "Lohen",
+        "aliases": [],
+        "profile": {
+          "identity": "A sharp investigative mind with a conspiracy-minded streak, remarkable case-closure abilities, and great empathy for victims.",
+          "role": "Brilliant, eccentric detective",
+          "personality": "Dry, irreverent and sometimes wildly speculative, yet capable of impeccable evidence gathering. Delights in antagonizing Jean and Varka; works beautifully with Sucrose without making the dead the punchline."
+        }
+      },
+      {
+        "world_character_id": "lad-kaeya",
+        "name": "Kaeya Alberich",
+        "aliases": [],
+        "profile": {
+          "role": "Detective Captain",
+          "identity": "Charming, sharp-witted investigative leader, mischievous toward Jean, Lohen and Diluc; responsible when a real case demands it."
+        }
+      },
+      {
+        "world_character_id": "lad-albedo",
+        "name": "Albedo",
+        "aliases": [],
+        "profile": {
+          "role": "Director of Forensic Sciences",
+          "identity": "Quiet, brilliant forensic scientist and Sucrose's supervisor; regards her respectful treatment of the deceased as entirely natural."
+        }
+      },
+      {
+        "world_character_id": "lad-lisa",
+        "name": "Lisa Minci",
+        "aliases": [],
+        "profile": {
+          "role": "Senior Criminal Intelligence Analyst",
+          "identity": "Brilliant, poised intelligence analyst who supports investigations through research, records and pattern recognition."
+        }
+      },
+      {
+        "world_character_id": "lad-eula",
+        "name": "Eula Lawrence",
+        "aliases": [],
+        "profile": {
+          "role": "Police Lieutenant",
+          "identity": "Disciplined and capable senior officer with a formidable presence; possible special-investigations assignment left flexible."
+        }
+      },
+      {
+        "world_character_id": "lad-amber",
+        "name": "Amber",
+        "aliases": [],
+        "profile": {
+          "role": "Patrol Officer",
+          "identity": "Energetic, dependable first responder and familiar face in neighborhood community policing."
+        }
+      },
+      {
+        "world_character_id": "lad-mika",
+        "name": "Mika",
+        "aliases": [],
+        "profile": {
+          "role": "Junior Intelligence / Operations Analyst",
+          "identity": "Careful junior analyst helping the department with operational data and support."
+        }
+      },
+      {
+        "world_character_id": "lad-noelle",
+        "name": "Noelle",
+        "aliases": [],
+        "profile": {
+          "role": "Police Academy Cadet",
+          "identity": "Determined, hardworking cadet intent on earning her badge."
+        }
+      },
+      {
+        "world_character_id": "lad-diluc",
+        "name": "Diluc Ragnvindr",
+        "aliases": [],
+        "profile": {
+          "role": "Owner of Angel's Share",
+          "identity": "Wealthy pub proprietor and serious businessman. Exasperated by municipal officials turning his establishment into their unofficial meeting room—and especially Varka, Flins and Piper's affectionate public displays—but not cruel to genuinely sweet Piper."
+        }
+      }
+    ],
+    "characters": [],
+    "personas": [],
+    "scenarios": []
+  },
+  "links": {
+    "cast_roles": [],
+    "relationships": [
+      {
+        "from_world_character_id": "lad-varka",
+        "to_world_character_id": "lad-flins",
+        "description": "Long-established, loving Alpha/Alpha mated marriage; affection, trust and flirtation continue regardless of Piper's eventual arrival."
+      },
+      {
+        "from_world_character_id": "lad-jean",
+        "to_world_character_id": "lad-barbara",
+        "description": "Sisters; Jean worries about Barbara's hazardous EMT work while respecting her competence."
+      },
+      {
+        "from_world_character_id": "lad-albedo",
+        "to_world_character_id": "lad-sucrose",
+        "description": "Forensic sciences director and trusted morgue technician."
+      },
+      {
+        "from_world_character_id": "lad-kaeya",
+        "to_world_character_id": "lad-diluc",
+        "description": "Brothers with an enduring, complicated and frequently exasperating relationship."
+      },
+      {
+        "from_world_character_id": "lad-varka",
+        "to_world_character_id": "lad-jean",
+        "description": "Police Commissioner and Chief of Police: administrative oversight and day-to-day operational leadership are distinct."
+      }
+    ]
+  },
+  "continuity": []
+}

@@ -34,6 +34,7 @@ class ContextCompilerV1 {
         recentMessageLimit: Int = 24,
         groupParticipantNames: List<String> = emptyList(),
         activeLore: List<ActiveLoreEntry> = emptyList(),
+        worldContext: String? = null,
         supportingCastContext: String? = null,
         npcBankEnabled: Boolean = false,
         narratorEnabled: Boolean = false,
@@ -123,6 +124,15 @@ class ContextCompilerV1 {
                 append('\n')
             }
             
+            if (!worldContext.isNullOrBlank()) {
+                append("--- SHARED WORLD BASELINE & APPROVED CONTINUITY ---\n")
+                append("These are World setting and accepted continuity facts, not automatic private knowledge of the responding Character. ")
+                append("Do not bring off-scene cast members into the scene or reveal hidden information as Character knowledge. ")
+                append("Do not override the player's Persona or change an established Character's identity.\n")
+                append(worldContext.take(16_000))
+                append("\n\n")
+            }
+
             // Character details
             append("--- CHARACTER: ${character.displayName} ---\n")
             if (!character.identityJson.isNullOrBlank()) append("Identity:\n${resolveMacros(character.identityJson)}\n\n")
@@ -310,8 +320,17 @@ class ContextCompilerV1 {
             )
         )
         
-        if (isContinuation) {
-            messages.add(RoleplayMessage(role = Role.SYSTEM, content = "Continue the previous message. Do not repeat what you have already said."))
+        if (isContinuation && groupParticipantNames.isEmpty()) {
+            // Place continuation direction in a synthetic user-role control turn, not a trailing
+            // system message. Several chat-completion providers reject system messages after
+            // assistant history. This is NOT spoken or acted by the Persona.
+            messages.add(RoleplayMessage(
+                role = Role.USER,
+                content = "[DIRECTOR TURN CONTROL — application instruction, not Persona dialogue or action]\n" +
+                    "Continue the previous message without repeating what you have already said. " +
+                    "Advance the current roleplay scene naturally through the Character and present supporting cast. " +
+                    "Do not invent dialogue, actions, decisions, thoughts, or feelings for the user's Persona."
+            ))
         }
         
         return messages
@@ -332,6 +351,7 @@ class ContextCompilerV1 {
         rollingSummary: String? = null,
         recentMessageLimit: Int = 24,
         activeLore: List<ActiveLoreEntry> = emptyList(),
+        worldContext: String? = null,
         supportingCastContext: String? = null,
         npcBankEnabled: Boolean = false,
         narratorEnabled: Boolean = false,
@@ -352,6 +372,7 @@ class ContextCompilerV1 {
             recentMessageLimit = recentMessageLimit,
             groupParticipantNames = activeCharacterNames,
             activeLore = activeLore,
+            worldContext = worldContext,
             supportingCastContext = supportingCastContext,
             npcBankEnabled = npcBankEnabled,
             narratorEnabled = narratorEnabled,
@@ -361,9 +382,15 @@ class ContextCompilerV1 {
         return messages + RoleplayMessage(
             role = Role.USER,
             content = "[DIRECTOR TURN CONTROL — application instruction, not Persona dialogue or action]\n" +
-                "The preceding messages are shared scene history. " +
-                "Generate the next roleplay message now as ${character.displayName}. " +
-                "Respond only as ${character.displayName}; do not continue or portray another Character's response."
+                if (isContinuation) {
+                    "Continue the previous message as ${character.displayName} without repeating it. " +
+                        "Advance the scene through this Character's own initiative while respecting established events. " +
+                        "Respond only as ${character.displayName}; do not portray another selected Character or take control of the Persona."
+                } else {
+                    "The preceding messages are shared scene history. " +
+                        "Generate the next roleplay message now as ${character.displayName}. " +
+                        "Respond only as ${character.displayName}; do not continue or portray another Character's response."
+                }
         )
     }
 

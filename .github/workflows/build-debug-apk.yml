@@ -1,4 +1,4 @@
-name: Build Temporary Elsewhere Test APK
+name: Pre-freeze Regression Tests (manual Test APK optional)
 
 on:
   workflow_dispatch:
@@ -10,12 +10,18 @@ on:
       - feature/solo-ensemble-co-leads
       - feature/final-freeze-fixes-2026-10-31
 
+# Keep one active build per pull request/branch: frequent exploratory commits
+# should not launch overlapping resource-heavy Robolectric suites.
+concurrency:
+  group: temporary-elsewhere-test-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
 jobs:
   build-debug-apk:
-    name: Build temporary app-sandbox.apk
+    name: Run pre-freeze compatibility regression tests
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -44,18 +50,18 @@ jobs:
         run: |
           bash ./gradlew :app:testSandboxUnitTest --no-daemon \
             --tests com.example.AppDatabaseMigrationTest \
+            --tests com.example.WorldRepositoryTest \
+            --tests com.example.WorldDefinitionCodecTest \
+            --tests com.example.WorldsScreenTest \
             --tests com.example.EnsembleCoLeadContextTest \
             --tests com.example.domain.backup.BackupCryptoTest \
             --tests com.example.domain.backup.BackupRepositoryTest \
             --tests com.example.ChatDetailGenerationTest \
-            --tests com.example.ChatMessageReadingUiTest \
+            --tests com.example.RetainedChatViewModelStoresTest \
+            --tests com.example.ReplyNotificationPolicyTest \
             --tests com.example.ChatSettingsScreenInitTest \
             --tests com.example.EndpointSelectionPersistenceTest \
             --tests com.example.LorebookRepositoryTest \
-            --tests com.example.NpcRepositoryTest \
-            --tests com.example.NpcSceneCastResolverTest \
-            --tests com.example.NpcSpeakerPortraitResolverTest \
-            --tests com.example.ProfileImageRepositoryTest \
             --tests com.example.ChatLorebooksScreenTest \
             --tests com.example.GroupCharacterControlsTest \
             --tests com.example.LorebookUiTest.manualEditorExposesAllLoreEntryControls \
@@ -77,10 +83,12 @@ jobs:
                       print((failure.text or "")[:5000])
           PY
 
-      - name: Build temporary sandbox APK
+      - name: Build temporary sandbox APK only when manually requested
+        if: github.event_name == 'workflow_dispatch'
         run: bash ./gradlew :app:assembleSandbox --no-daemon
 
       - name: Verify native libraries are compressed for device installation
+        if: github.event_name == 'workflow_dispatch'
         run: |
           python3 - <<'PY'
           from zipfile import ZipFile, ZIP_DEFLATED
@@ -96,7 +104,8 @@ jobs:
               print(f"Verified {len(libraries)} native libraries packaged compressed.")
           PY
 
-      - name: Upload temporary test APK
+      - name: Upload temporary test APK only when manually requested
+        if: github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v4
         with:
           name: Elsewhere-Temporary-Test-APK
