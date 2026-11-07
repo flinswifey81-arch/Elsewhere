@@ -81,6 +81,7 @@ fun ElsewhereThemeBanner(
             .border(1.dp, colors.foliage.copy(alpha = 0.65f), shape)
             .testTag("elsewhere_banner_" + palette.storageId)
     ) {
+        val bannerWidth = maxWidth
         Canvas(Modifier.fillMaxSize()) {
             val w = size.width
             val h = size.height
@@ -164,7 +165,7 @@ fun ElsewhereThemeBanner(
                 color = colors.text,
                 fontFamily = FontFamily.Serif,
                 fontWeight = FontWeight.Normal,
-                fontSize = if (maxWidth < 380.dp) 34.sp else 42.sp,
+                fontSize = if (bannerWidth < 380.dp) 34.sp else 42.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Clip
             )
@@ -173,7 +174,7 @@ fun ElsewhereThemeBanner(
                 color = colors.text.copy(alpha = 0.92f),
                 fontFamily = FontFamily.Serif,
                 fontStyle = FontStyle.Italic,
-                fontSize = if (maxWidth < 380.dp) 13.sp else 15.sp,
+                fontSize = if (bannerWidth < 380.dp) 13.sp else 15.sp,
                 maxLines = 1
             )
         }
