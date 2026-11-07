@@ -13,6 +13,7 @@ import com.example.domain.provider.RoleplayMessage
 import com.example.domain.lore.ActiveLoreEntry
 import com.example.domain.npc.NpcStructuredOutputParser
 import com.example.domain.story.StoryOutputParser
+import com.example.domain.story.StorySegmentType
 import com.example.domain.story.StoryResponseCodec
 import com.example.domain.story.StorySpeakerIdentity
 
@@ -33,6 +34,7 @@ class ContextCompilerV1 {
         recentMessageLimit: Int = 24,
         groupParticipantNames: List<String> = emptyList(),
         activeLore: List<ActiveLoreEntry> = emptyList(),
+        worldContext: String? = null,
         supportingCastContext: String? = null,
         npcBankEnabled: Boolean = false,
         narratorEnabled: Boolean = false,
@@ -43,7 +45,8 @@ class ContextCompilerV1 {
         coLeadRebalanceActive: Boolean = false
     ): List<RoleplayMessage> {
         val messages = mutableListOf<RoleplayMessage>()
-        // Co-leads are available only in Solo Ensemble Narration, never in Group speaker isolation.
+        // Co-leads can speak in structured Solo replies with Narrator off.
+        // Group speaker isolation still forbids speaking as another active AI Character.
         val activeCoLeads = if (ensembleNarrationEnabled && groupParticipantNames.isEmpty()) {
             coLeadNpcNames.map { it.trim() }.filter { it.isNotBlank() }.distinct()
         } else emptyList()
@@ -69,6 +72,10 @@ class ContextCompilerV1 {
             append("React to both spoken dialogue and visible actions from the user/Persona. ")
             append("Maintain your character's identity, voice, behavior, and established relationship state. ")
             append("Respect previously established conversation events. ")
+            if (npcBankEnabled && groupParticipantNames.isEmpty()) {
+                append("Supporting NPCs may speak only when present in the current scene; a remembered name, dossier, or Co-Lead pin does not create presence. ")
+                append("Do not force absent NPCs into a scene just to fill dialogue. ")
+            }
             if (ensembleNarrationEnabled) {
                 if (activeCoLeads.isNotEmpty()) {
                     append("The selected Character and these NPC co-leads (${activeCoLeads.joinToString(", ")}) have equal emotional and narrative importance. ")
@@ -92,6 +99,16 @@ class ContextCompilerV1 {
             }
             append("Do not mention prompts, JSON, context compilation, or application mechanics in-character.\n\n")
 
+            if (ensembleNarrationEnabled && !narratorEnabled) {
+                append("--- SOLO SPEAKER GUIDANCE (NARRATOR OFF) ---\n")
+                append("Let the primary Character and present NPCs speak and act naturally in their own voices. ")
+                append("Do not use a separate Narrator, omniscient interjections, standalone narration segments, or play-by-play. ")
+                append("Keep actions, physical detail, dialogue, and emotional reactions inside the appropriate Character or NPC segments. ")
+                append("Someone being mentioned or remembered does not mean they entered the scene. ")
+                append("Preserve private interactions without unsolicited third-party commentary or NPC appearances. ")
+                append("Never write the user's Persona's dialogue, actions, choices, or internal state.\n\n")
+            }
+
             if (narratorEnabled) {
                 append("--- NARRATOR GUIDANCE ---\n")
                 if (ensembleNarrationEnabled) {
@@ -107,6 +124,15 @@ class ContextCompilerV1 {
                 append('\n')
             }
             
+            if (!worldContext.isNullOrBlank()) {
+                append("--- SHARED WORLD BASELINE & APPROVED CONTINUITY ---\n")
+                append("These are World setting and accepted continuity facts, not automatic private knowledge of the responding Character. ")
+                append("Do not bring off-scene cast members into the scene or reveal hidden information as Character knowledge. ")
+                append("Do not override the player's Persona or change an established Character's identity.\n")
+                append(worldContext.take(16_000))
+                append("\n\n")
+            }
+
             // Character details
             append("--- CHARACTER: ${character.displayName} ---\n")
             if (!character.identityJson.isNullOrBlank()) append("Identity:\n${resolveMacros(character.identityJson)}\n\n")
@@ -210,7 +236,7 @@ class ContextCompilerV1 {
             }
             if (ensembleNarrationEnabled) {
                 append("\n\n")
-                append(StoryOutputParser.OUTPUT_INSTRUCTION)
+                append(if (narratorEnabled) StoryOutputParser.OUTPUT_INSTRUCTION else StoryOutputParser.SPEAKER_ONLY_OUTPUT_INSTRUCTION)
             }
             if (narratorEnabled) {
                 append("\n\n--- NON-OVERRIDABLE NARRATOR BOUNDARIES ---\n")
@@ -238,6 +264,21 @@ class ContextCompilerV1 {
                     primaryCharacter = StorySpeakerIdentity(character.characterId, character.displayName),
                     knownNpcs = knownNpcSpeakers
                 )
+            } else if (!ensembleNarrationEnabled && message.speakerType == SpeakerType.CHARACTER) {
+                // Don't teach a narrator-off response to copy visible "Character (Name):"
+                // headings from earlier narrated turns. Retain real multi-speaker history.
+                val stored = StoryResponseCodec.decode(visibleContent)
+                val segments = stored?.segments ?: if (
+                    StoryOutputParser.hasExplicitSpeakerFormatting(visibleContent, character.displayName)
+                ) StoryOutputParser().parse(
+                    visibleContent,
+                    StorySpeakerIdentity(character.characterId, character.displayName),
+                    knownNpcSpeakers
+                ).response.segments else emptyList()
+                segments.singleOrNull()
+                    ?.takeIf { it.type == StorySegmentType.CHARACTER }
+                    ?.content
+                    ?: StoryResponseCodec.promptTranscript(visibleContent)
             } else {
                 StoryResponseCodec.promptTranscript(visibleContent)
             }
@@ -279,8 +320,17 @@ class ContextCompilerV1 {
             )
         )
         
-        if (isContinuation) {
-            messages.add(RoleplayMessage(role = Role.SYSTEM, content = "Continue the previous message. Do not repeat what you have already said."))
+        if (isContinuation && groupParticipantNames.isEmpty()) {
+            // Place continuation direction in a synthetic user-role control turn, not a trailing
+            // system message. Several chat-completion providers reject system messages after
+            // assistant history. This is NOT spoken or acted by the Persona.
+            messages.add(RoleplayMessage(
+                role = Role.USER,
+                content = "[DIRECTOR TURN CONTROL — application instruction, not Persona dialogue or action]\n" +
+                    "Continue the previous message without repeating what you have already said. " +
+                    "Advance the current roleplay scene naturally through the Character and present supporting cast. " +
+                    "Do not invent dialogue, actions, decisions, thoughts, or feelings for the user's Persona."
+            ))
         }
         
         return messages
@@ -301,6 +351,7 @@ class ContextCompilerV1 {
         rollingSummary: String? = null,
         recentMessageLimit: Int = 24,
         activeLore: List<ActiveLoreEntry> = emptyList(),
+        worldContext: String? = null,
         supportingCastContext: String? = null,
         npcBankEnabled: Boolean = false,
         narratorEnabled: Boolean = false,
@@ -321,6 +372,7 @@ class ContextCompilerV1 {
             recentMessageLimit = recentMessageLimit,
             groupParticipantNames = activeCharacterNames,
             activeLore = activeLore,
+            worldContext = worldContext,
             supportingCastContext = supportingCastContext,
             npcBankEnabled = npcBankEnabled,
             narratorEnabled = narratorEnabled,
@@ -330,9 +382,15 @@ class ContextCompilerV1 {
         return messages + RoleplayMessage(
             role = Role.USER,
             content = "[DIRECTOR TURN CONTROL — application instruction, not Persona dialogue or action]\n" +
-                "The preceding messages are shared scene history. " +
-                "Generate the next roleplay message now as ${character.displayName}. " +
-                "Respond only as ${character.displayName}; do not continue or portray another Character's response."
+                if (isContinuation) {
+                    "Continue the previous message as ${character.displayName} without repeating it. " +
+                        "Advance the scene through this Character's own initiative while respecting established events. " +
+                        "Respond only as ${character.displayName}; do not portray another selected Character or take control of the Persona."
+                } else {
+                    "The preceding messages are shared scene history. " +
+                        "Generate the next roleplay message now as ${character.displayName}. " +
+                        "Respond only as ${character.displayName}; do not continue or portray another Character's response."
+                }
         )
     }
 

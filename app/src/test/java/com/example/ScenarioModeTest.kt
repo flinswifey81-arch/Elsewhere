@@ -150,6 +150,12 @@ class ScenarioModeTest {
         vm.continueMessage(active.messageId)
         withTimeout(15000) { vm.uiState.first { it is ChatUiState.Success && !it.isGenerating && it.messages.any { m -> m.messageId == active.messageId && m.content.length > active.content.length } } }
         assertEquals(3, provider.requests.size)
+        val continuationPrompt = provider.requests.last()
+        assertEquals(com.example.domain.provider.Role.USER, continuationPrompt.last().role)
+        assertTrue(continuationPrompt.last().content.startsWith("[DIRECTOR TURN CONTROL"))
+        assertTrue(continuationPrompt.last().content.contains("Continue the preceding narrator response"))
+        assertTrue(continuationPrompt.last().content.contains("do not invent the Persona's dialogue"))
+        assertFalse(continuationPrompt.drop(1).any { it.role == com.example.domain.provider.Role.SYSTEM })
     }
     @Test fun failedNarrationRetryDoesNotDuplicatePlayerTurn() = runBlocking {
         val provider = RecordingProvider(failFirst = true)

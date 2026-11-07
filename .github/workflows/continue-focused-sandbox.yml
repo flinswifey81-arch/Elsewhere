@@ -1,0 +1,54 @@
+name: Continue Regression Tests
+
+on:
+  pull_request:
+    branches:
+      - main
+      - feature/background-reply-notifications-2026-11-04
+
+permissions:
+  contents: read
+
+jobs:
+  continue-regression:
+    name: Validate Continue and notifications integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+
+      - name: Configure Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Configure Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools
+
+      - name: Install Android SDK packages
+        run: sdkmanager "platforms;android-36.1" "build-tools;36.0.0"
+
+      - name: Configure Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Test continuation without live OpenRouter billing
+        run: |
+          bash ./gradlew :app:testSandboxUnitTest --no-daemon \
+            --tests com.example.ChatDetailGenerationTest.streamedResponseIsPersistedAndCompiledContextIncludesMemory \
+            --tests com.example.ChatDetailGenerationTest.structuredContinueAppendsToTheSameLogicalResponseWithoutRepeatingSegments \
+            --tests com.example.ChatDetailGenerationTest.continueFromCharacterGreetingNeedsNoPersonaTurn \
+            --tests com.example.ChatDetailGenerationTest.malformedNarratedOutputIsSavedWithoutExposingControlMarkers \
+            --tests com.example.OpenRouterModelProviderTest.lateConnectionFailureAfterStopDoesNotMarkFinishedAnswerIncomplete \
+            --tests com.example.OpenRouterModelProviderTest.brokenConnectionBeforeFinishKeepsReceivedTextButReportsIncomplete \
+            --tests com.example.OpenRouterModelProviderTest.cleanConnectionCloseWithoutTerminalEvidenceIsNotSuccessful \
+            --tests com.example.ChatDetailGenerationTest.retryAndRegenerateReuseOriginImageWhileContinueDoesNotResendIt \
+            --tests com.example.LocalGroupGenerationTest.groupRetryRegenerateAndContinueKeepSelectedSpeakerAndNonPersistedDirectorTurn \
+            --tests com.example.LocalGroupGenerationTest.groupCharactersAndRegenerationReuseOriginImageButContinueDoesNot \
+            --tests com.example.ScenarioModeTest.oneRequestPortraysMultipleNpcsAndPreservesModelSettingsAndNarratorIdentity
+
+      # Test-only CI gate. Integrated signed production APK is the sole automatic build artifact.

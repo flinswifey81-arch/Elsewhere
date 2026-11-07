@@ -1,6 +1,11 @@
 package com.example.ui.screens
 
 import android.graphics.BitmapFactory
+import android.Manifest
+import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.core.content.ContextCompat
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.result.PickVisualMediaRequest
@@ -41,12 +46,14 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.viewmodel.compose.LocalViewModelStoreOwner
 import com.example.data.model.MessageEntity
 import com.example.data.model.SpeakerType
 import com.example.data.model.ChatType
@@ -60,6 +67,8 @@ import com.example.ui.components.elsewhereTopAppBarColors
 import com.example.ui.theme.LocalElsewhereSemanticColors
 import com.example.domain.repository.ProfileImageKind
 import com.example.domain.repository.ProfileImageRepository
+import com.example.data.model.NpcDossier
+import com.example.domain.npc.NpcSpeakerPortraitResolver
 import com.example.domain.story.StoryResponse
 import com.example.domain.story.StoryResponseCodec
 import com.example.domain.story.StorySegmentType
@@ -84,7 +93,15 @@ fun ChatDetailScreen(
     onNavigateToNpcBank: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    // Navigation ordinarily destroys a screen-scoped ViewModel on exit. Use one application-
+    // owned store per chat so switching chats cannot cancel a pending provider response.
+    val navigationOwner = checkNotNull(LocalViewModelStoreOwner.current)
+    val retainedStores = appContainer.retainedChatViewModelStores
+    val chatOwner = remember(chatId, retainedStores, navigationOwner) {
+        retainedStores?.ownerFor(chatId) ?: navigationOwner
+    }
     val viewModel: ChatDetailViewModel = viewModel(
+        viewModelStoreOwner = chatOwner,
         factory = ChatDetailViewModel.Factory(
             chatId = chatId,
             chatRepository = appContainer.chatRepository,
@@ -101,11 +118,41 @@ fun ChatDetailScreen(
             messageAttachmentRepository = appContainer.messageAttachmentRepository,
             scenarioRepository = appContainer.scenarioRepository,
             npcRepository = appContainer.npcRepository,
-            npcOutputParser = appContainer.npcOutputParser
+            npcOutputParser = appContainer.npcOutputParser,
+            generationLifecycle = appContainer.generationNotifications
         )
     )
 
+    DisposableEffect(chatId, retainedStores, viewModel) {
+        retainedStores?.onAttached(chatId, viewModel::hasPendingGenerationWork)
+        appContainer.generationNotifications?.dismissReady(chatId)
+        onDispose { retainedStores?.onDetached(chatId) }
+    }
+
+    val context = LocalContext.current
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { /* Notification denial never blocks generation. */ }
+    val askForNotificationPermissionOnce = {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
+                PackageManager.PERMISSION_GRANTED
+        ) {
+            val preferences = context.getSharedPreferences(
+                "elsewhere_reply_notifications", Context.MODE_PRIVATE
+            )
+            if (!preferences.getBoolean("permission_asked", false)) {
+                preferences.edit().putBoolean("permission_asked", true).apply()
+                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+    }
+
     val uiState by viewModel.uiState.collectAsState()
+    val npcFlow = remember(chatId, appContainer.npcRepository) {
+        appContainer.npcRepository?.observeProjectedDossiers(chatId)
+    }
+    val npcDossiers: List<NpcDossier> = npcFlow?.collectAsState(initial = emptyList())?.value.orEmpty()
     val draft by viewModel.draft.collectAsState()
     val clipboardManager = LocalClipboardManager.current
     val snackbarHostState = remember { SnackbarHostState() }
@@ -122,6 +169,7 @@ fun ChatDetailScreen(
 
     LaunchedEffect(uiState) {
         if (uiState is ChatUiState.Deleted) {
+            retainedStores?.forget(chatId)
             onChatDeleted()
         }
     }
@@ -284,13 +332,20 @@ fun ChatDetailScreen(
                                 MessageBubble(
                                     group = group,
                                     profileImageRepository = appContainer.profileImageRepository,
+                                    npcDossiers = npcDossiers,
                                     attachments = state.attachments.filter { it.messageId == group.primaryMessage.messageId },
                                     attachmentFile = { attachment -> appContainer.messageAttachmentRepository?.resolveFile(attachment) },
                                     mutationsEnabled = !state.isGenerating &&
                                         !state.partialStopped && !state.partialResolutionInProgress,
                                     onSwitchVariant = { msgId -> viewModel.switchVariant(group.primaryMessage.variantGroupId ?: group.primaryMessage.messageId, msgId) },
-                                    onRegenerate = { viewModel.regenerateMessage(it) },
-                                    onContinue = { viewModel.continueMessage(it) },
+                                    onRegenerate = {
+                                        askForNotificationPermissionOnce()
+                                        viewModel.regenerateMessage(it)
+                                    },
+                                    onContinue = {
+                                        askForNotificationPermissionOnce()
+                                        viewModel.continueMessage(it)
+                                    },
                                     onCopy = { content ->
                                         clipboardManager.setText(AnnotatedString(content))
                                         coroutineScope.launch {
@@ -319,6 +374,7 @@ fun ChatDetailScreen(
                                         characterId = state.generationCharacterId
                                             ?: state.chatSummary.characters.firstOrNull()?.characterId,
                                         profileImageRepository = appContainer.profileImageRepository,
+                                        npcDossiers = npcDossiers,
                                         characterName = generationCharacterName
                                             ?: (if (state.chatSummary.chat.chatType == ChatType.SCENARIO) "Narrator" else null)
                                             ?: state.chatSummary.characters.firstOrNull()?.displayName
@@ -387,6 +443,29 @@ fun ChatDetailScreen(
                                     }
                                 }
                             }
+                            state.generationWarning?.let { warning ->
+                                Surface(
+                                    color = MaterialTheme.colorScheme.secondaryContainer,
+                                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            Icons.Filled.Info,
+                                            contentDescription = null,
+                                            modifier = Modifier.padding(end = 8.dp)
+                                        )
+                                        Text(
+                                            warning,
+                                            modifier = Modifier.weight(1f),
+                                            style = MaterialTheme.typography.bodySmall
+                                        )
+                                    }
+                                }
+                            }
                             Surface(
                                 color = MaterialTheme.colorScheme.surface,
                                 tonalElevation = 3.dp,
@@ -451,6 +530,7 @@ fun ChatDetailScreen(
                                             (!isGroup && state.messages.lastOrNull()?.speakerType == SpeakerType.PERSONA)
                                         IconButton(
                                             onClick = {
+                                                askForNotificationPermissionOnce()
                                                 if (draft.isNotBlank() || state.draftAttachments.isNotEmpty()) viewModel.sendMessage()
                                                 else if (!isGroup) viewModel.retryGeneration()
                                             },
@@ -853,6 +933,7 @@ private fun LazyListState.isNearBottom(thresholdPx: Int): Boolean {
 fun MessageBubble(
     group: MessageGroup,
     profileImageRepository: ProfileImageRepository? = null,
+    npcDossiers: List<NpcDossier> = emptyList(),
     attachments: List<MessageAttachmentEntity> = emptyList(),
     attachmentFile: (MessageAttachmentEntity) -> File? = { null },
     responsibleParticipantName: String? = null,
@@ -873,6 +954,7 @@ fun MessageBubble(
             group = group,
             story = ensembleStory,
             profileImageRepository = profileImageRepository,
+            npcDossiers = npcDossiers,
             responsibleParticipantName = responsibleParticipantName,
             mutationsEnabled = mutationsEnabled,
             onSwitchVariant = onSwitchVariant,
@@ -909,7 +991,8 @@ fun MessageBubble(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = if (isUser) Alignment.End else Alignment.Start
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            if (isUser) Spacer(Modifier.weight(1f))
             Text(
                 text = message.speakerDisplayNameSnapshot,
                 style = MaterialTheme.typography.labelSmall,
@@ -924,6 +1007,23 @@ fun MessageBubble(
                     modifier = Modifier.padding(end = 8.dp)
                 )
             }
+            if (!isUser) Spacer(Modifier.weight(1f))
+            Box {
+                IconButton(onClick = { showMenu = true }, modifier = Modifier.size(36.dp)) {
+                    Icon(Icons.Filled.MoreVert, contentDescription = "Message menu")
+                }
+                MessageMenu(
+                    expanded = showMenu,
+                    onDismiss = { showMenu = false },
+                    onCopy = { onCopy(message.content) },
+                    onEdit = { isEditing = true },
+                    onDelete = { showDeleteConfirm = true },
+                    onRegenerate = if (isUser) null else ({ onRegenerate(message.messageId) }),
+                    onContinue = if (isUser) null else ({ onContinue(message.messageId) }),
+                    onShowMetadata = if (isUser) null else ({ onShowMetadata(message.messageId) }),
+                    mutationsEnabled = mutationsEnabled
+                )
+            }
         }
         responsibleParticipantName?.let { participant ->
             Text(
@@ -935,7 +1035,8 @@ fun MessageBubble(
         }
         
         Row(
-            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.Top,
             horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start
         ) {
             if (!isUser) {
@@ -950,30 +1051,11 @@ fun MessageBubble(
                 )
                 Spacer(Modifier.width(6.dp))
             }
-            if (isUser) {
-                Box {
-                    IconButton(onClick = { showMenu = true }) {
-                        Icon(Icons.Filled.MoreVert, contentDescription = "Menu")
-                    }
-                    MessageMenu(
-                        expanded = showMenu,
-                        onDismiss = { showMenu = false },
-                        onCopy = { onCopy(message.content) },
-                        onEdit = { isEditing = true },
-                        onDelete = { showDeleteConfirm = true },
-                        onRegenerate = null,
-                        onContinue = null,
-                        onShowMetadata = null,
-                        mutationsEnabled = mutationsEnabled
-                    )
-                }
-            }
-
             Surface(
                 shape = shape,
                 color = color,
                 tonalElevation = 1.dp,
-                modifier = Modifier.fillMaxWidth(0.70f)
+                modifier = Modifier.weight(1f, fill = false).testTag("chat_message_bubble")
             ) {
                 if (isEditing) {
                     Column(modifier = Modifier.padding(8.dp)) {
@@ -1018,24 +1100,6 @@ fun MessageBubble(
                 }
             }
 
-            if (!isUser) {
-                Box {
-                    IconButton(onClick = { showMenu = true }) {
-                        Icon(Icons.Filled.MoreVert, contentDescription = "Menu")
-                    }
-                    MessageMenu(
-                        expanded = showMenu,
-                        onDismiss = { showMenu = false },
-                        onCopy = { onCopy(message.content) },
-                        onEdit = { isEditing = true },
-                        onDelete = { showDeleteConfirm = true },
-                        onRegenerate = { onRegenerate(message.messageId) },
-                        onContinue = { onContinue(message.messageId) },
-                        onShowMetadata = { onShowMetadata(message.messageId) },
-                        mutationsEnabled = mutationsEnabled
-                    )
-                }
-            }
             if (isUser) {
                 Spacer(Modifier.width(6.dp))
                 ProfileImageAvatar(
@@ -1115,6 +1179,7 @@ private fun EnsembleMessageBubble(
     group: MessageGroup,
     story: StoryResponse,
     profileImageRepository: ProfileImageRepository?,
+    npcDossiers: List<NpcDossier>,
     responsibleParticipantName: String?,
     mutationsEnabled: Boolean,
     onSwitchVariant: (String) -> Unit,
@@ -1134,23 +1199,42 @@ private fun EnsembleMessageBubble(
     var showDeleteConfirm by remember { mutableStateOf(false) }
 
     Column(modifier = Modifier.fillMaxWidth()) {
-        responsibleParticipantName?.let { participant ->
-            Text(
-                text = "Sent by $participant",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 8.dp)
-            )
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                responsibleParticipantName?.let { participant ->
+                    Text(
+                        text = "Sent by $participant",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 8.dp)
+                    )
+                }
+                if (message.editedAt != null) {
+                    Text(
+                        text = "(edited)",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                    )
+                }
+            }
+            Box {
+                IconButton(onClick = { showMenu = true }, modifier = Modifier.size(36.dp)) {
+                    Icon(Icons.Filled.MoreVert, contentDescription = "Message menu")
+                }
+                MessageMenu(
+                    expanded = showMenu,
+                    onDismiss = { showMenu = false },
+                    onCopy = { onCopy(StoryResponseCodec.readableTranscript(story)) },
+                    onEdit = { isEditing = true },
+                    onDelete = { showDeleteConfirm = true },
+                    onRegenerate = { onRegenerate(message.messageId) },
+                    onContinue = { onContinue(message.messageId) },
+                    onShowMetadata = { onShowMetadata(message.messageId) },
+                    mutationsEnabled = mutationsEnabled
+                )
+            }
         }
-        if (message.editedAt != null) {
-            Text(
-                text = "(edited)",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
-            )
-        }
-
         if (isEditing) {
             Surface(
                 shape = MaterialTheme.shapes.medium,
@@ -1182,36 +1266,20 @@ private fun EnsembleMessageBubble(
                 story = story,
                 primaryCharacterId = message.speakerId,
                 primaryCharacterName = message.speakerDisplayNameSnapshot,
-                profileImageRepository = profileImageRepository
+                profileImageRepository = profileImageRepository,
+                npcDossiers = npcDossiers
             )
         }
 
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(start = 42.dp, end = 8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            if (group.variants.size > 1) {
+        if (group.variants.size > 1) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(start = 42.dp, top = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 EnsembleVariantSelector(
                     group = group,
                     mutationsEnabled = mutationsEnabled,
                     onSwitchVariant = onSwitchVariant
-                )
-            }
-            Spacer(Modifier.weight(1f))
-            Box {
-                IconButton(onClick = { showMenu = true }) {
-                    Icon(Icons.Filled.MoreVert, contentDescription = "Menu")
-                }
-                MessageMenu(
-                    expanded = showMenu,
-                    onDismiss = { showMenu = false },
-                    onCopy = { onCopy(StoryResponseCodec.readableTranscript(story)) },
-                    onEdit = { isEditing = true },
-                    onDelete = { showDeleteConfirm = true },
-                    onRegenerate = { onRegenerate(message.messageId) },
-                    onContinue = { onContinue(message.messageId) },
-                    onShowMetadata = { onShowMetadata(message.messageId) },
-                    mutationsEnabled = mutationsEnabled
                 )
             }
         }
@@ -1243,7 +1311,8 @@ private fun StorySegments(
     story: StoryResponse,
     primaryCharacterId: String?,
     primaryCharacterName: String,
-    profileImageRepository: ProfileImageRepository?
+    profileImageRepository: ProfileImageRepository?,
+    npcDossiers: List<NpcDossier>
 ) {
     val semanticColors = LocalElsewhereSemanticColors.current
     story.segments.forEachIndexed { index, segment ->
@@ -1258,7 +1327,9 @@ private fun StorySegments(
             )
             StorySegmentType.CHARACTER, StorySegmentType.NPC -> {
                 val isPrimary = segment.type == StorySegmentType.CHARACTER
-                val speakerId = if (isPrimary) primaryCharacterId else segment.speakerId
+                val speakerId = if (isPrimary) primaryCharacterId else {
+                    NpcSpeakerPortraitResolver.resolveId(segment.speakerId, segment.speakerName, npcDossiers)
+                }
                 val speakerName = if (isPrimary) primaryCharacterName else segment.speakerName ?: "Supporting character"
                 Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.Start) {
                     Text(
@@ -1267,10 +1338,10 @@ private fun StorySegments(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(start = 50.dp, bottom = 2.dp)
                     )
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
                         ProfileImageAvatar(
                             repository = profileImageRepository,
-                            kind = if (isPrimary) ProfileImageKind.CHARACTER else null,
+                            kind = if (isPrimary) ProfileImageKind.CHARACTER else ProfileImageKind.NPC,
                             profileId = speakerId,
                             displayName = speakerName,
                             size = 36.dp,
@@ -1282,7 +1353,7 @@ private fun StorySegments(
                             shape = RoundedCornerShape(16.dp, 16.dp, 16.dp, 0.dp),
                             color = semanticColors.characterBubble,
                             tonalElevation = 1.dp,
-                            modifier = Modifier.fillMaxWidth(0.76f)
+                            modifier = Modifier.weight(1f, fill = false).testTag("story_message_bubble_$index")
                         ) {
                             MarkdownText(
                                 markdown = segment.content,
@@ -1444,7 +1515,8 @@ fun StreamingBubble(
     content: String,
     characterName: String,
     characterId: String? = null,
-    profileImageRepository: ProfileImageRepository? = null
+    profileImageRepository: ProfileImageRepository? = null,
+    npcDossiers: List<NpcDossier> = emptyList()
 ) {
     val story = remember(content) { StoryResponseCodec.decode(content) }
     if (story != null) {
@@ -1453,7 +1525,8 @@ fun StreamingBubble(
                 story = story,
                 primaryCharacterId = characterId,
                 primaryCharacterName = characterName,
-                profileImageRepository = profileImageRepository
+                profileImageRepository = profileImageRepository,
+                npcDossiers = npcDossiers
             )
             Text(
                 text = "Generating…",
@@ -1474,7 +1547,7 @@ fun StreamingBubble(
             color = MaterialTheme.colorScheme.primary,
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
         )
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
             ProfileImageAvatar(
                 repository = profileImageRepository,
                 kind = ProfileImageKind.CHARACTER,
@@ -1489,7 +1562,7 @@ fun StreamingBubble(
                 shape = RoundedCornerShape(16.dp, 16.dp, 16.dp, 0.dp),
                 color = MaterialTheme.colorScheme.surfaceVariant,
                 tonalElevation = 1.dp,
-                modifier = Modifier.fillMaxWidth(0.70f)
+                modifier = Modifier.weight(1f, fill = false).testTag("streaming_message_bubble")
             ) {
                 MarkdownText(
                     markdown = content,

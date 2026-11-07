@@ -461,9 +461,11 @@ class LocalGroupGenerationTest {
         assertTrue(provider.requests[3].any {
             it.role == Role.ASSISTANT && it.content.contains("B regenerated")
         })
-        assertTrue(provider.requests.last().any {
-            it.role == Role.SYSTEM && it.content.contains("Continue the previous message")
-        })
+        val continuedRequest = provider.requests.last()
+        assertEquals(Role.USER, continuedRequest.last().role)
+        assertTrue(continuedRequest.last().content.contains("Continue the previous message"))
+        assertEquals(1, continuedRequest.count { it.content.startsWith("[DIRECTOR TURN CONTROL") })
+        assertFalse(continuedRequest.drop(1).any { it.role == Role.SYSTEM })
         val stored = harness.messageRepository.getMessagesForChatOnce(harness.chatId)
         assertTrue(stored.none { it.content.contains("DIRECTOR TURN CONTROL") })
         assertTrue(stored.filter { it.speakerType == SpeakerType.CHARACTER }.all { it.speakerId == "character-b" })

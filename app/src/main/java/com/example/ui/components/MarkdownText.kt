@@ -1,6 +1,7 @@
 package com.example.ui.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -33,7 +34,8 @@ fun MarkdownText(
     modifier: Modifier = Modifier
 ) {
     val blocks = markdownBlocks(markdown)
-    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    SelectionContainer(modifier = modifier) {
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         blocks.forEach { block ->
             when (block) {
                 is MarkdownBlock.Blank -> Spacer(Modifier.height(4.dp))
@@ -68,6 +70,7 @@ fun MarkdownText(
                 }
                 is MarkdownBlock.Paragraph -> Text(parseInlineMarkdown(block.content), color = color)
             }
+        }
         }
     }
 }
