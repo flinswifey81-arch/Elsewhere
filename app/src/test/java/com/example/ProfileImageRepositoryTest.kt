@@ -64,6 +64,11 @@ class ProfileImageRepositoryTest {
         val persona = repository.replaceImage(ProfileImageKind.PERSONA, "shared/id", Uri.fromFile(source))
         val character = repository.replaceImage(ProfileImageKind.CHARACTER, "shared/id", Uri.fromFile(source))
 
+        val npc = repository.replaceImage(ProfileImageKind.NPC, "shared/id", Uri.fromFile(source))
+
+        assertTrue(npc.isFile)
+        assertNotEquals(npc.canonicalPath, character.canonicalPath)
+        assertNotEquals(npc.canonicalPath, persona.canonicalPath)
         assertTrue(persona.isFile)
         assertTrue(character.isFile)
         assertNotEquals(persona.canonicalPath, character.canonicalPath)

@@ -31,7 +31,8 @@ enum class BackupFileKind {
     MESSAGE_ATTACHMENT,
     CHARACTER_AVATAR,
     PERSONA_AVATAR,
-    SCENARIO_AVATAR
+    SCENARIO_AVATAR,
+    NPC_AVATAR
 }
 
 @JsonClass(generateAdapter = true)

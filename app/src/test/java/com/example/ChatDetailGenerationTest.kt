@@ -26,6 +26,7 @@ import com.example.data.model.ProviderRoutingMode
 import com.example.data.model.RoleplayMemoryEntity
 import com.example.data.model.ResponseLengthProfile
 import com.example.data.model.SpeakerType
+import com.example.domain.generation.GenerationLifecycleReporter
 import com.example.domain.provider.GenerationOptions
 import com.example.domain.provider.ModelProvider
 import com.example.domain.provider.OpenRouterModel
@@ -126,6 +127,16 @@ class ChatDetailGenerationTest {
         )
 
         val provider = RecordingStreamingProvider()
+        val savedReplyIds = mutableListOf<String>()
+        val generationEvents = object : GenerationLifecycleReporter {
+            override fun started(chatId: String, chatTitle: String) {}
+            override fun replySaved(
+                chatId: String, chatTitle: String, speakerName: String, messageId: String
+            ) {
+                savedReplyIds.add(messageId)
+            }
+            override fun finished(chatId: String) {}
+        }
         val viewModel = viewModels.create(ChatDetailViewModel::class.java) {
             ChatDetailViewModel(
                 chatId,
@@ -135,7 +146,8 @@ class ChatDetailGenerationTest {
                 personaRepository,
                 provider,
                 memoryRepository,
-                dataCoordinator = dataCoordinator
+                dataCoordinator = dataCoordinator,
+                generationLifecycle = generationEvents
             )
         }
         withTimeout(15_000) { viewModel.uiState.first { it is ChatUiState.Success } }
@@ -184,9 +196,46 @@ class ChatDetailGenerationTest {
         }
         assertEquals(2, continuedMessages.size)
         val continuationRequest = provider.requests.last()
-        assertEquals(1, continuationRequest.count { it.role == Role.USER })
+        assertEquals(2, continuationRequest.count { it.role == Role.USER })
         assertEquals(1, continuationRequest.count { it.role == Role.ASSISTANT })
+        assertEquals(Role.USER, continuationRequest.last().role)
+        assertTrue(continuationRequest.last().content.startsWith("[DIRECTOR TURN CONTROL"))
         assertTrue(continuationRequest.last().content.contains("Continue the previous message"))
+        assertTrue(continuationRequest.last().content.contains("Do not invent dialogue"))
+        assertFalse(continuationRequest.drop(1).any { it.role == Role.SYSTEM })
+        withTimeout(5_000) { while (savedReplyIds.size < 2) yield() }
+        // A saved Continue updates the existing message instead of inventing a new chat turn.
+        assertEquals(listOf(persisted.last().messageId, persisted.last().messageId), savedReplyIds)
+    }
+
+    @Test
+    fun continueFromCharacterGreetingNeedsNoPersonaTurn() = runBlocking {
+        val provider = SequentialResponseProvider(listOf(" And then the door opened."))
+        val harness = createHarness(
+            provider = provider,
+            responseLengthProfile = ResponseLengthProfile.NORMAL,
+            initialStoredCharacterContent = "The door closed."
+        )
+        val greeting = harness.messageRepository.getMessagesForChatOnce(harness.chatId).single()
+        assertEquals(SpeakerType.CHARACTER, greeting.speakerType)
+
+        harness.viewModel.continueMessage(greeting.messageId)
+
+        val continued = withTimeout(15_000) {
+            harness.messageRepository.getMessagesForChat(harness.chatId).first { messages ->
+                messages.size == 1 &&
+                    messages.single().messageId == greeting.messageId &&
+                    messages.single().content.contains("And then the door opened.")
+            }
+        }
+        assertEquals(1, continued.size)
+        assertEquals(0, continued.count { it.speakerType == SpeakerType.PERSONA })
+        assertEquals(1, provider.requests.size)
+        val prompt = provider.requests.single()
+        assertEquals(Role.ASSISTANT, prompt[prompt.lastIndex - 1].role)
+        assertEquals(Role.USER, prompt.last().role)
+        assertTrue(prompt.last().content.startsWith("[DIRECTOR TURN CONTROL"))
+        assertFalse(prompt.drop(1).any { it.role == Role.SYSTEM })
     }
 
     @Test
@@ -489,6 +538,7 @@ class ChatDetailGenerationTest {
                 secrets = "",
                 authorNotes = "",
                 keepInScene = true,
+                sceneMode = "HERE",
                 isManualBase = true,
                 createdAt = 1,
                 updatedAt = 1
@@ -559,6 +609,7 @@ class ChatDetailGenerationTest {
                 secrets = "",
                 authorNotes = "",
                 keepInScene = true,
+                sceneMode = "HERE",
                 isManualBase = true,
                 createdAt = 1,
                 updatedAt = 1
@@ -828,6 +879,48 @@ class ChatDetailGenerationTest {
     }
 
     @Test
+    fun narratorOffNormalizesPreviousCharacterTranscriptPrefix() = runBlocking {
+        val provider = SequentialResponseProvider(listOf(
+            "Character (Rowan): *He drops the bags.* \"You're sitting down.\""
+        ))
+        val harness = createHarness(provider, ResponseLengthProfile.NORMAL, narratorEnabled = false)
+        harness.viewModel.onDraftChanged("I'm sleepy.")
+        harness.viewModel.sendMessage()
+        val completed = withTimeout(15_000) {
+            harness.messageRepository.getMessagesForChat(harness.chatId).first { it.size == 2 }
+        }
+        val story = requireNotNull(StoryResponseCodec.decode(completed.last().content))
+        assertEquals(StorySegmentType.CHARACTER, story.segments.single().type)
+        assertEquals("*He drops the bags.* \"You're sitting down.\"",
+            story.segments.single().content)
+        assertFalse(StoryResponseCodec.visibleText(completed.last().content).contains("Character (Rowan):"))
+        assertEquals(1, provider.requests.size)
+    }
+
+    @Test
+    fun narratorOffCanDiscoverLabeledNpcWithoutExtraRequest() = runBlocking {
+        val provider = SequentialResponseProvider(listOf(
+            "Character (Rowan): \"Who are you?\"\nNPC (Liora Fen): \"The courier.\""
+        ))
+        val harness = createHarness(provider, ResponseLengthProfile.NORMAL, narratorEnabled = false,
+            npcBankEnabledInitially = true)
+        harness.viewModel.onDraftChanged("Who's at the door?")
+        harness.viewModel.sendMessage()
+        val completed = withTimeout(15_000) {
+            harness.messageRepository.getMessagesForChat(harness.chatId).first { it.size == 2 }
+        }
+        val story = requireNotNull(StoryResponseCodec.decode(completed.last().content))
+        assertEquals(listOf(StorySegmentType.CHARACTER, StorySegmentType.NPC),
+            story.segments.map { it.type })
+        val npc = harness.npcRepository.getProjectedDossiers(harness.chatId).single()
+        assertEquals("Liora Fen", npc.displayName)
+        val stored = requireNotNull(harness.messageRepository.getMessagesForChatOnce(harness.chatId)
+            .singleOrNull { it.speakerType == SpeakerType.CHARACTER })
+        assertEquals(npc.npcId, StoryResponseCodec.decode(stored.content)?.segments?.last()?.speakerId)
+        assertEquals(1, provider.requests.size)
+    }
+
+    @Test
     fun malformedNarratedOutputIsSavedWithoutExposingControlMarkers() = runBlocking {
         val provider = SequentialResponseProvider(
             listOf(
@@ -854,6 +947,16 @@ class ChatDetailGenerationTest {
         assertFalse(visible.contains("<|"))
         assertFalse(visible.contains("broken"))
         assertEquals(1, provider.requests.size)
+        val savedWithWarning = withTimeout(15_000) {
+            harness.viewModel.uiState.first { state ->
+                state is ChatUiState.Success &&
+                    !state.isGenerating &&
+                    state.generationWarning != null &&
+                    state.messages.any { it.messageId == completed.last().messageId }
+            }
+        } as ChatUiState.Success
+        assertNull(savedWithWarning.generationError)
+        assertTrue(savedWithWarning.generationWarning.orEmpty().isNotBlank())
     }
 
     @Test
@@ -1202,6 +1305,7 @@ class ChatDetailGenerationTest {
                 secrets = "",
                 authorNotes = "",
                 keepInScene = true,
+                sceneMode = "HERE",
                 isManualBase = true,
                 createdAt = 1,
                 updatedAt = 1
@@ -1227,7 +1331,12 @@ class ChatDetailGenerationTest {
         harness.viewModel.regenerateMessage(firstReply.messageId)
         withTimeout(15_000) {
             harness.messageRepository.getMessagesForChat(harness.chatId).first { messages ->
-                messages.any { it.content == "Regenerated safely." && it.isPrimaryVariant }
+                messages.any {
+                    it.isPrimaryVariant && (
+                        StoryResponseCodec.decode(it.content)?.segments?.singleOrNull()?.content
+                            ?: it.content
+                        ) == "Regenerated safely."
+                }
             }
         }
 
@@ -1896,8 +2005,13 @@ class ChatDetailGenerationTest {
         val harness = createHarness(CancellablePartialProvider(), ResponseLengthProfile.NORMAL)
         harness.viewModel.onDraftChanged("Start a long response.")
         harness.viewModel.sendMessage()
+        // This test verifies the generation guard, not the earlier history-loading guard.
+        // Both are valid reasons to block tools; wait for the intended state before asserting
+        // the exact warning instead of depending on Room's initial history emission timing.
         withTimeout(15_000) {
-            harness.viewModel.uiState.first { it is ChatUiState.Success && it.isGenerating }
+            harness.viewModel.uiState.first {
+                it is ChatUiState.Success && it.historyLoaded && it.isGenerating
+            }
         }
 
         harness.viewModel.wackContext()
@@ -1991,7 +2105,12 @@ class ChatDetailGenerationTest {
                 storyOutputParserFactory = storyOutputParserFactory
             )
         }
-        withTimeout(15_000) { viewModel.uiState.first { it is ChatUiState.Success } }
+        // ChatUiState.Success is emitted before the Room history collector delivers its
+        // first value. Tests must not send messages or invoke tools during that loading
+        // window; otherwise their expected events can race initial history hydration.
+        withTimeout(15_000) {
+            viewModel.uiState.first { it is ChatUiState.Success && it.historyLoaded }
+        }
         return Harness(
             chatId,
             viewModel,

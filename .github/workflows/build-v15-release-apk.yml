@@ -1,16 +1,24 @@
-name: Build Signed Elsewhere v1.5 APK
+name: Build Signed Elsewhere Production APK
 
 on:
   workflow_dispatch:
+  # Signed production candidate from the integration branch; nothing is installed or merged.
+  push:
+    branches:
+      - integration/worlds-and-rp-lifecycle-2026-11-06
+
+concurrency:
+  group: elsewhere-production-candidate-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
   build-release-apk:
-    name: Build and verify signed v1.5 APK
+    name: Test integrated production features, build and verify signed APK
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
       - name: Check out selected branch
@@ -36,6 +44,44 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           cache-read-only: true
+
+      - name: Verify production identity, app-data migrations and full-backup compatibility
+        run: |
+          bash ./gradlew :app:testDebugUnitTest --no-daemon \
+            --tests com.example.ProductionIdentityTest \
+            --tests com.example.AppDatabaseMigrationTest \
+            --tests com.example.domain.backup.BackupRepositoryTest
+
+      - name: Verify Home, Library, Create, Settings and theme preservation
+        run: |
+          bash ./gradlew :app:testDebugUnitTest --no-daemon --no-configuration-cache \
+            --tests com.example.AppNavigationTest \
+            --tests com.example.SettingsFunctionalTest \
+            --tests com.example.AppearanceRepositoryTest \
+            --tests com.example.ElsewhereThemeBannerTest
+
+      - name: Verify Worlds archives and existing RP lifecycle together
+        run: |
+          bash ./gradlew :app:testSandboxUnitTest --no-daemon \
+            --tests com.example.WorldRepositoryTest \
+            --tests com.example.WorldEpisodeContextCompilerTest \
+            --tests com.example.WorldDefinitionCodecTest \
+            --tests com.example.WorldsScreenTest \
+            --tests com.example.WorldArchiveManifestCodecTest \
+            --tests com.example.WorldArchiveHistoryTest \
+            --tests com.example.WorldArchiveEncryptedIOTest \
+            --tests com.example.WorldArchiveAdditiveRestorerTest \
+            --tests com.example.WorldArchiveTransferCoordinatorTest \
+            --tests com.example.RetainedChatViewModelStoresTest \
+            --tests com.example.ReplyNotificationPolicyTest \
+            --tests com.example.NpcSceneCastResolverTest \
+            --tests com.example.NpcSpeakerPortraitResolverTest \
+            --tests com.example.NpcStructuredOutputParserTest \
+            --tests com.example.StoryResponseTest \
+            --tests com.example.ChatDetailGenerationTest.structuredContinueAppendsToTheSameLogicalResponseWithoutRepeatingSegments \
+            --tests com.example.ChatDetailGenerationTest.wackPreservesSavedDataAndBlocksPreResetGenerationTools \
+            --tests com.example.LocalGroupGenerationTest.groupRetryRegenerateAndContinueKeepSelectedSpeakerAndNonPersistedDirectorTurn \
+            --tests com.example.ScenarioModeTest.oneRequestPortraysMultipleNpcsAndPreservesModelSettingsAndNarratorIdentity
 
       - name: Restore v1.5 release signing key
         env:
@@ -69,12 +115,33 @@ jobs:
           apk_path="app/build/outputs/apk/release/app-release.apk"
           build_tools="$ANDROID_HOME/build-tools/36.0.0"
           expected_package="com.aistudio.elsewhere.abwzy.v15"
+          expected_version_code="3"
+          expected_version_name="1.5.2"
+          # Baseline signer from verified v1.5 and v1.5.1 production APKs.
+          expected_legacy_signer="7c1fa02f0732d179d509d5333afa40933743e3c5dc8b70ef0aff2607c1e759f5"
 
           actual_package="$($build_tools/aapt dump badging "$apk_path" | sed -n "s/^package: name='\([^']*\)'.*/\1/p")"
           if [ "$actual_package" != "$expected_package" ]; then
             echo "Unexpected APK package: $actual_package" >&2
             exit 1
           fi
+
+
+          actual_version_code="$("$build_tools/aapt" dump badging "$apk_path" | sed -n "s/^package:.*versionCode='\([^']*\)'.*/\1/p")"
+          actual_version_name="$("$build_tools/aapt" dump badging "$apk_path" | sed -n "s/^package:.*versionName='\([^']*\)'.*/\1/p")"
+          if [ "$actual_version_code" != "$expected_version_code" ] || [ "$actual_version_name" != "$expected_version_name" ]; then
+            echo "Unexpected upgrade version: code=$actual_version_code name=$actual_version_name" >&2
+            exit 1
+          fi
+          python3 - <<'PY'
+          from zipfile import ZipFile, ZIP_DEFLATED
+          apk = "app/build/outputs/apk/release/app-release.apk"
+          with ZipFile(apk) as archive:
+              libs = [entry for entry in archive.infolist()
+                      if entry.filename.startswith("lib/") and entry.filename.endswith(".so")]
+              assert libs and all(entry.compress_type == ZIP_DEFLATED for entry in libs), "Native libraries must be compressed"
+          print("Release native libraries are packaged for 16 KB page devices")
+          PY
 
           expected_certificate="$(keytool -exportcert -keystore "$KEYSTORE_PATH" -storepass:env STORE_PASSWORD -alias upload | openssl dgst -sha256 -r | awk '{print $1}')"
           signer_report="$($build_tools/apksigner verify --verbose --print-certs "$apk_path")"
@@ -83,10 +150,14 @@ jobs:
             echo "The APK signing certificate does not match the upload key." >&2
             exit 1
           fi
+          if [ "$actual_certificate" != "$expected_legacy_signer" ]; then
+            echo "Signer differs from existing Elsewhere production releases: refusing to publish an incompatible update." >&2
+            exit 1
+          fi
 
           {
             echo "Package: $actual_package"
-            echo "Version: 1.5 (1)"
+            echo "Version: 1.5.2 (3)"
             echo "Signer certificate SHA-256: $actual_certificate"
           } | tee "$RUNNER_TEMP/elsewhere-v15-verification.txt"
 
@@ -100,7 +171,7 @@ jobs:
       - name: Upload verified release APK
         uses: actions/upload-artifact@v4
         with:
-          name: Elsewhere-v1.5-Release-APK
+          name: Elsewhere-Production-Worlds-UI-Combined-Candidate-APK
           path: |
             app/build/outputs/apk/release/app-release.apk
             ${{ runner.temp }}/elsewhere-v15-verification.txt

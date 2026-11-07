@@ -106,6 +106,10 @@ class WorldArchiveAssetCollector(
                 WorldArchiveEntryKind.PERSONA_AVATAR)
             profileImages(ProfileImageKind.SCENARIO, state.scenarios.map { it.scenarioId },
                 WorldArchiveEntryKind.SCENARIO_AVATAR)
+            // NPC portraits are app-owned profile images too. Omitting them would create a
+            // deceptively successful World import with missing supporting-cast artwork.
+            profileImages(ProfileImageKind.NPC, state.npcDossiers.map { it.npcId },
+                WorldArchiveEntryKind.NPC_PORTRAIT)
             return StagedAssets(sources, stage)
         } catch (error: Exception) {
             stage.deleteRecursively()

@@ -7,7 +7,7 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.example.data.model.*
 
-const val APP_DATABASE_VERSION = 14
+const val APP_DATABASE_VERSION = 15
 
 @Database(
     entities = [
@@ -64,16 +64,16 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun worldDao(): WorldDao
 
     companion object {
-        val MIGRATION_13_14 = object : Migration(13, 14) {
+        val MIGRATION_14_15 = object : Migration(14, 15) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE worlds ADD COLUMN linksJson TEXT NOT NULL DEFAULT '{\"cast_roles\":[],\"relationships\":[]}'")
                 db.execSQL("ALTER TABLE worlds ADD COLUMN defaultLorebookIdsJson TEXT NOT NULL DEFAULT '[]'")
             }
         }
 
-        val MIGRATION_12_13 = object : Migration(12, 13) {
+        val MIGRATION_13_14 = object : Migration(13, 14) {
             override fun migrate(db: SupportSQLiteDatabase) {
-                // Additive schema. Legacy chats and all user content remain untouched.
+                // Additive Worlds tables. Legacy chats and all user content remain untouched.
                 db.execSQL("CREATE TABLE IF NOT EXISTS worlds (worldId TEXT NOT NULL PRIMARY KEY, title TEXT NOT NULL, description TEXT NOT NULL, settingSummary TEXT NOT NULL, worldRules TEXT NOT NULL, genreTagsJson TEXT NOT NULL, createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL)")
                 db.execSQL("CREATE TABLE IF NOT EXISTS world_memberships (worldId TEXT NOT NULL, resourceType TEXT NOT NULL, resourceId TEXT NOT NULL, createdAt INTEGER NOT NULL, PRIMARY KEY(worldId, resourceType, resourceId), FOREIGN KEY(worldId) REFERENCES worlds(worldId) ON UPDATE NO ACTION ON DELETE CASCADE)")
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_world_memberships_worldId ON world_memberships(worldId)")
@@ -81,6 +81,14 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_world_cast_worldId ON world_cast(worldId)")
                 db.execSQL("CREATE TABLE IF NOT EXISTS world_continuity_events (eventId TEXT NOT NULL PRIMARY KEY, worldId TEXT NOT NULL, title TEXT NOT NULL, facts TEXT NOT NULL, status TEXT NOT NULL, sourceChatId TEXT, relatedCastIdsJson TEXT NOT NULL, createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL, FOREIGN KEY(worldId) REFERENCES worlds(worldId) ON UPDATE NO ACTION ON DELETE CASCADE)")
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_world_continuity_events_worldId ON world_continuity_events(worldId)")
+            }
+        }
+
+        // Production/Test database version 13 already owns the NPC scene-mode column.
+        // Worlds must not reuse that schema number for unrelated tables.
+        val MIGRATION_12_13 = object : Migration(12, 13) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE npc_dossiers ADD COLUMN sceneMode TEXT NOT NULL DEFAULT 'AUTO'")
             }
         }
 

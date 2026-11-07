@@ -25,6 +25,7 @@ import com.example.data.model.WorldCastEntity
 import com.example.data.model.WorldContinuityEventEntity
 import com.example.data.model.WorldEntity
 import com.example.domain.repository.WorldRepository
+import com.example.domain.repository.ChatRepository
 import com.example.ui.components.elsewhereCardBorder
 import com.example.ui.components.elsewhereTextFieldColors
 import com.example.ui.components.elsewhereTopAppBarColors
@@ -38,7 +39,11 @@ import kotlinx.coroutines.launch
 @Composable
 fun WorldsScreen(
     repository: WorldRepository,
-    archiveTransfer: WorldArchiveTransferCoordinator? = null
+    archiveTransfer: WorldArchiveTransferCoordinator? = null,
+    chatRepository: ChatRepository? = null,
+    onOpenChat: ((String) -> Unit)? = null,
+    onCreateSoloEpisode: ((String) -> Unit)? = null,
+    onCreateScenarioEpisode: ((String) -> Unit)? = null
 ) {
     val worlds by repository.observeWorlds().collectAsState(initial = emptyList())
     val scope = rememberCoroutineScope()
@@ -259,7 +264,7 @@ fun WorldsScreen(
                 item {
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Text("A World organizes its setting, recurring cast and continuity independently of any one chat or episode.")
-                        Text("World definitions and complete encrypted history archives are different formats. The full-history archive workflow is currently available only in the separate Worlds Preview build.",
+                        Text("World Definition JSON contains setting data without episode history. An encrypted World archive can include linked chats, message history, variants and images.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Button(onClick = {
@@ -326,11 +331,28 @@ fun WorldsScreen(
                                 }
                             }
                         ) { Text("Export World Definition JSON") }
+                        if (chatRepository != null) {
+                            if (onCreateSoloEpisode != null) {
+                                Button(
+                                    onClick = { onCreateSoloEpisode(selected.worldId) },
+                                    modifier = Modifier.testTag("world_new_solo_episode")
+                                ) { Text("New solo episode") }
+                            }
+                            if (onCreateScenarioEpisode != null) {
+                                OutlinedButton(
+                                    onClick = { onCreateScenarioEpisode(selected.worldId) },
+                                    modifier = Modifier.testTag("world_new_scenario_episode")
+                                ) { Text("New Scenario episode") }
+                            }
+                            WorldArchiveChatLinks(
+                                repository, chatRepository, selected,
+                                onOpenChat = { chatId -> onOpenChat?.invoke(chatId) }
+                            )
+                        }
                         if (archiveTransfer != null) {
-                            WorldArchiveChatLinks(repository, archiveTransfer, selected)
                             WorldArchiveControls(archiveTransfer, selected, onImported = { selectedId = it })
                         }
-                        Text("Definition JSON excludes episode history. Encrypted World archives include chat history and files when available in Worlds Preview.",
+                        Text("World Definition JSON excludes episode history. Encrypted World archives can include linked chat history and files.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }

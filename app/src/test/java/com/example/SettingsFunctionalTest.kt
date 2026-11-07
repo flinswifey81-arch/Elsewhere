@@ -64,9 +64,8 @@ class SettingsFunctionalTest {
         composeTestRule.waitForIdle()
         
         // Model & API
-        composeTestRule.onNodeWithTag("settings_list")
-            .performScrollToNode(hasText("Model & API"))
-        composeTestRule.onNodeWithText("Model & API").assertExists()
+        composeTestRule.onNodeWithTag("settings_tab_connection").performClick()
+        composeTestRule.onNodeWithText("OpenRouter").assertExists()
         
         // Since isLoaded is async, we wait for it
         composeTestRule.waitUntil(timeoutMillis = 5000) {
@@ -88,5 +87,10 @@ class SettingsFunctionalTest {
         
         // Back to normal
         composeTestRule.onNodeWithTag("api_key_input").assertExists()
+
+        composeTestRule.onNodeWithTag("settings_tab_about").performClick()
+        composeTestRule.onNodeWithTag("settings_app_version").assertTextEquals(
+            "Version " + BuildConfig.VERSION_NAME + " (build " + BuildConfig.VERSION_CODE + ")"
+        )
     }
 }

@@ -69,7 +69,18 @@ class ScenarioContextCompiler {
                 else -> Role.SYSTEM
             }, "${it.speakerDisplayNameSnapshot}: ${it.content}", sourceMessageId = it.messageId)
         }
-        if (continuation) messages += RoleplayMessage(Role.SYSTEM, "Continue the preceding narrator response without repeating it. Preserve player agency.")
+        if (continuation) {
+            // The narrator's prior message is assistant-role history. A synthetic user-role
+            // director turn is accepted across chat-completion routes without pretending
+            // the player said or did anything.
+            messages += RoleplayMessage(
+                Role.USER,
+                "[DIRECTOR TURN CONTROL — application instruction, not Persona dialogue or action]\n" +
+                    "Continue the preceding narrator response without repeating it. " +
+                    "Let the world and established NPCs advance the scene naturally, preserve the player's agency, " +
+                    "and do not invent the Persona's dialogue, actions, decisions, or feelings."
+            )
+        }
         return messages
     }
 }
