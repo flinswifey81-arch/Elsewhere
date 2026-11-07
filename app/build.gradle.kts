@@ -20,7 +20,9 @@ android {
   compileSdk { version = release(36) { minorApiLevel = 1 } }
 
   defaultConfig {
-    applicationId = productionApplicationId
+    // Keep the original Elsewhere Test package stable across production version bumps.
+    // Release and debug explicitly retain their v1.5 suffixes below.
+    applicationId = legacyApplicationId
     minSdk = 33
     targetSdk = 36
     versionCode = 1
@@ -55,12 +57,15 @@ android {
 
   buildTypes {
     release {
+      applicationIdSuffix = ".v15"
       isCrunchPngs = false
       isMinifyEnabled = false
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
       signingConfig = signingConfigs.getByName("release")
     }
-    debug { }
+    debug {
+      applicationIdSuffix = ".v15"
+    }
     create("sandbox") {
       initWith(getByName("debug"))
       buildConfigField("boolean", "WORLD_ARCHIVE_PREVIEW", "true")
@@ -76,7 +81,8 @@ android {
     }
     create("worldsPreview") {
       initWith(getByName("sandbox"))
-      applicationIdSuffix = ".test.worlds"
+      // Preserve the already-separate Worlds Preview package ID.
+      applicationIdSuffix = ".v15.test.worlds"
       versionNameSuffix = "-worlds-preview"
       buildConfigField("boolean", "WORLD_ARCHIVE_PREVIEW", "true")
       matchingFallbacks += listOf("sandbox", "debug")
