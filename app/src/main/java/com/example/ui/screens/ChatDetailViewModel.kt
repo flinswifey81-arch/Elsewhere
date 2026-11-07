@@ -2005,6 +2005,19 @@ class ChatDetailViewModel(
     fun retryGeneration() {
         val state = _uiState.value as? ChatUiState.Success ?: return
         if (inChatToolInProgress || generationStartInProgress || state.isGenerating) return
+        // Wack already marks the visible tail as out of context. Reject this known
+        // invalid Retry synchronously, before claiming the generation-start gate:
+        // otherwise the old-message lookup can race and silently block a new Send.
+        val resetBoundary = state.chatSummary.chat.contextResetOrderIndex
+        val visibleTail = state.messages.lastOrNull { it.isPrimaryVariant }
+        if (resetBoundary != null && visibleTail != null &&
+            !ContextResetPolicy.includes(visibleTail, resetBoundary)
+        ) {
+            updateSuccessState {
+                it.copy(generationError = "Retry is unavailable because the last message is before the Wack context boundary.")
+            }
+            return
+        }
         if (state.chatSummary.chat.chatType == ChatType.GROUP) {
             generateGroupResponse(state.generationCharacterId ?: state.selectedGroupCharacterId)
             return
