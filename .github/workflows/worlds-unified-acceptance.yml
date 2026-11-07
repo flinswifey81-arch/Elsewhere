@@ -1,4 +1,4 @@
-name: Worlds Unified Acceptance - Elsewhere Test
+name: Worlds and RP Integrated Acceptance
 
 on:
   pull_request:
@@ -20,7 +20,7 @@ concurrency:
 
 jobs:
   integrated-sandbox:
-    name: Test Worlds with RP lifecycle and publish integrated sandbox
+    name: Validate Worlds archives and existing RP lifecycle
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
@@ -83,65 +83,3 @@ jobs:
                       print(failure.get("message", ""))
                       print((failure.text or "")[:2500])
           PY
-
-      # Never publish a debug-signed APK as an update for an existing Elsewhere Test.
-      # The same dedicated keystore is used by build-testing-apk.yml.
-      - name: Restore dedicated testing signing key
-        env:
-          TEST_KEYSTORE_BASE64: ${{ secrets.ELSEWHERE_TEST_KEYSTORE_BASE64 }}
-          TEST_STORE_PASSWORD: ${{ secrets.ELSEWHERE_TEST_STORE_PASSWORD }}
-          TEST_KEY_ALIAS: ${{ secrets.ELSEWHERE_TEST_KEY_ALIAS }}
-          TEST_KEY_PASSWORD: ${{ secrets.ELSEWHERE_TEST_KEY_PASSWORD }}
-        run: |
-          for value in TEST_KEYSTORE_BASE64 TEST_STORE_PASSWORD TEST_KEY_ALIAS TEST_KEY_PASSWORD; do
-            if [ -z "${!value}" ]; then
-              echo "Missing required testing-signing secret: $value" >&2
-              exit 1
-            fi
-          done
-          umask 077
-          printf '%s' "$TEST_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/elsewhere-test.jks"
-
-      - name: Assemble unified Elsewhere Test with stable signing
-        env:
-          ELSEWHERE_TEST_KEYSTORE_PATH: ${{ runner.temp }}/elsewhere-test.jks
-          ELSEWHERE_TEST_STORE_PASSWORD: ${{ secrets.ELSEWHERE_TEST_STORE_PASSWORD }}
-          ELSEWHERE_TEST_KEY_ALIAS: ${{ secrets.ELSEWHERE_TEST_KEY_ALIAS }}
-          ELSEWHERE_TEST_KEY_PASSWORD: ${{ secrets.ELSEWHERE_TEST_KEY_PASSWORD }}
-        run: bash ./gradlew :app:assembleSandbox --no-daemon --no-configuration-cache
-
-      - name: Remove temporary testing signing key
-        if: always()
-        run: |
-          if [ -f "$RUNNER_TEMP/elsewhere-test.jks" ]; then
-            shred --remove "$RUNNER_TEMP/elsewhere-test.jks" 2>/dev/null || rm -f "$RUNNER_TEMP/elsewhere-test.jks"
-          fi
-
-      - name: Verify sandbox app ID and native packaging
-        run: |
-          python3 - <<'PY'
-          from zipfile import ZipFile, ZIP_DEFLATED
-          apk = "app/build/outputs/apk/sandbox/app-sandbox.apk"
-          with ZipFile(apk) as archive:
-              libs = [x for x in archive.infolist()
-                      if x.filename.startswith("lib/") and x.filename.endswith(".so")]
-              assert libs and all(x.compress_type == ZIP_DEFLATED for x in libs)
-          print("Native libraries compressed")
-          PY
-          APK=app/build/outputs/apk/sandbox/app-sandbox.apk
-          AAPT="$ANDROID_HOME/build-tools/36.0.0/aapt"
-          APKSIGNER="$ANDROID_HOME/build-tools/36.0.0/apksigner"
-          test -x "$AAPT" && test -x "$APKSIGNER"
-          BADGING="$("$AAPT" dump badging "$APK")"
-          printf '%s\\n' "$BADGING" | grep -m1 "^package:"
-          printf '%s\\n' "$BADGING" | grep -q "name='com.aistudio.elsewhere.abwzy.test'"
-          "$APKSIGNER" verify --print-certs "$APK" | grep -E "Signer #1 certificate SHA-256 digest|Verified using v[123] scheme"
-
-
-      - name: Upload unified sandbox APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: Elsewhere-Test-Unified-Worlds-Continue-Notifications
-          path: app/build/outputs/apk/sandbox/app-sandbox.apk
-          if-no-files-found: error
-          retention-days: 14
