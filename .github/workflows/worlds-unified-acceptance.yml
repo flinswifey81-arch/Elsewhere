@@ -14,7 +14,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: worlds-unified-${{ github.event.pull_request.number || github.ref }}
+  # Push and both stacked PRs at the same HEAD need one acceptance run, not three.
+  group: worlds-unified-${{ github.event.pull_request.head.sha || github.sha }}
   cancel-in-progress: true
 
 jobs:
