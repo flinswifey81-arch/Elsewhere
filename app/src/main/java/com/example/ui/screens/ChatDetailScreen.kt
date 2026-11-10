@@ -90,6 +90,7 @@ fun ChatDetailScreen(
     onNavigateToSettings: () -> Unit = {},
     onNavigateToInspector: (String?) -> Unit = {},
     onNavigateToLorebooks: () -> Unit = {},
+    onNavigateToStoryMemories: () -> Unit = {},
     onNavigateToNpcBank: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
@@ -245,6 +246,11 @@ fun ChatDetailScreen(
                                     showChatMenu = false
                                     onNavigateToInspector((uiState as? ChatUiState.Success)?.selectedGroupCharacterId)
                                 }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Story Memories") },
+                                leadingIcon = { Icon(Icons.Filled.Bookmarks, contentDescription = null) },
+                                onClick = { showChatMenu = false; onNavigateToStoryMemories() }
                             )
                             DropdownMenuItem(
                                 text = { Text("Chat Lorebooks") },
