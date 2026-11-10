@@ -1233,11 +1233,33 @@ class ChatDetailGenerationTest {
             harness.viewModel.uiState.first { it is ChatUiState.Success && it.draftAttachments.size == 1 }
         }
 
+        // Every follow-up tool checks ViewModel state and generation-start guards,
+        // not just the persisted Room row. Wait for both sides to become ready.
+        suspend fun awaitPrimaryAndIdle(messageId: String) {
+            withTimeout(30_000) {
+                harness.viewModel.uiState.first { state ->
+                    state is ChatUiState.Success &&
+                        !state.isGenerating &&
+                        state.messages.any {
+                            it.messageId == messageId && it.isPrimaryVariant
+                        }
+                }
+                while (harness.viewModel.hasPendingGenerationWork()) {
+                    kotlinx.coroutines.delay(10)
+                }
+            }
+        }
+
         harness.viewModel.onDraftChanged("What do you see?")
         harness.viewModel.sendMessage()
         withTimeout(30_000) {
             harness.viewModel.uiState.first {
                 it is ChatUiState.Success && !it.isGenerating && it.generationError == "mock failure"
+            }
+            // A provider's fast error can reach the UI before the Send job's
+            // finally block clears the guard that Retry checks synchronously.
+            while (harness.viewModel.hasPendingGenerationWork()) {
+                kotlinx.coroutines.delay(10)
             }
         }
         harness.viewModel.retryGeneration()
@@ -1246,9 +1268,7 @@ class ChatDetailGenerationTest {
                 messages.any { it.content == "Original image reply." }
             }
         }.single { it.content == "Original image reply." }
-        withTimeout(30_000) {
-            harness.viewModel.uiState.first { it is ChatUiState.Success && !it.isGenerating }
-        }
+        awaitPrimaryAndIdle(original.messageId)
 
         harness.viewModel.regenerateMessage(original.messageId)
         val regenerated = withTimeout(30_000) {
@@ -1256,23 +1276,7 @@ class ChatDetailGenerationTest {
                 messages.any { it.content == "Regenerated image reply." && it.isPrimaryVariant }
             }
         }.single { it.content == "Regenerated image reply." }
-        withTimeout(30_000) {
-            // Room can emit the persisted variant before the ViewModel adopts it.
-            // Continue reads the primary variant from ViewModel state, not Room.
-            harness.viewModel.uiState.first { state ->
-                state is ChatUiState.Success &&
-                    !state.isGenerating &&
-                    state.messages.any {
-                        it.messageId == regenerated.messageId && it.isPrimaryVariant
-                    }
-            }
-            // The UI can become idle before regenerateMessage's finally block
-            // releases generationStartInProgress; Continue rejects calls while
-            // that gate (or its generation job) is still active.
-            while (harness.viewModel.hasPendingGenerationWork()) {
-                kotlinx.coroutines.delay(10)
-            }
-        }
+        awaitPrimaryAndIdle(regenerated.messageId)
 
         harness.viewModel.continueMessage(regenerated.messageId)
         withTimeout(30_000) {
