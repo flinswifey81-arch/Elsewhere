@@ -179,10 +179,10 @@ class BackupRepositoryTest {
         val historicalJson = listOf(
             "storyMemories", "storyMemoryActors", "storyMemoryReturns"
         ).fold(currentJson) { json, field ->
-            json.replace(Regex(""",\\s*"$field"\\s*:\\s*\\[\\]"""), "")
+            json.replace(Regex(""",\s*"$field"\s*:\s*\[\]"""), "")
         }
         assertNotEquals(currentJson, historicalJson)
-        assertFalse(historicalJson.contains("\\"storyMemories\\""))
+        assertFalse(historicalJson.contains("storyMemories"))
         val manifest = BackupManifest(
             formatVersion = BackupArchiveIO.FORMAT_VERSION,
             applicationId = BuildConfig.APPLICATION_ID,
