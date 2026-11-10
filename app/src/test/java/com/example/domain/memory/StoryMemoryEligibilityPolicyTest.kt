@@ -41,7 +41,7 @@ class StoryMemoryEligibilityPolicyTest {
     private fun origin(msg: MessageEntity = selected, digest: String? = StoryMemoryEligibilityPolicy.sha256(msg.content)) =
         StoryMemoryOrigin.Message(
             msg.messageId, msg.variantGroupId, msg.orderIndex,
-            msg.speakerType, msg.speakerId, digest
+            msg.speakerType, msg.speakerId, msg.createdAt, digest
         )
 
     private fun record(
@@ -61,7 +61,10 @@ class StoryMemoryEligibilityPolicyTest {
         hidden: Boolean = false,
         pinned: Boolean = false
     ) = StoryMemoryRecord(
-        memoryId = id, ownerId = ownerId, sourceChatId = sourceChatId,
+        memoryId = id,
+        content = "Rowan promised to return the compass.",
+        createdAtEpochMillis = 1_000L, updatedAtEpochMillis = 1_000L,
+        ownerId = ownerId, sourceChatId = sourceChatId,
         scope = scope, branchId = branchId, origin = source,
         claim = claim, visibility = visibility, knownBy = knownBy,
         believedBy = believedBy, actors = actors,
@@ -108,6 +111,16 @@ class StoryMemoryEligibilityPolicyTest {
 
     @Test fun selectedSourceAndApprovedScopedRecipientAreEligible() {
         assertEquals(StoryMemoryExclusion.ELIGIBLE, reason(record()))
+    }
+
+    @Test fun emptyRecordContentIsRejectedBeforeAnyRetrieval() {
+        assertEquals(StoryMemoryExclusion.EMPTY_MEMORY,
+            reason(record().copy(content = "")))
+    }
+
+    @Test fun sourceCreationTimestampMustMatchCapturedProvenance() {
+        assertEquals(StoryMemoryExclusion.SOURCE_CHANGED,
+            reason(record(source = origin().copy(sourceCreatedAtEpochMillis = 0L))))
     }
 
     @Test fun pinnedMemoryDoesNotBypassPendingReviewOrHiddenStatus() {

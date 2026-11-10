@@ -30,6 +30,7 @@ sealed interface StoryMemoryOrigin {
         val orderIndex: Long,
         val speakerType: SpeakerType,
         val speakerId: String,
+        val sourceCreatedAtEpochMillis: Long,
         /** Optional content digest to detect source edits without storing source text twice. */
         val sourceSha256: String? = null
     ) : StoryMemoryOrigin
@@ -45,6 +46,9 @@ sealed interface StoryMemoryOrigin {
  */
 data class StoryMemoryRecord(
     val memoryId: String,
+    val content: String,
+    val createdAtEpochMillis: Long,
+    val updatedAtEpochMillis: Long,
     val ownerId: String,
     val sourceChatId: String,
     val scope: StoryMemoryOwnerScope,
@@ -88,6 +92,7 @@ data class StoryMemoryReadContext(
 
 enum class StoryMemoryExclusion {
     ELIGIBLE,
+    EMPTY_MEMORY,
     OTHER_STORY_OR_SCOPE,
     OTHER_BRANCH,
     NOT_APPROVED,
@@ -114,6 +119,7 @@ object StoryMemoryEligibilityPolicy {
 
     /** Decision for future source-linked records; no unreviewed proposals enter context. */
     fun evaluate(record: StoryMemoryRecord, context: StoryMemoryReadContext): StoryMemoryDecision {
+        if (record.content.isBlank()) return deny(StoryMemoryExclusion.EMPTY_MEMORY)
         if (record.scope != StoryMemoryOwnerScope.CHAT ||
             record.ownerId != context.chatId || record.sourceChatId != context.chatId
         ) return deny(StoryMemoryExclusion.OTHER_STORY_OR_SCOPE)
@@ -136,6 +142,7 @@ object StoryMemoryEligibilityPolicy {
                     origin.orderIndex,
                     origin.speakerType,
                     origin.speakerId,
+                    origin.sourceCreatedAtEpochMillis,
                     origin.sourceSha256
                 )
                 if (check != StoryMemoryExclusion.ELIGIBLE) return deny(check)
@@ -181,7 +188,7 @@ object StoryMemoryEligibilityPolicy {
         val check = checkSource(
             context.archivedMessages, context.chatId,
             sourceId, source.variantGroupId, source.orderIndex,
-            source.speakerType, source.speakerId, sourceSha256 = null
+            source.speakerType, source.speakerId, source.createdAt, sourceSha256 = null
         )
         if (check != StoryMemoryExclusion.ELIGIBLE) return deny(check)
         // A legacy record does not know whether it was captured before an edit.
@@ -231,13 +238,14 @@ object StoryMemoryEligibilityPolicy {
         orderIndex: Long,
         speakerType: SpeakerType,
         speakerId: String,
+        sourceCreatedAtEpochMillis: Long,
         sourceSha256: String?
     ): StoryMemoryExclusion {
         val source = messages.firstOrNull { it.messageId == messageId }
             ?: return StoryMemoryExclusion.SOURCE_MISSING
         if (source.chatId != chatId || source.variantGroupId != variantGroupId ||
             source.orderIndex != orderIndex || source.speakerType != speakerType ||
-            source.speakerId != speakerId
+            source.speakerId != speakerId || source.createdAt != sourceCreatedAtEpochMillis
         ) return StoryMemoryExclusion.SOURCE_CHANGED
         val selected = messages.filter {
             it.chatId == chatId && it.variantGroupId == variantGroupId && it.isPrimaryVariant
