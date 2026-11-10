@@ -17,7 +17,7 @@ concurrency:
 jobs:
   sandbox-review:
     name: Verify backup integrity and build isolated sandbox
-    if: github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'chore/stage0-')
+    if: github.event_name == 'workflow_dispatch' || (github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.head_ref, 'chore/stage0-'))
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -51,9 +51,33 @@ jobs:
             --tests com.example.WorldRepositoryTest \
             --tests com.example.WorldEpisodeContextCompilerTest \
             --tests com.example.domain.Stage0MemoryIsolationTest
-      - name: Build isolated sandbox APK
+      - name: Restore dedicated Elsewhere Test signing key
+        env:
+          TEST_KEYSTORE_BASE64: ${{ secrets.ELSEWHERE_TEST_KEYSTORE_BASE64 }}
+          TEST_STORE_PASSWORD: ${{ secrets.ELSEWHERE_TEST_STORE_PASSWORD }}
+          TEST_KEY_ALIAS: ${{ secrets.ELSEWHERE_TEST_KEY_ALIAS }}
+          TEST_KEY_PASSWORD: ${{ secrets.ELSEWHERE_TEST_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for value in TEST_KEYSTORE_BASE64 TEST_STORE_PASSWORD TEST_KEY_ALIAS TEST_KEY_PASSWORD; do
+            if [ -z "${!value}" ]; then
+              echo "Missing required stable Elsewhere Test signing secret: $value" >&2
+              exit 1
+            fi
+          done
+          umask 077
+          printf '%s' "$TEST_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/elsewhere-test.jks"
+      - name: Build isolated sandbox APK with stable Test signature
+        env:
+          ELSEWHERE_TEST_KEYSTORE_PATH: ${{ runner.temp }}/elsewhere-test.jks
+          ELSEWHERE_TEST_STORE_PASSWORD: ${{ secrets.ELSEWHERE_TEST_STORE_PASSWORD }}
+          ELSEWHERE_TEST_KEY_ALIAS: ${{ secrets.ELSEWHERE_TEST_KEY_ALIAS }}
+          ELSEWHERE_TEST_KEY_PASSWORD: ${{ secrets.ELSEWHERE_TEST_KEY_PASSWORD }}
         run: bash ./gradlew :app:assembleSandbox --no-daemon --no-configuration-cache
-      - name: Verify sandbox identity, signature and native library packaging
+      - name: Verify sandbox identity, stable Test signature and native library packaging
+        env:
+          TEST_STORE_PASSWORD: ${{ secrets.ELSEWHERE_TEST_STORE_PASSWORD }}
+          TEST_KEY_ALIAS: ${{ secrets.ELSEWHERE_TEST_KEY_ALIAS }}
         run: |
           set -euo pipefail
           apk="app/build/outputs/apk/sandbox/app-sandbox.apk"
@@ -66,7 +90,12 @@ jobs:
           test "$package" != "com.aistudio.elsewhere.abwzy.v15"
           test "$version_code" = "3"
           test "$version_name" = "1.5.2-test"
-          "$tools/apksigner" verify --verbose "$apk"
+          signer_report="$("$tools/apksigner" verify --verbose --print-certs "$apk")"
+          expected_certificate="$(keytool -exportcert -keystore "$RUNNER_TEMP/elsewhere-test.jks" -storepass:env TEST_STORE_PASSWORD -alias "$TEST_KEY_ALIAS" | openssl dgst -sha256 -r | awk '{print $1}')"
+          actual_certificate="$(printf '%s\n' "$signer_report" | awk -F': ' '/Signer #1 certificate SHA-256 digest:/ {print $2; exit}')"
+          test -n "$actual_certificate"
+          test "$actual_certificate" = "$expected_certificate"
+          test "$actual_certificate" != "7c1fa02f0732d179d509d5333afa40933743e3c5dc8b70ef0aff2607c1e759f5"
           python3 - <<'PY'
           from zipfile import ZipFile, ZIP_DEFLATED
           apk = "app/build/outputs/apk/sandbox/app-sandbox.apk"
@@ -82,9 +111,16 @@ jobs:
             echo "Expected production package: com.aistudio.elsewhere.abwzy.v15"
             echo "Sandbox package: $package"
             echo "Version: $version_name ($version_code)"
-            echo "Source commit: $GITHUB_SHA"
+            echo "Test signer SHA-256: $actual_certificate"
+            echo "Source PR head: ${{ github.event.pull_request.head.sha || github.sha }}"
             sha256sum "$apk"
           } | tee app/build/outputs/apk/sandbox/stage0-apk-verification.txt
+      - name: Remove temporary Test signing key
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/elsewhere-test.jks" ]; then
+            shred --remove "$RUNNER_TEMP/elsewhere-test.jks" 2>/dev/null || rm -f "$RUNNER_TEMP/elsewhere-test.jks"
+          fi
       - name: Upload sandbox APK and verification manifest
         uses: actions/upload-artifact@v4
         with:
