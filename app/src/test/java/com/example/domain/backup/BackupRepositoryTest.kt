@@ -121,7 +121,7 @@ class BackupRepositoryTest {
         val json = BackupArchiveIO(moshi, BuildConfig.APPLICATION_ID).payloadToJson(completePayload())
         val historical = listOf("storyMemories", "storyMemoryActors", "storyMemoryReturns")
             .fold(json) { current, field ->
-                current.replace(Regex(""",\\s*"$field"\\s*:\\s*\\[\\]"""), "")
+                current.replace(Regex(""",\s*"$field"\s*:\s*\[\]"""), "")
             }
         assertNotEquals(json, historical)
         val decoded = requireNotNull(moshi.adapter(BackupPayload::class.java).fromJson(historical))
