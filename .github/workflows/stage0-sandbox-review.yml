@@ -51,7 +51,7 @@ jobs:
             --tests com.example.WorldRepositoryTest \
             --tests com.example.WorldEpisodeContextCompilerTest \
             --tests com.example.domain.Stage0MemoryIsolationTest
-      - name: Restore dedicated Elsewhere Test signing key
+      - name: Select reusable Test signing or isolated one-off review signing
         env:
           TEST_KEYSTORE_BASE64: ${{ secrets.ELSEWHERE_TEST_KEYSTORE_BASE64 }}
           TEST_STORE_PASSWORD: ${{ secrets.ELSEWHERE_TEST_STORE_PASSWORD }}
@@ -59,15 +59,25 @@ jobs:
           TEST_KEY_PASSWORD: ${{ secrets.ELSEWHERE_TEST_KEY_PASSWORD }}
         run: |
           set -euo pipefail
+          present=0
           for value in TEST_KEYSTORE_BASE64 TEST_STORE_PASSWORD TEST_KEY_ALIAS TEST_KEY_PASSWORD; do
-            if [ -z "${!value}" ]; then
-              echo "Missing required stable Elsewhere Test signing secret: $value" >&2
-              exit 1
+            if [ -n "${!value}" ]; then
+              present=$((present + 1))
             fi
           done
-          umask 077
-          printf '%s' "$TEST_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/elsewhere-test.jks"
-      - name: Build isolated sandbox APK with stable Test signature
+          if [ "$present" -eq 4 ]; then
+            umask 077
+            printf '%s' "$TEST_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/elsewhere-test.jks"
+            echo "ELSEWHERE_REVIEW_SIGNING=stable-test" >> "$GITHUB_ENV"
+            echo "Using configured stable Elsewhere Test signer."
+          elif [ "$present" -eq 0 ]; then
+            echo "ELSEWHERE_REVIEW_SIGNING=one-off-debug" >> "$GITHUB_ENV"
+            echo "::warning::Dedicated Test signer is not configured. This APK uses an ephemeral debug signer and may not update an existing Elsewhere Test installation. Do not uninstall Test data to force installation."
+          else
+            echo "::error::Partial Test signing configuration; refusing to build with ambiguous signing." >&2
+            exit 1
+          fi
+      - name: Build isolated sandbox APK
         env:
           ELSEWHERE_TEST_KEYSTORE_PATH: ${{ runner.temp }}/elsewhere-test.jks
           ELSEWHERE_TEST_STORE_PASSWORD: ${{ secrets.ELSEWHERE_TEST_STORE_PASSWORD }}
@@ -91,11 +101,16 @@ jobs:
           test "$version_code" = "3"
           test "$version_name" = "1.5.2-test"
           signer_report="$("$tools/apksigner" verify --verbose --print-certs "$apk")"
-          expected_certificate="$(keytool -exportcert -keystore "$RUNNER_TEMP/elsewhere-test.jks" -storepass:env TEST_STORE_PASSWORD -alias "$TEST_KEY_ALIAS" | openssl dgst -sha256 -r | awk '{print $1}')"
           actual_certificate="$(printf '%s\n' "$signer_report" | awk -F': ' '/Signer #1 certificate SHA-256 digest:/ {print $2; exit}')"
           test -n "$actual_certificate"
-          test "$actual_certificate" = "$expected_certificate"
           test "$actual_certificate" != "7c1fa02f0732d179d509d5333afa40933743e3c5dc8b70ef0aff2607c1e759f5"
+          if [ "$ELSEWHERE_REVIEW_SIGNING" = "stable-test" ]; then
+            expected_certificate="$(keytool -exportcert -keystore "$RUNNER_TEMP/elsewhere-test.jks" -storepass:env TEST_STORE_PASSWORD -alias "$TEST_KEY_ALIAS" | openssl dgst -sha256 -r | awk '{print $1}')"
+            test "$actual_certificate" = "$expected_certificate"
+          else
+            test "$ELSEWHERE_REVIEW_SIGNING" = "one-off-debug"
+            echo "::warning::Verified a one-off debug-signed sandbox. Android upgrades of a prior Test app are NOT guaranteed."
+          fi
           python3 - <<'PY'
           from zipfile import ZipFile, ZIP_DEFLATED
           apk = "app/build/outputs/apk/sandbox/app-sandbox.apk"
@@ -111,7 +126,11 @@ jobs:
             echo "Expected production package: com.aistudio.elsewhere.abwzy.v15"
             echo "Sandbox package: $package"
             echo "Version: $version_name ($version_code)"
-            echo "Test signer SHA-256: $actual_certificate"
+            echo "Signing mode: $ELSEWHERE_REVIEW_SIGNING"
+            echo "Sandbox signer SHA-256: $actual_certificate"
+            if [ "$ELSEWHERE_REVIEW_SIGNING" = "one-off-debug" ]; then
+              echo "WARNING: Ephemeral signer. Do not overwrite an existing Elsewhere Test installation; Android may report an incompatible signature."
+            fi
             echo "Source PR head: ${{ github.event.pull_request.head.sha || github.sha }}"
             sha256sum "$apk"
           } | tee app/build/outputs/apk/sandbox/stage0-apk-verification.txt
