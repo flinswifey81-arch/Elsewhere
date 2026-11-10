@@ -672,10 +672,33 @@ class ChatDetailViewModel(
             updateSuccessState { it.copy(generationError = "Image attachment storage is unavailable.") }
             return
         }
+        // Import completion can race a Send: Room may publish the draft row
+        // before importDraftImage returns. Never let a stale upload callback
+        // erase or replace a more recent generation/attachment error.
+        val startingError = state.generationError
+        val startingMessageCount = state.messages.size
+        val startingLastMessageId = state.messages.lastOrNull()?.messageId
+        fun sameComposerOperation(current: ChatUiState.Success): Boolean =
+            current.generationError == startingError &&
+                current.messages.size == startingMessageCount &&
+                current.messages.lastOrNull()?.messageId == startingLastMessageId &&
+                !hasPendingGenerationWork()
+
         viewModelScope.launch {
             runCatching { repository.importDraftImage(chatId, uri) }
-                .onSuccess { updateSuccessState { it.copy(generationError = null) } }
-                .onFailure { error -> updateSuccessState { it.copy(generationError = error.message ?: "The image could not be attached.") } }
+                .onSuccess {
+                    updateSuccessState { current ->
+                        if (sameComposerOperation(current)) current.copy(generationError = null)
+                        else current
+                    }
+                }
+                .onFailure { error ->
+                    updateSuccessState { current ->
+                        if (sameComposerOperation(current)) {
+                            current.copy(generationError = error.message ?: "The image could not be attached.")
+                        } else current
+                    }
+                }
         }
     }
 
