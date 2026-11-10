@@ -45,6 +45,7 @@ jobs:
             --tests com.example.domain.AutomaticMemoryManagerTest \
             --tests com.example.domain.ContextResetPolicyTest \
             --tests com.example.domain.StoryMemoryStorageTest \
+            --tests com.example.StoryMemoriesScreenTest \
             --tests com.example.AppDatabaseMigrationTest \
             --tests com.example.domain.backup.BackupRepositoryTest
       - name: Report exact failing memory tests
