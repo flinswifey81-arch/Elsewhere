@@ -155,8 +155,21 @@ class ChatLorebooksScreenTest {
                 ChatLorebooksScreen(chatId = "ui-chat", repository = repository, onNavigateBack = {})
             }
         }
-        composeRule.waitUntil(15_000) {
-            composeRule.onAllNodesWithTag("chat_lorebooks_list").fetchSemanticsNodes().isNotEmpty()
+        try {
+            composeRule.waitUntil(15_000) {
+                composeRule.onAllNodesWithTag("chat_lorebooks_list").fetchSemanticsNodes().isNotEmpty()
+            }
+        } catch (timeout: ComposeTimeoutException) {
+            val storedBooks = runBlocking { repository.getChatLorebookStates("ui-chat").size }
+            val loading = composeRule.onAllNodesWithTag("chat_lorebooks_loading").fetchSemanticsNodes().isNotEmpty()
+            val empty = composeRule.onAllNodesWithTag("chat_lorebooks_empty").fetchSemanticsNodes().isNotEmpty()
+            val error = composeRule.onAllNodesWithTag("chat_lorebooks_error").fetchSemanticsNodes().isNotEmpty()
+            throw AssertionError(
+                "Chat Lorebooks screen never displayed list: storedBooks=$storedBooks, " +
+                    "loading=$loading, empty=$empty, errorDialog=$error. " +
+                    "Semantics:\n${composeRule.onRoot(useUnmergedTree = true).printToString()}",
+                timeout
+            )
         }
         composeRule.onNodeWithTag("chat_lorebooks_list").performScrollToIndex(1)
         composeRule.onNodeWithTag("attach_lorebook_ui-book").performClick()

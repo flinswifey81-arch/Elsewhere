@@ -721,12 +721,25 @@ class ChatDetailGenerationTest {
         repeat(6) { turn ->
             harness.viewModel.onDraftChanged("Player turn ${turn + 1}")
             harness.viewModel.sendMessage()
-            withTimeout(15_000) {
-                harness.viewModel.uiState.first { state ->
-                    state is ChatUiState.Success &&
-                        !state.isGenerating &&
-                        state.messages.count { it.speakerType == SpeakerType.CHARACTER } == turn + 1
+            try {
+                withTimeout(15_000) {
+                    harness.viewModel.uiState.first { state ->
+                        state is ChatUiState.Success &&
+                            !state.isGenerating &&
+                            state.messages.count { it.speakerType == SpeakerType.CHARACTER } == turn + 1
+                    }
                 }
+            } catch (timeout: kotlinx.coroutines.TimeoutCancellationException) {
+                val state = harness.viewModel.uiState.value as? ChatUiState.Success
+                val persistedReplies = harness.messageRepository.getMessagesForChatOnce(harness.chatId)
+                    .count { it.speakerType == SpeakerType.CHARACTER }
+                throw AssertionError(
+                    "Narrated turn ${turn + 1}/6 stalled: persistedReplies=$persistedReplies, " +
+                        "uiReplies=${state?.messages?.count { it.speakerType == SpeakerType.CHARACTER }}, " +
+                        "isGenerating=${state?.isGenerating}, pendingWork=${harness.viewModel.hasPendingGenerationWork()}, " +
+                        "providerRequests=${provider.requests.size}, generationErrorPresent=${state?.generationError != null}",
+                    timeout
+                )
             }
         }
 
@@ -2126,8 +2139,22 @@ class ChatDetailGenerationTest {
         // ChatUiState.Success is emitted before the Room history collector delivers its
         // first value. Tests must not send messages or invoke tools during that loading
         // window; otherwise their expected events can race initial history hydration.
-        withTimeout(15_000) {
-            viewModel.uiState.first { it is ChatUiState.Success && it.historyLoaded }
+        try {
+            withTimeout(15_000) {
+                viewModel.uiState.first { it is ChatUiState.Success && it.historyLoaded }
+            }
+        } catch (timeout: kotlinx.coroutines.TimeoutCancellationException) {
+            // An unexplained startup timeout is not evidence of a failed RP
+            // response. Report whether Room was ready and which UI phase stalled.
+            val snapshot = viewModel.uiState.value
+            val status = if (snapshot is ChatUiState.Success) {
+                "Success(historyLoaded=${snapshot.historyLoaded}, messageCount=${snapshot.messages.size}, isGenerating=${snapshot.isGenerating})"
+            } else snapshot::class.java.simpleName
+            val persistedCount = messageRepository.getMessagesForChatOnce(chatId).size
+            throw AssertionError(
+                "Chat test ViewModel never loaded history: state=$status, persistedMessages=$persistedCount",
+                timeout
+            )
         }
         return Harness(
             chatId,

@@ -15,6 +15,7 @@ import com.example.data.model.LorebookEntryEntity
 import com.example.data.model.MessageEntity
 import com.example.data.model.PersonaEntity
 import com.example.data.model.SpeakerType
+import com.example.data.model.WorldResourceType
 import com.example.di.AppContainer
 import com.example.domain.provider.GenerationOptions
 import com.example.domain.provider.ModelProvider
@@ -30,6 +31,8 @@ import com.example.domain.repository.MemoryRepository
 import com.example.domain.repository.MessageRepository
 import com.example.domain.repository.PersonaRepository
 import com.example.domain.repository.SettingsRepository
+import com.example.domain.repository.ScenarioRepository
+import com.example.domain.repository.WorldRepository
 import com.example.ui.screens.ChatLorebooksScreen
 import com.example.ui.screens.ContextInspectorScreen
 import com.example.ui.screens.LorebooksScreen
@@ -260,6 +263,18 @@ class LorebookUiTest {
                     orderIndex = 11L
                 )
             )
+            // Inspector must receive this chat's accepted World baseline and
+            // must not import facts from another, unrelated World.
+            val worlds = WorldRepository(database)
+            val linkedWorld = worlds.createWorld(
+                "Inspector Shared World", settingSummary = "LINKED_INSPECTOR_WORLD_SETTING"
+            )
+            worlds.attach(linkedWorld.worldId, WorldResourceType.CHAT, createdChatId)
+            val accepted = worlds.draftEvent(
+                linkedWorld.worldId, "Repaired archway", "LINKED_INSPECTOR_WORLD_CONTINUITY"
+            )
+            worlds.acceptEvent(linkedWorld.worldId, accepted.eventId)
+            worlds.createWorld("Unrelated World", settingSummary = "UNLINKED_WORLD_PRIVATE_MARKER")
             createdChatId
         }
         val container = object : AppContainer {
@@ -272,6 +287,7 @@ class LorebookUiTest {
             override val messageRepository = messageRepository
             override val memoryRepository = memoryRepository
             override val lorebookRepository = repository
+            override val scenarioRepository = ScenarioRepository(database)
         }
 
         composeRule.setContent {
@@ -294,6 +310,12 @@ class LorebookUiTest {
         )
         composeRule.onNodeWithText("B_INSPECTOR_KNOWLEDGE", substring = true).assertExists()
         composeRule.onNodeWithText("A_INSPECTOR_KNOWLEDGE", substring = true).assertDoesNotExist()
+        composeRule.onNode(hasScrollAction()).performScrollToNode(
+            hasText("LINKED_INSPECTOR_WORLD_CONTINUITY", substring = true)
+        )
+        composeRule.onNodeWithText("LINKED_INSPECTOR_WORLD_CONTINUITY", substring = true).assertExists()
+        composeRule.onNodeWithText("LINKED_INSPECTOR_WORLD_SETTING", substring = true).assertExists()
+        composeRule.onNodeWithText("UNLINKED_WORLD_PRIVATE_MARKER", substring = true).assertDoesNotExist()
         composeRule.onNodeWithText("INSPECTOR_NARRATOR_GUIDANCE", substring = true).assertExists()
         composeRule.onNode(hasScrollAction()).performScrollToNode(
             hasText("INSPECTOR_POST_RESET_MARKER", substring = true)
