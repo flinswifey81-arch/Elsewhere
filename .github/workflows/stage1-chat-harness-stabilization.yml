@@ -1,0 +1,81 @@
+name: Stage 1 Chat Harness Stabilization
+
+on:
+  pull_request:
+    branches:
+      - feature/stage1-memory-storage-v16-2026-11-10
+
+permissions:
+  contents: read
+
+concurrency:
+  group: elsewhere-chat-harness-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  pre-freeze:
+    if: github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.head_ref, 'chore/stage1-chat-harness-')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        trial: [1, 2]
+    name: Broad pre-freeze trial ${{ matrix.trial }}
+    steps:
+      - name: Check out exact review branch
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools
+      - name: Install required SDK packages
+        run: sdkmanager "platforms;android-36.1" "build-tools;36.0.0"
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: true
+      - name: Re-run exact broad pre-freeze suite without an APK or provider
+        run: |
+          bash ./gradlew :app:testSandboxUnitTest --no-daemon \
+            --tests com.example.AppDatabaseMigrationTest \
+            --tests com.example.WorldRepositoryTest \
+            --tests com.example.WorldDefinitionCodecTest \
+            --tests com.example.WorldsScreenTest \
+            --tests com.example.EnsembleCoLeadContextTest \
+            --tests com.example.domain.backup.BackupCryptoTest \
+            --tests com.example.domain.backup.BackupRepositoryTest \
+            --tests com.example.domain.memory.StoryMemoryEligibilityPolicyTest \
+            --tests com.example.domain.StoryMemoryStorageTest \
+            --tests com.example.StoryMemoriesScreenTest \
+            --tests com.example.ChatDetailGenerationTest \
+            --tests com.example.RetainedChatViewModelStoresTest \
+            --tests com.example.ReplyNotificationPolicyTest \
+            --tests com.example.ChatSettingsScreenInitTest \
+            --tests com.example.EndpointSelectionPersistenceTest \
+            --tests com.example.LorebookRepositoryTest \
+            --tests com.example.ChatLorebooksScreenTest \
+            --tests com.example.GroupCharacterControlsTest \
+            --tests com.example.LorebookUiTest.manualEditorExposesAllLoreEntryControls \
+            --tests com.example.LorebookUiTest.pastedJsonPreviewShowsStoryScopeAndEntryDetailsBeforeImport
+      - name: Report failures with test names and stack traces
+        if: failure()
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          from xml.etree import ElementTree as ET
+          for p in Path("app/build/test-results/testSandboxUnitTest").glob("TEST-*.xml"):
+              root = ET.parse(p).getroot()
+              for case in root.iter("testcase"):
+                  for failure in (*case.findall("failure"), *case.findall("error")):
+                      print("FAIL:", case.get("classname"), case.get("name"))
+                      print(failure.get("message", ""))
+                      print((failure.text or "")[:4000])
+          PY
