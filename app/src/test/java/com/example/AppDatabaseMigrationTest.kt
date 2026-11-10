@@ -174,7 +174,8 @@ class AppDatabaseMigrationTest {
                 AppDatabase.MIGRATION_11_12,
                 AppDatabase.MIGRATION_12_13,
                 AppDatabase.MIGRATION_13_14,
-                AppDatabase.MIGRATION_14_15
+                AppDatabase.MIGRATION_14_15,
+                AppDatabase.MIGRATION_15_16
             )
             .allowMainThreadQueries()
             .build()
@@ -536,6 +537,68 @@ class AppDatabaseMigrationTest {
                 assertTrue(cursor.moveToFirst())
                 assertEquals(7L, cursor.getLong(0))
                 assertEquals(8L, cursor.getLong(1))
+            }
+        } finally {
+            helper.close()
+        }
+    }
+
+    @Test
+    fun migrationFrom15To16AddsEmptyMemoryTablesWithoutLosingExistingRows() {
+        val helper = FrameworkSQLiteOpenHelperFactory().create(
+            SupportSQLiteOpenHelper.Configuration.builder(context).name(databaseName)
+                .callback(object : SupportSQLiteOpenHelper.Callback(15) {
+                    override fun onCreate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                        db.execSQL("CREATE TABLE chats (chatId TEXT NOT NULL PRIMARY KEY, displayName TEXT NOT NULL)")
+                        db.execSQL("CREATE TABLE roleplay_memories (memoryId TEXT NOT NULL PRIMARY KEY, chatId TEXT NOT NULL, content TEXT NOT NULL)")
+                        db.execSQL("CREATE TABLE conversation_summaries (chatId TEXT NOT NULL PRIMARY KEY, summary TEXT NOT NULL)")
+                    }
+                    override fun onUpgrade(db: androidx.sqlite.db.SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+                }).build()
+        )
+        try {
+            val db = helper.writableDatabase
+            db.execSQL("INSERT INTO chats VALUES ('chat-keep', 'Never Delete')")
+            db.execSQL("INSERT INTO roleplay_memories VALUES ('legacy-memory', 'chat-keep', 'Existing Promise')")
+            db.execSQL("INSERT INTO conversation_summaries VALUES ('chat-keep', 'Existing Summary')")
+            AppDatabase.MIGRATION_15_16.migrate(db)
+            db.query("SELECT displayName FROM chats WHERE chatId = 'chat-keep'").use {
+                assertTrue(it.moveToFirst())
+                assertEquals("Never Delete", it.getString(0))
+            }
+            db.query("SELECT content FROM roleplay_memories WHERE memoryId = 'legacy-memory'").use {
+                assertTrue(it.moveToFirst())
+                assertEquals("Existing Promise", it.getString(0))
+            }
+            db.query("SELECT summary FROM conversation_summaries WHERE chatId = 'chat-keep'").use {
+                assertTrue(it.moveToFirst())
+                assertEquals("Existing Summary", it.getString(0))
+            }
+            db.query("SELECT COUNT(*) FROM story_memories").use {
+                assertTrue(it.moveToFirst())
+                assertEquals(0, it.getInt(0))
+            }
+            db.query("SELECT COUNT(*) FROM story_memory_actors").use {
+                assertTrue(it.moveToFirst())
+                assertEquals(0, it.getInt(0))
+            }
+            db.query("SELECT COUNT(*) FROM story_memory_returns").use {
+                assertTrue(it.moveToFirst())
+                assertEquals(0, it.getInt(0))
+            }
+            db.execSQL("""
+                INSERT INTO story_memories (memoryId, chatId, ownerId, scope, content,
+                  claim, visibility, review, lifecycle, hidden, pinned, originKind,
+                  sourceOrderIndex, createdAtEpochMillis, updatedAtEpochMillis)
+                VALUES ('memory-new', 'chat-keep', 'chat-keep', 'CHAT', 'Silver compass',
+                  'PROMISE', 'STORYTELLER_ONLY', 'APPROVED', 'ACTIVE', 0, 0,
+                  'MANUAL', 18, 100, 100)
+            """.trimIndent())
+            db.execSQL("INSERT INTO story_memory_actors VALUES ('memory-new', 'CHARACTER', 'rowan', 'MENTIONED')")
+            db.execSQL("INSERT INTO story_memory_returns VALUES ('memory-new', 19, 'chat-keep', NULL, 20, 1)")
+            db.query("SELECT COUNT(*) FROM story_memory_returns").use {
+                assertTrue(it.moveToFirst())
+                assertEquals(1, it.getInt(0))
             }
         } finally {
             helper.close()

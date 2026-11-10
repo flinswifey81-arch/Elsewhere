@@ -7,7 +7,7 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.example.data.model.*
 
-const val APP_DATABASE_VERSION = 15
+const val APP_DATABASE_VERSION = 16
 
 @Database(
     entities = [
@@ -21,6 +21,9 @@ const val APP_DATABASE_VERSION = 15
         ChatSettingsEntity::class,
         GenerationMetadataEntity::class,
         RoleplayMemoryEntity::class,
+        StoryMemoryEntity::class,
+        StoryMemoryActorEntity::class,
+        StoryMemoryReturnEntity::class,
         ConversationSummaryEntity::class,
         LorebookEntity::class,
         LorebookEntryEntity::class,
@@ -55,6 +58,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun chatDao(): ChatDao
     abstract fun messageDao(): MessageDao
     abstract fun memoryDao(): MemoryDao
+    abstract fun storyMemoryDao(): StoryMemoryDao
     abstract fun lorebookDao(): LorebookDao
     abstract fun coopDao(): CoopDao
     abstract fun messageAttachmentDao(): MessageAttachmentDao
@@ -64,6 +68,66 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun worldDao(): WorldDao
 
     companion object {
+        val MIGRATION_15_16 = object : Migration(15, 16) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Additive only. Never mutate old roleplay_memories or summaries.
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS story_memories (
+                        memoryId TEXT NOT NULL PRIMARY KEY,
+                        chatId TEXT NOT NULL,
+                        ownerId TEXT NOT NULL,
+                        scope TEXT NOT NULL,
+                        branchId TEXT,
+                        content TEXT NOT NULL,
+                        claim TEXT NOT NULL,
+                        visibility TEXT NOT NULL,
+                        review TEXT NOT NULL,
+                        lifecycle TEXT NOT NULL,
+                        hidden INTEGER NOT NULL,
+                        pinned INTEGER NOT NULL,
+                        originKind TEXT NOT NULL,
+                        sourceMessageId TEXT,
+                        sourceVariantGroupId TEXT,
+                        sourceOrderIndex INTEGER NOT NULL,
+                        sourceSpeakerType TEXT,
+                        sourceSpeakerId TEXT,
+                        sourceCreatedAtEpochMillis INTEGER,
+                        sourceSha256 TEXT,
+                        believedByKind TEXT,
+                        believedById TEXT,
+                        createdAtEpochMillis INTEGER NOT NULL,
+                        updatedAtEpochMillis INTEGER NOT NULL,
+                        userEditedAt INTEGER,
+                        FOREIGN KEY(chatId) REFERENCES chats(chatId) ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_story_memories_chatId ON story_memories(chatId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_story_memories_sourceMessageId ON story_memories(sourceMessageId)")
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS story_memory_actors (
+                        memoryId TEXT NOT NULL,
+                        actorKind TEXT NOT NULL,
+                        actorId TEXT NOT NULL,
+                        relation TEXT NOT NULL,
+                        PRIMARY KEY(memoryId, actorKind, actorId, relation),
+                        FOREIGN KEY(memoryId) REFERENCES story_memories(memoryId) ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                """.trimIndent())
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS story_memory_returns (
+                        memoryId TEXT NOT NULL,
+                        resetBoundaryOrderIndex INTEGER NOT NULL,
+                        chatId TEXT NOT NULL,
+                        branchId TEXT,
+                        approvedAtOrderIndex INTEGER NOT NULL,
+                        initiatedByUser INTEGER NOT NULL,
+                        PRIMARY KEY(memoryId, resetBoundaryOrderIndex),
+                        FOREIGN KEY(memoryId) REFERENCES story_memories(memoryId) ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                """.trimIndent())
+            }
+        }
+
         val MIGRATION_14_15 = object : Migration(14, 15) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE worlds ADD COLUMN linksJson TEXT NOT NULL DEFAULT '{\"cast_roles\":[],\"relationships\":[]}'")

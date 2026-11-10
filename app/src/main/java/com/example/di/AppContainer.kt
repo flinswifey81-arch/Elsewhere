@@ -42,6 +42,7 @@ interface AppContainer {
     val chatRepository: ChatRepository
     val messageRepository: MessageRepository
     val memoryRepository: MemoryRepository
+    val storyMemoryRepository: com.example.domain.repository.StoryMemoryRepository? get() = null
     val lorebookRepository: LorebookRepository? get() = null
     val coopRepository: CoopRepository? get() = null
     val coopSessionManager: CoopSessionManager? get() = null
@@ -89,7 +90,8 @@ class DefaultAppContainer(private val context: Context) : AppContainer {
                 AppDatabase.MIGRATION_11_12,
                 AppDatabase.MIGRATION_12_13,
                 AppDatabase.MIGRATION_13_14,
-                AppDatabase.MIGRATION_14_15
+                AppDatabase.MIGRATION_14_15,
+                AppDatabase.MIGRATION_15_16
             )
             .build()
     }
@@ -135,6 +137,8 @@ class DefaultAppContainer(private val context: Context) : AppContainer {
     override val messageRepository: MessageRepository by lazy {
         MessageRepository(database.messageDao(), dataCoordinator)
     }
+
+    override val storyMemoryRepository by lazy { com.example.domain.repository.StoryMemoryRepository(database, dataCoordinator) }
 
     override val memoryRepository: MemoryRepository by lazy {
         MemoryRepository(database.memoryDao(), dataCoordinator)
