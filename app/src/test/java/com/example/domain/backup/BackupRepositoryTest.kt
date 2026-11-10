@@ -80,6 +80,58 @@ class BackupRepositoryTest {
     }
 
     @Test
+    fun encryptedBackupRoundTripsStoryMemoryActorKnowledgeAndExplicitWackReturn() = runBlocking {
+        val source = environment()
+        val chat = ChatEntity(chatId = "story-v16", displayName = "Memory Archive", chatType = ChatType.SOLO)
+        source.database.chatDao().insertChat(chat)
+        val record = StoryMemoryEntity(
+            memoryId = "story-1", chatId = chat.chatId, ownerId = chat.chatId,
+            content = "The chapel bell conceals a letter.",
+            claim = "SECRET", visibility = "STORYTELLER_ONLY",
+            originKind = "MANUAL", sourceOrderIndex = 17L,
+            createdAtEpochMillis = 1_700L, updatedAtEpochMillis = 1_800L,
+            pinned = true
+        )
+        source.database.storyMemoryDao().insert(record)
+        source.database.storyMemoryDao().insertActor(
+            StoryMemoryActorEntity(record.memoryId, "CHARACTER", "rowan", "MENTIONED")
+        )
+        source.database.storyMemoryDao().insertReturn(
+            StoryMemoryReturnEntity(
+                memoryId = record.memoryId,
+                resetBoundaryOrderIndex = 25L,
+                chatId = chat.chatId,
+                branchId = null,
+                approvedAtOrderIndex = 26L,
+                initiatedByUser = true
+            )
+        )
+        val encrypted = ByteArrayOutputStream()
+        source.repository.exportEncrypted(encrypted, PASSPHRASE.toCharArray())
+        val target = environment()
+        target.repository.restoreEncrypted(ByteArrayInputStream(encrypted.toByteArray()), PASSPHRASE.toCharArray())
+        assertEquals(source.database.storyMemoryDao().getAll(), target.database.storyMemoryDao().getAll())
+        assertEquals(source.database.storyMemoryDao().getAllActors(), target.database.storyMemoryDao().getAllActors())
+        assertEquals(source.database.storyMemoryDao().getAllReturns(), target.database.storyMemoryDao().getAllReturns())
+        assertEquals("Memory Archive", target.database.chatDao().getChatById(chat.chatId)?.displayName)
+    }
+
+    @Test
+    fun historicalPayloadWithoutV16MemoryListsDecodesToEmptyCollections() {
+        val json = BackupArchiveIO(moshi, BuildConfig.APPLICATION_ID).payloadToJson(completePayload())
+        val historical = listOf("storyMemories", "storyMemoryActors", "storyMemoryReturns")
+            .fold(json) { current, field ->
+                current.replace(Regex(",\\s*\\"" + field + "\\"\\s*:\\s*\\[\\]"), "")
+            }
+        assertNotEquals(json, historical)
+        val decoded = requireNotNull(moshi.adapter(BackupPayload::class.java).fromJson(historical))
+        assertTrue(decoded.storyMemories.isEmpty())
+        assertTrue(decoded.storyMemoryActors.isEmpty())
+        assertTrue(decoded.storyMemoryReturns.isEmpty())
+        assertEquals(completePayload().chats, decoded.chats)
+    }
+
+    @Test
     fun staleWorldChatLinkDoesNotBlockEncryptedBackup() = runBlocking {
         val source = environment()
         val chat = ChatEntity(chatId = "removed-world-chat", displayName = "Disposable", chatType = ChatType.SOLO)
