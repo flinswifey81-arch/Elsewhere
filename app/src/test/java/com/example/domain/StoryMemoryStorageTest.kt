@@ -134,7 +134,7 @@ class StoryMemoryStorageTest {
         )
         database.messageDao().insertMessage(original)
         val saved = repository.saveFromMessage("chat-a", original.messageId)
-        assertEquals("The lamp dimmed.\\n\\nRowan: \"Stay near.\"", saved.content)
+        assertEquals("The lamp dimmed.\n\nRowan: \"Stay near.\"", saved.content)
         assertEquals(com.example.domain.memory.StoryMemoryEligibilityPolicy.sha256(encoded), saved.sourceSha256)
         assertEquals(StoryMemoryExclusion.ELIGIBLE,
             repository.eligibility(saved, "chat-a", null, narrator).reason)
