@@ -56,6 +56,7 @@ jobs:
             --tests com.example.EnsembleCoLeadContextTest \
             --tests com.example.domain.backup.BackupCryptoTest \
             --tests com.example.domain.backup.BackupRepositoryTest \
+            --tests com.example.domain.memory.StoryMemoryEligibilityPolicyTest \
             --tests com.example.ChatDetailGenerationTest \
             --tests com.example.RetainedChatViewModelStoresTest \
             --tests com.example.ReplyNotificationPolicyTest \
