@@ -2108,8 +2108,22 @@ class ChatDetailGenerationTest {
         // ChatUiState.Success is emitted before the Room history collector delivers its
         // first value. Tests must not send messages or invoke tools during that loading
         // window; otherwise their expected events can race initial history hydration.
-        withTimeout(15_000) {
-            viewModel.uiState.first { it is ChatUiState.Success && it.historyLoaded }
+        try {
+            withTimeout(15_000) {
+                viewModel.uiState.first { it is ChatUiState.Success && it.historyLoaded }
+            }
+        } catch (timeout: kotlinx.coroutines.TimeoutCancellationException) {
+            // Distinguish Room history hydration from success-state readiness.
+            // Preserve this failure as an actual regression until diagnosed.
+            val snapshot = viewModel.uiState.value
+            val status = if (snapshot is ChatUiState.Success) {
+                "Success(historyLoaded=${snapshot.historyLoaded}, messageCount=${snapshot.messages.size}, isGenerating=${snapshot.isGenerating})"
+            } else snapshot::class.java.simpleName
+            val persistedCount = messageRepository.getMessagesForChatOnce(chatId).size
+            throw AssertionError(
+                "Chat test ViewModel never loaded history: state=$status, persistedMessages=$persistedCount",
+                timeout
+            )
         }
         return Harness(
             chatId,
