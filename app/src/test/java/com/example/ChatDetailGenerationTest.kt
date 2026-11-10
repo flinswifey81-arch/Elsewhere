@@ -83,7 +83,10 @@ class ChatDetailGenerationTest {
     private lateinit var database: AppDatabase
     private lateinit var viewModels: TestViewModelOwner
     private lateinit var dataCoordinator: AppDataMaintenanceCoordinator
-    private val mainDispatcher = UnconfinedTestDispatcher()
+    // runBlocking does not automatically drive a TestCoroutineScheduler.
+    // Use a non-virtual Main for this asynchronous Room/ViewModel suite:
+    // three full broad CI trials passed with this dispatcher in PR #46.
+    private val mainDispatcher = Dispatchers.Unconfined
 
     @Before
     fun setUp() {
