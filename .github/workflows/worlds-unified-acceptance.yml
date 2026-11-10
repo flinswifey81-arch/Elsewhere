@@ -46,6 +46,7 @@ jobs:
             --tests com.example.AppDatabaseMigrationTest \
             --tests com.example.WorldRepositoryTest \
             --tests com.example.WorldEpisodeContextCompilerTest \
+            --tests com.example.LorebookUiTest.groupInspectorCompilesForExplicitlySelectedCharacter \
             --tests com.example.WorldDefinitionCodecTest \
             --tests com.example.WorldsScreenTest \
             --tests com.example.WorldArchiveManifestCodecTest \

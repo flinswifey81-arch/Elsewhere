@@ -67,6 +67,7 @@ fun ContextInspectorScreen(
                 .filter { it.isPrimaryVariant }
             val resetBoundary = summary?.chat?.contextResetOrderIndex
             val history = ContextResetPolicy.eligiblePrimaryMessages(allPrimaryHistory, resetBoundary)
+            val activeWorldContext = appContainer.scenarioRepository?.worldContextForChat(chatId)
             val memories = character?.let {
                 appContainer.memoryRepository.getMemoriesOnce(chatId, it.characterId)
             }.orEmpty()
@@ -98,7 +99,8 @@ fun ContextInspectorScreen(
                     compiledMessages = com.example.domain.compiler.ScenarioContextCompiler().compile(
                         com.example.data.model.ScenarioCodec.decode(session.definitionJson), persona, settings,
                         history.dropLast(1), current, summary = rollingSummary, memories = scenarioMemories,
-                        lore = appContainer.lorebookRepository?.resolveActiveLore(chatId, history.dropLast(1), current, 24).orEmpty()
+                        lore = appContainer.lorebookRepository?.resolveActiveLore(chatId, history.dropLast(1), current, 24).orEmpty(),
+                        worldContext = activeWorldContext
                     )
                     includedMessages = history.size.coerceAtMost(25)
                 }
@@ -162,6 +164,7 @@ fun ContextInspectorScreen(
                         durableMemories = memories,
                         rollingSummary = rollingSummary,
                         activeLore = activeLore,
+                        worldContext = activeWorldContext,
                         supportingCastContext = supportingCast,
                         npcBankEnabled = npcBankEnabled,
                         narratorEnabled = settings.narratorEnabled,
@@ -180,6 +183,7 @@ fun ContextInspectorScreen(
                         durableMemories = memories,
                         rollingSummary = rollingSummary,
                         activeLore = activeLore,
+                        worldContext = activeWorldContext,
                         supportingCastContext = supportingCast,
                         npcBankEnabled = npcBankEnabled,
                         narratorEnabled = settings.narratorEnabled,
