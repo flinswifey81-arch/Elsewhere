@@ -6,6 +6,7 @@ import com.example.data.model.StoryMemoryActorEntity
 import com.example.data.model.StoryMemoryEntity
 import com.example.data.model.StoryMemoryReturnEntity
 import com.example.domain.memory.*
+import com.example.domain.story.StoryResponseCodec
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -58,7 +59,12 @@ class StoryMemoryRepository(
                 require(variants.count { it.isPrimaryVariant } == 1 && message.isPrimaryVariant) {
                     "Only the selected message variant may be saved."
                 }
-                val content = message.content.trim()
+                // Ensemble messages are stored as a structured envelope; save a
+                // readable story excerpt while fingerprinting the actual source
+                // bytes so future edits/branch changes remain detectable.
+                val content = (StoryResponseCodec.decode(message.content)
+                    ?.let(StoryResponseCodec::readableTranscript)
+                    ?: message.content).trim()
                 require(content.isNotBlank() && content.length <= 12_000) {
                     "Message is empty or too long to save as one memory."
                 }
