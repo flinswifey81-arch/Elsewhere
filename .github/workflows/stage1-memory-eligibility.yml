@@ -43,7 +43,10 @@ jobs:
           bash ./gradlew :app:testSandboxUnitTest --no-daemon \
             --tests com.example.domain.memory.StoryMemoryEligibilityPolicyTest \
             --tests com.example.domain.AutomaticMemoryManagerTest \
-            --tests com.example.domain.ContextResetPolicyTest
+            --tests com.example.domain.ContextResetPolicyTest \
+            --tests com.example.domain.StoryMemoryStorageTest \
+            --tests com.example.AppDatabaseMigrationTest \
+            --tests com.example.domain.backup.BackupRepositoryTest
       - name: Report exact failing memory tests
         if: failure()
         run: |
