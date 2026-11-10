@@ -13,6 +13,10 @@ import com.example.domain.memory.StoryActorRef
 import com.example.domain.memory.StoryMemoryClaim
 import com.example.domain.memory.StoryMemoryExclusion
 import com.example.domain.repository.StoryMemoryRepository
+import com.example.domain.story.StoryResponse
+import com.example.domain.story.StoryResponseCodec
+import com.example.domain.story.StorySegment
+import com.example.domain.story.StorySegmentType
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -114,6 +118,26 @@ class StoryMemoryStorageTest {
         database.messageDao().updateMessage(discarded.copy(isPrimaryVariant = true))
         assertEquals(StoryMemoryExclusion.SOURCE_NOT_SELECTED,
             repository.eligibility(saved, "chat-a", 100L, narrator).reason)
+    }
+
+    @Test
+    fun sourceLinkedEnsembleMemoryUsesReadableStoryButFingerprintsOriginalBytes() = runBlocking {
+        chat()
+        val encoded = StoryResponseCodec.encode(StoryResponse(segments = listOf(
+            StorySegment(StorySegmentType.NARRATION, "The lamp dimmed."),
+            StorySegment(StorySegmentType.CHARACTER, "\"Stay near.\"", "rowan", "Rowan")
+        )))
+        val original = MessageEntity(
+            messageId = "ensemble-1", chatId = "chat-a",
+            speakerType = SpeakerType.CHARACTER, speakerId = "rowan",
+            speakerDisplayNameSnapshot = "Rowan", content = encoded, orderIndex = 15L
+        )
+        database.messageDao().insertMessage(original)
+        val saved = repository.saveFromMessage("chat-a", original.messageId)
+        assertEquals("The lamp dimmed.\\n\\nRowan: \"Stay near.\"", saved.content)
+        assertEquals(com.example.domain.memory.StoryMemoryEligibilityPolicy.sha256(encoded), saved.sourceSha256)
+        assertEquals(StoryMemoryExclusion.ELIGIBLE,
+            repository.eligibility(saved, "chat-a", null, narrator).reason)
     }
 
     @Test
