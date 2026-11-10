@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.net.Uri
 import androidx.room.Room
+import androidx.lifecycle.viewModelScope
 import androidx.test.core.app.ApplicationProvider
 import com.example.data.AppDatabase
 import com.example.data.model.CharacterEntity
@@ -56,6 +57,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.yield
@@ -81,7 +83,10 @@ class ChatDetailGenerationTest {
     private lateinit var database: AppDatabase
     private lateinit var viewModels: TestViewModelOwner
     private lateinit var dataCoordinator: AppDataMaintenanceCoordinator
-    private val mainDispatcher = UnconfinedTestDispatcher()
+    // runBlocking does not automatically drive a TestCoroutineScheduler.
+    // Use a non-virtual Main for this asynchronous Room/ViewModel suite:
+    // three full broad CI trials passed with this dispatcher in PR #46.
+    private val mainDispatcher = Dispatchers.Unconfined
 
     @Before
     fun setUp() {
@@ -1376,18 +1381,63 @@ class ChatDetailGenerationTest {
         source.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
         bitmap.recycle()
         harness.viewModel.addDraftImage(Uri.fromFile(source))
-        withTimeout(15_000) {
-            harness.viewModel.uiState.first { it is ChatUiState.Success && it.draftAttachments.size == 1 }
+        try {
+            withTimeout(15_000) {
+                harness.viewModel.uiState.first {
+                    it is ChatUiState.Success && it.draftAttachments.size == 1
+                }
+            }
+        } catch (timeout: kotlinx.coroutines.TimeoutCancellationException) {
+            // The intermittent failure occurs during draft-image import, before
+            // Send or the text-only provider capability gate can run.
+            val snapshot = harness.viewModel.uiState.value as? ChatUiState.Success
+            val draftRows = harness.attachmentRepository.getDrafts(harness.chatId)
+            throw AssertionError(
+                "Draft image was not imported into the chat: " +
+                    "fileExists=${source.isFile}, fileBytes=${source.length()}, " +
+                    "roomDraftRows=${draftRows.size}, " +
+                    "uiDraftRows=${snapshot?.draftAttachments?.size}, " +
+                    "historyLoaded=${snapshot?.historyLoaded}, " +
+                    "errorPresent=${snapshot?.generationError != null}, " +
+                    "errorMentionsImage=${snapshot?.generationError?.contains("image", ignoreCase = true)}, " +
+                    "errorMentionsReadable=${snapshot?.generationError?.contains("readable", ignoreCase = true)}, " +
+                    "errorMentionsSaved=${snapshot?.generationError?.contains("saved", ignoreCase = true)}, " +
+                    "pendingGenerationWork=${harness.viewModel.hasPendingGenerationWork()}, " +
+                    "providerRequestCount=${provider.requestCount}",
+                timeout
+            )
         }
 
         harness.viewModel.onDraftChanged("Can you see this?")
         harness.viewModel.sendMessage()
 
-        val failed = withTimeout(15_000) {
-            harness.viewModel.uiState.first {
-                it is ChatUiState.Success && it.generationError?.contains("does not support image input") == true
-            }
-        } as ChatUiState.Success
+        val failed = try {
+            withTimeout(15_000) {
+                harness.viewModel.uiState.first {
+                    it is ChatUiState.Success &&
+                        it.generationError?.contains("does not support image input") == true
+                }
+            } as ChatUiState.Success
+        } catch (timeout: kotlinx.coroutines.TimeoutCancellationException) {
+            val snapshot = harness.viewModel.uiState.value as? ChatUiState.Success
+            val persisted = harness.messageRepository.getMessagesForChatOnce(harness.chatId)
+            val attachments = harness.attachmentRepository.observeForChat(harness.chatId).first()
+            throw AssertionError(
+                "Text-only model test did not show the expected image rejection: " +
+                    "historyLoaded=${snapshot?.historyLoaded}, " +
+                    "uiMessageCount=${snapshot?.messages?.size}, " +
+                    "persistedMessageCount=${persisted.size}, " +
+                    "persistedPersonaCount=${persisted.count { it.speakerType == SpeakerType.PERSONA }}, " +
+                    "draftAttachmentCount=${snapshot?.draftAttachments?.size}, " +
+                    "ownedAttachmentCount=${attachments.count { it.messageId != null }}, " +
+                    "isGenerating=${snapshot?.isGenerating}, " +
+                    "pendingGenerationWork=${harness.viewModel.hasPendingGenerationWork()}, " +
+                    "errorPresent=${snapshot?.generationError != null}, " +
+                    "errorMentionsImage=${snapshot?.generationError?.contains("image", ignoreCase = true)}, " +
+                    "providerRequestCount=${provider.requestCount}",
+                timeout
+            )
+        }
         assertTrue(failed.generationError.orEmpty().contains("vision-capable"))
         assertEquals(0, provider.requestCount)
         assertEquals(listOf(SpeakerType.PERSONA), harness.messageRepository.getMessagesForChatOnce(harness.chatId).map { it.speakerType })
@@ -2029,6 +2079,19 @@ class ChatDetailGenerationTest {
         harness.viewModel.discardPartial()
     }
 
+    @Test
+    fun freshEmptyChatHydratesHistoryBeforeAnyMessageOrProviderCall() = runBlocking {
+        val provider = CountingProvider()
+        val harness = createHarness(provider, ResponseLengthProfile.NORMAL)
+        val state = harness.viewModel.uiState.value as ChatUiState.Success
+        assertTrue("A new empty chat must finish the initial history query", state.historyLoaded)
+        assertTrue(state.messages.isEmpty())
+        assertTrue(withTimeout(5_000) {
+            harness.messageRepository.getMessagesForChat(harness.chatId).first().isEmpty()
+        })
+        assertEquals(0, provider.requestCount)
+    }
+
     private data class Harness(
         val chatId: String,
         val viewModel: ChatDetailViewModel,
@@ -2108,8 +2171,36 @@ class ChatDetailGenerationTest {
         // ChatUiState.Success is emitted before the Room history collector delivers its
         // first value. Tests must not send messages or invoke tools during that loading
         // window; otherwise their expected events can race initial history hydration.
-        withTimeout(15_000) {
-            viewModel.uiState.first { it is ChatUiState.Success && it.historyLoaded }
+        try {
+            withTimeout(15_000) {
+                viewModel.uiState.first { it is ChatUiState.Success && it.historyLoaded }
+            }
+        } catch (timeout: kotlinx.coroutines.TimeoutCancellationException) {
+            // Distinguish Room history hydration from success-state readiness.
+            // Preserve this failure as an actual regression until diagnosed.
+            val snapshot = viewModel.uiState.value
+            val status = if (snapshot is ChatUiState.Success) {
+                "Success(historyLoaded=${snapshot.historyLoaded}, messageCount=${snapshot.messages.size}, isGenerating=${snapshot.isGenerating})"
+            } else snapshot::class.java.simpleName
+            val persistedCount = messageRepository.getMessagesForChatOnce(chatId).size
+            // Probe a NEW independent Room collector only after the existing
+            // ViewModel hydration wait has failed. Running it beforehand could
+            // accidentally hide the timing issue we are trying to isolate.
+            val directFlowCount = kotlinx.coroutines.withTimeoutOrNull(3_000) {
+                messageRepository.getMessagesForChat(chatId).first().size
+            }
+            val settingsFlowReady = kotlinx.coroutines.withTimeoutOrNull(3_000) {
+                chatRepository.getChatSettingsFlow(chatId).filterNotNull().first().chatId == chatId
+            }
+            val viewModelScopeActive = viewModel.viewModelScope.coroutineContext[kotlinx.coroutines.Job]?.isActive
+            throw AssertionError(
+                "Chat test ViewModel never loaded history: state=$status, " +
+                    "persistedMessages=$persistedCount, " +
+                    "independentMessageFlowCount=${directFlowCount ?: "TIMED_OUT"}, " +
+                    "independentSettingsFlowReady=${settingsFlowReady ?: "TIMED_OUT"}, " +
+                    "viewModelScopeActive=$viewModelScopeActive",
+                timeout
+            )
         }
         return Harness(
             chatId,
