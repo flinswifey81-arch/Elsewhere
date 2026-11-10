@@ -1,6 +1,8 @@
 package com.example.domain
 
 import com.example.data.model.ChatSettingsEntity
+import com.example.data.model.CharacterEntity
+import com.example.data.model.ResponseLengthProfile
 import com.example.data.model.ConversationSummaryEntity
 import com.example.data.model.MemoryCategory
 import com.example.data.model.MessageEntity
@@ -10,6 +12,7 @@ import com.example.data.model.ScenarioDefinition
 import com.example.data.model.SpeakerType
 import com.example.domain.compiler.ContextBudgetBucket
 import com.example.domain.compiler.ContextBudgetProbe
+import com.example.domain.compiler.ContextCompilerV1
 import com.example.domain.compiler.ScenarioContextCompiler
 import com.example.domain.memory.ContextResetPolicy
 import org.junit.Assert.assertEquals
@@ -34,6 +37,14 @@ class Stage0ContextCostAndContinuityBenchmarkTest {
     )
     private val scenario = ScenarioDefinition(title = "The Long Road", premise = "A continuous journey")
     private val settings = ChatSettingsEntity(chatId = "stage0-benchmark")
+    private val character = CharacterEntity(
+        characterId = "rowan", displayName = "Rowan", characterName = "Rowan",
+        aliases = emptyList(), importSchemaVersion = 1,
+        identityJson = null, appearanceJson = null, personalityJson = null,
+        voiceJson = null, behaviorJson = null, backstoryJson = null,
+        knowledgeJson = null, worldContextJson = null, writingRulesJson = null,
+        examplesJson = null, authorNotesJson = null, extensionFieldsJson = null
+    )
 
     private val earlyFacts = mapOf(
         17 to "EARLY_PROMISE: Mara swore to return Rowan's silver compass.",
@@ -174,5 +185,57 @@ class Stage0ContextCostAndContinuityBenchmarkTest {
         assertNull(bigCost.explicitOutputTokenCeiling)
         // Stage 2 must actively budget authored context; capping transcript
         // and rolling summary alone is not a provider-context-window limit.
+    }
+
+    @Test
+    fun soloAndGroupPromptFootprintsStayBoundedButEarlyStoriesRemainUnavailable() {
+        val soloSamples = mutableListOf<Long>()
+        val groupSamples = mutableListOf<Long>()
+        for (count in listOf(500, 2_000, 10_000)) {
+            val sampleHistory = history(count)
+            val current = next(count).copy(
+                speakerType = SpeakerType.PERSONA, speakerId = persona.personaId,
+                speakerDisplayNameSnapshot = persona.displayName
+            )
+            val syntheticSummary = "Most recent scene recap. ".repeat(500).take(12_000)
+            val solo = ContextCompilerV1().compileSoloContext(
+                character = character, persona = persona,
+                chatHistory = sampleHistory, currentMessage = current,
+                responseProfile = ResponseLengthProfile.NORMAL,
+                customMin = null, customTargetMax = null, customHardMax = null,
+                rollingSummary = syntheticSummary,
+                worldContext = "Shared World: The Long Road."
+            )
+            val group = ContextCompilerV1().compileGroupCharacterContext(
+                character = character, persona = persona,
+                activeCharacterNames = listOf("Rowan", "Selene"),
+                chatHistory = sampleHistory, currentMessage = current,
+                responseProfile = ResponseLengthProfile.NORMAL,
+                customMin = null, customTargetMax = null, customHardMax = null,
+                rollingSummary = syntheticSummary,
+                worldContext = "Shared World: The Long Road."
+            )
+            for ((mode, compiled) in listOf("solo" to solo, "group" to group)) {
+                val flat = compiled.joinToString("\n") { it.content }
+                earlyFacts.values.forEach { assertFalse(flat.contains(it)) }
+                assertFalse(flat.contains("UNSELECTED_BRANCH"))
+                assertTrue(flat.contains("SELECTED_BRANCH"))
+                assertTrue(flat.contains("RECENT_SCENE"))
+                val usage = ContextBudgetProbe.measure(compiled)
+                for (bucket in listOf(
+                    ContextBudgetBucket.CHARACTER, ContextBudgetBucket.PERSONA,
+                    ContextBudgetBucket.WORLD, ContextBudgetBucket.SUMMARY,
+                    ContextBudgetBucket.TRANSCRIPT
+                )) assertTrue("$mode missing $bucket at $count", usage.utf8BytesByBucket.getValue(bucket) > 0)
+                if (mode == "group") {
+                    assertTrue(flat.contains("Respond only as Rowan"))
+                    assertTrue(usage.utf8BytesByBucket.getValue(ContextBudgetBucket.DIRECTOR) > 0)
+                    groupSamples.add(usage.inputUtf8Bytes)
+                } else soloSamples.add(usage.inputUtf8Bytes)
+                println("STAGE0_CONTEXT_BENCHMARK mode=$mode messages=$count bytes=${usage.inputUtf8Bytes} approxTokens=${usage.approximateInputTokens} earlyFactsPresent=0 selectedVariantOnly=true")
+            }
+        }
+        assertTrue(abs(soloSamples.last() - soloSamples.first()) < 2_000L)
+        assertTrue(abs(groupSamples.last() - groupSamples.first()) < 2_000L)
     }
 }
