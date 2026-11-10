@@ -55,6 +55,11 @@ jobs:
             --tests com.example.WorldsScreenTest \
             --tests com.example.EnsembleCoLeadContextTest \
             --tests com.example.domain.backup.BackupCryptoTest \
+            --tests com.example.domain.AutomaticMemoryManagerTest \
+            --tests com.example.domain.ContextResetPolicyTest \
+            --tests com.example.domain.Stage0LongHistoryBaselineTest \
+            --tests com.example.domain.Stage0ContextWindowContractTest \
+            --tests com.example.domain.Stage0MemoryIsolationTest \
             --tests com.example.domain.backup.BackupRepositoryTest \
             --tests com.example.ChatDetailGenerationTest \
             --tests com.example.RetainedChatViewModelStoresTest \
