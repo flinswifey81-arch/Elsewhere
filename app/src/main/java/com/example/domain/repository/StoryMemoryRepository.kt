@@ -7,6 +7,7 @@ import com.example.data.model.StoryMemoryEntity
 import com.example.data.model.StoryMemoryReturnEntity
 import com.example.domain.memory.*
 import com.example.domain.story.StoryResponseCodec
+import com.example.domain.npc.NpcStructuredOutputParser
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -62,9 +63,10 @@ class StoryMemoryRepository(
                 // Ensemble messages are stored as a structured envelope; save a
                 // readable story excerpt while fingerprinting the actual source
                 // bytes so future edits/branch changes remain detectable.
-                val content = (StoryResponseCodec.decode(message.content)
+                val visibleSource = NpcStructuredOutputParser.finalVisibleStoryText(message.content)
+                val content = (StoryResponseCodec.decode(visibleSource)
                     ?.let(StoryResponseCodec::readableTranscript)
-                    ?: message.content).trim()
+                    ?: visibleSource).trim()
                 require(content.isNotBlank() && content.length <= 12_000) {
                     "Message is empty or too long to save as one memory."
                 }
