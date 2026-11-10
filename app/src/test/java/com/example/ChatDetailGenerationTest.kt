@@ -83,7 +83,10 @@ class ChatDetailGenerationTest {
     private lateinit var database: AppDatabase
     private lateinit var viewModels: TestViewModelOwner
     private lateinit var dataCoordinator: AppDataMaintenanceCoordinator
-    private val mainDispatcher = UnconfinedTestDispatcher()
+    // runBlocking does not drive TestCoroutineScheduler; Room's IO callbacks can
+    // arrive after initial ViewModel state was emitted. This controlled test-only
+    // experiment removes the virtual scheduler without modifying production code.
+    private val mainDispatcher = Dispatchers.Unconfined
 
     @Before
     fun setUp() {
