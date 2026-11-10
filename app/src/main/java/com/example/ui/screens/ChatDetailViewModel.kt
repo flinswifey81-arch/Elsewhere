@@ -14,6 +14,7 @@ import com.example.data.model.PersonaEntity
 import com.example.data.model.ResponseLengthProfile
 import com.example.data.model.SpeakerType
 import com.example.domain.compiler.ContextCompilerV1
+import com.example.domain.compiler.ContextBudgetProbe
 import com.example.domain.generation.GenerationLifecycleReporter
 import com.example.domain.memory.AutomaticMemoryManager
 import com.example.domain.memory.ContextResetPolicy
@@ -954,6 +955,16 @@ class ChatDetailViewModel(
             characterId = characterId
         ) ?: return
         val fullCharacter = prepared.character
+
+        // Stage 0: no raw prompt, story content, model IDs, prices, or credentials
+        // are logged. This reads only already-compiled prompt strings, performs
+        // no network request, and is inert in the production release build.
+        if (com.example.BuildConfig.DEBUG) {
+            android.util.Log.d(
+                "ElsewhereContextBudget",
+                ContextBudgetProbe.measure(prepared.messages, prepared.options).countsOnlyDebugLine()
+            )
+        }
 
         updateSuccessState {
             it.copy(
