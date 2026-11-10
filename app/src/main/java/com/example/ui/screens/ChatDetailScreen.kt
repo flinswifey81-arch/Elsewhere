@@ -361,7 +361,20 @@ fun ChatDetailScreen(
                                     },
                                     onEdit = { id, content -> viewModel.editMessage(id, content) },
                                     onDelete = { viewModel.deleteMessage(it) },
-                                    onShowMetadata = { viewModel.showGenerationDetails(it) }
+                                    onShowMetadata = { viewModel.showGenerationDetails(it) },
+                                    onSaveMemory = appContainer.storyMemoryRepository?.let { archive ->
+                                        { messageId: String ->
+                                            coroutineScope.launch {
+                                                runCatching { archive.saveFromMessage(chatId, messageId) }
+                                                    .onSuccess {
+                                                        snackbarHostState.showSnackbar("Saved to Story Memories (retrieval not yet enabled)")
+                                                    }
+                                                    .onFailure {
+                                                        snackbarHostState.showSnackbar(it.message ?: "Unable to save Story Memory")
+                                                    }
+                                            }
+                                        }
+                                    }
                                 )
                             }
                             
@@ -951,7 +964,8 @@ fun MessageBubble(
     onCopy: (String) -> Unit,
     onEdit: (String, String) -> Unit,
     onDelete: (String) -> Unit,
-    onShowMetadata: (String) -> Unit
+    onShowMetadata: (String) -> Unit,
+    onSaveMemory: ((String) -> Unit)? = null
 ) {
     val message = group.primaryMessage
     val isUser = message.speakerType == SpeakerType.PERSONA
@@ -970,7 +984,8 @@ fun MessageBubble(
             onCopy = onCopy,
             onEdit = onEdit,
             onDelete = onDelete,
-            onShowMetadata = onShowMetadata
+            onShowMetadata = onShowMetadata,
+            onSaveMemory = onSaveMemory
         )
         return
     }
@@ -1028,6 +1043,7 @@ fun MessageBubble(
                     onRegenerate = if (isUser) null else ({ onRegenerate(message.messageId) }),
                     onContinue = if (isUser) null else ({ onContinue(message.messageId) }),
                     onShowMetadata = if (isUser) null else ({ onShowMetadata(message.messageId) }),
+                    onSaveMemory = onSaveMemory?.let { action -> { action(message.messageId) } },
                     mutationsEnabled = mutationsEnabled
                 )
             }
@@ -1195,7 +1211,8 @@ private fun EnsembleMessageBubble(
     onCopy: (String) -> Unit,
     onEdit: (String, String) -> Unit,
     onDelete: (String) -> Unit,
-    onShowMetadata: (String) -> Unit
+    onShowMetadata: (String) -> Unit,
+    onSaveMemory: ((String) -> Unit)? = null
 ) {
     val message = group.primaryMessage
     var showMenu by remember { mutableStateOf(false) }
@@ -1238,6 +1255,7 @@ private fun EnsembleMessageBubble(
                     onRegenerate = { onRegenerate(message.messageId) },
                     onContinue = { onContinue(message.messageId) },
                     onShowMetadata = { onShowMetadata(message.messageId) },
+                    onSaveMemory = onSaveMemory?.let { action -> { action(message.messageId) } },
                     mutationsEnabled = mutationsEnabled
                 )
             }
@@ -1474,7 +1492,8 @@ fun MessageMenu(
     onRegenerate: (() -> Unit)?,
     onContinue: (() -> Unit)?,
     onShowMetadata: (() -> Unit)?,
-    mutationsEnabled: Boolean = true
+    mutationsEnabled: Boolean = true,
+    onSaveMemory: (() -> Unit)? = null
 ) {
     DropdownMenu(
         expanded = expanded,
@@ -1484,6 +1503,13 @@ fun MessageMenu(
             text = { Text("Copy") },
             onClick = { onDismiss(); onCopy() }
         )
+        if (onSaveMemory != null) {
+            DropdownMenuItem(
+                text = { Text("Save as Story Memory") },
+                onClick = { onDismiss(); onSaveMemory() },
+                enabled = mutationsEnabled
+            )
+        }
         DropdownMenuItem(
             text = { Text("Edit") },
             onClick = { onDismiss(); onEdit() },
