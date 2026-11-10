@@ -1376,8 +1376,31 @@ class ChatDetailGenerationTest {
         source.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
         bitmap.recycle()
         harness.viewModel.addDraftImage(Uri.fromFile(source))
-        withTimeout(15_000) {
-            harness.viewModel.uiState.first { it is ChatUiState.Success && it.draftAttachments.size == 1 }
+        try {
+            withTimeout(15_000) {
+                harness.viewModel.uiState.first {
+                    it is ChatUiState.Success && it.draftAttachments.size == 1
+                }
+            }
+        } catch (timeout: kotlinx.coroutines.TimeoutCancellationException) {
+            // The intermittent failure occurs during draft-image import, before
+            // Send or the text-only provider capability gate can run.
+            val snapshot = harness.viewModel.uiState.value as? ChatUiState.Success
+            val draftRows = harness.attachmentRepository.getDrafts(harness.chatId)
+            throw AssertionError(
+                "Draft image was not imported into the chat: " +
+                    "fileExists=${source.isFile}, fileBytes=${source.length()}, " +
+                    "roomDraftRows=${draftRows.size}, " +
+                    "uiDraftRows=${snapshot?.draftAttachments?.size}, " +
+                    "historyLoaded=${snapshot?.historyLoaded}, " +
+                    "errorPresent=${snapshot?.generationError != null}, " +
+                    "errorMentionsImage=${snapshot?.generationError?.contains("image", ignoreCase = true)}, " +
+                    "errorMentionsReadable=${snapshot?.generationError?.contains("readable", ignoreCase = true)}, " +
+                    "errorMentionsSaved=${snapshot?.generationError?.contains("saved", ignoreCase = true)}, " +
+                    "pendingGenerationWork=${harness.viewModel.hasPendingGenerationWork()}, " +
+                    "providerRequestCount=${provider.requestCount}",
+                timeout
+            )
         }
 
         harness.viewModel.onDraftChanged("Can you see this?")
