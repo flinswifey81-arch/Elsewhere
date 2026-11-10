@@ -670,10 +670,10 @@ class BackupRepository internal constructor(
         unique("memory", payload.roleplayMemories.map { it.memoryId })
         val storyMemoryIds = unique("story memory", payload.storyMemories.map { it.memoryId })
         uniqueComposite("story memory actor", payload.storyMemoryActors.map {
-            "${it.memoryId}\\u0000${it.actorKind}\\u0000${it.actorId}\\u0000${it.relation}"
+            "${it.memoryId}\u0000${it.actorKind}\u0000${it.actorId}\u0000${it.relation}"
         })
         uniqueComposite("story memory Wack grant", payload.storyMemoryReturns.map {
-            "${it.memoryId}\\u0000${it.resetBoundaryOrderIndex}"
+            "${it.memoryId}\u0000${it.resetBoundaryOrderIndex}"
         })
         unique("co-op event", payload.coopEvents.map { it.eventId })
         unique("NPC update", payload.npcDossierUpdates.map { it.updateId })
