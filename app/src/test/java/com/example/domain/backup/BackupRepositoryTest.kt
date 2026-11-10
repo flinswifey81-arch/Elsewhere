@@ -131,6 +131,109 @@ class BackupRepositoryTest {
         assertEquals(completePayload().chats, decoded.chats)
     }
 
+    /**
+     * A synthetic v15-format encrypted archive, with v16 collections ABSENT
+     * (not present as empty lists), must restore through the real v16 archive
+     * validator and database replacement path. This is not a device-derived
+     * production backup and does not satisfy the release's real-data QA gate.
+     */
+    @Test
+    fun encryptedV15ShapeRestoresLegacyHistoryVariantsMemoryAndWackIntoV16() = runBlocking {
+        val source = environment()
+        val oldCharacter = character("historical-character", "Old Character")
+        source.database.characterDao().insertCharacter(oldCharacter)
+        val chat = ChatEntity(
+            chatId = "historical-chat", displayName = "Old Story",
+            chatType = ChatType.SOLO, contextResetOrderIndex = 15L
+        )
+        source.database.chatDao().insertChat(chat)
+        val selected = MessageEntity(
+            messageId = "historical-selected", chatId = chat.chatId,
+            speakerType = SpeakerType.CHARACTER, speakerId = oldCharacter.characterId,
+            speakerDisplayNameSnapshot = "Old Character",
+            content = "I promised to bring the map.", orderIndex = 30L,
+            variantGroupId = "historical-fork", isPrimaryVariant = true
+        )
+        val alternate = selected.copy(
+            messageId = "historical-alternate",
+            content = "I promised to bring the lantern.",
+            isPrimaryVariant = false
+        )
+        source.database.messageDao().insertMessage(selected)
+        source.database.messageDao().insertMessage(alternate)
+        val originalMemory = RoleplayMemoryEntity(
+            memoryId = "historical-memory", chatId = chat.chatId,
+            characterId = oldCharacter.characterId,
+            category = MemoryCategory.PROMISE,
+            content = "Bring the map back to the chapel.",
+            sourceMessageId = selected.messageId
+        )
+        source.database.backupDao().insertRoleplayMemories(listOf(originalMemory))
+        source.database.backupDao().insertConversationSummaries(listOf(
+            ConversationSummaryEntity(chat.chatId, "They crossed the ruined bridge.", 30L)
+        ))
+
+        val historicalPayload = source.readPayload()
+        val archive = BackupArchiveIO(moshi, BuildConfig.APPLICATION_ID)
+        val currentJson = archive.payloadToJson(historicalPayload)
+        val historicalJson = listOf(
+            "storyMemories", "storyMemoryActors", "storyMemoryReturns"
+        ).fold(currentJson) { json, field ->
+            json.replace(Regex(""",\\s*"$field"\\s*:\\s*\\[\\]"""), "")
+        }
+        assertNotEquals(currentJson, historicalJson)
+        assertFalse(historicalJson.contains("\\"storyMemories\\""))
+        val manifest = BackupManifest(
+            formatVersion = BackupArchiveIO.FORMAT_VERSION,
+            applicationId = BuildConfig.APPLICATION_ID,
+            appVersionCode = 1L,
+            appVersionName = "simulated-v15",
+            databaseVersion = 15,
+            createdAt = 1_000L,
+            payloadSha256 = BackupArchiveIO.sha256(
+                ByteArrayInputStream(historicalJson.toByteArray(Charsets.UTF_8))
+            ),
+            files = emptyList(),
+            excludedCategories = emptyList(),
+            coopRestoreMode = "OFFLINE_NON_RESUMABLE_HISTORY"
+        )
+        val plain = ByteArrayOutputStream()
+        archive.writePlainZip(
+            BackupSnapshot(
+                manifest = manifest, payload = historicalPayload,
+                payloadJson = historicalJson, binaries = emptyList(),
+                stagingDirectory = context.cacheDir
+            ), plain
+        )
+        val encrypted = ByteArrayOutputStream()
+        BackupCrypto.encrypt(
+            ByteArrayInputStream(plain.toByteArray()), encrypted,
+            PASSPHRASE.toCharArray()
+        )
+
+        val target = environment()
+        val bytes = encrypted.toByteArray()
+        val inspection = target.repository.inspectEncryptedForRestore(
+            ByteArrayInputStream(bytes), PASSPHRASE.toCharArray()
+        )
+        assertEquals(15, inspection.preview.databaseVersion)
+        val result = target.repository.restoreEncrypted(
+            ByteArrayInputStream(bytes), PASSPHRASE.toCharArray(),
+            expectedEncryptedSha256 = inspection.encryptedSha256
+        )
+        val restored = target.readPayload()
+        assertEquals(2, result.restoredMessages)
+        assertEquals(historicalPayload.chats, restored.chats)
+        assertEquals(historicalPayload.messages.toSet(), restored.messages.toSet())
+        assertEquals(historicalPayload.roleplayMemories, restored.roleplayMemories)
+        assertEquals(historicalPayload.conversationSummaries, restored.conversationSummaries)
+        assertEquals(1, restored.messages.count { it.isPrimaryVariant })
+        assertEquals(15L, target.database.chatDao().getChatById(chat.chatId)?.contextResetOrderIndex)
+        assertTrue(target.database.storyMemoryDao().getAll().isEmpty())
+        assertTrue(target.database.storyMemoryDao().getAllActors().isEmpty())
+        assertTrue(target.database.storyMemoryDao().getAllReturns().isEmpty())
+    }
+
     @Test
     fun staleWorldChatLinkDoesNotBlockEncryptedBackup() = runBlocking {
         val source = environment()
