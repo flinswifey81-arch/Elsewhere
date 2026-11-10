@@ -1383,11 +1383,33 @@ class ChatDetailGenerationTest {
         harness.viewModel.onDraftChanged("Can you see this?")
         harness.viewModel.sendMessage()
 
-        val failed = withTimeout(15_000) {
-            harness.viewModel.uiState.first {
-                it is ChatUiState.Success && it.generationError?.contains("does not support image input") == true
-            }
-        } as ChatUiState.Success
+        val failed = try {
+            withTimeout(15_000) {
+                harness.viewModel.uiState.first {
+                    it is ChatUiState.Success &&
+                        it.generationError?.contains("does not support image input") == true
+                }
+            } as ChatUiState.Success
+        } catch (timeout: kotlinx.coroutines.TimeoutCancellationException) {
+            val snapshot = harness.viewModel.uiState.value as? ChatUiState.Success
+            val persisted = harness.messageRepository.getMessagesForChatOnce(harness.chatId)
+            val attachments = harness.attachmentRepository.observeForChat(harness.chatId).first()
+            throw AssertionError(
+                "Text-only model test did not show the expected image rejection: " +
+                    "historyLoaded=${snapshot?.historyLoaded}, " +
+                    "uiMessageCount=${snapshot?.messages?.size}, " +
+                    "persistedMessageCount=${persisted.size}, " +
+                    "persistedPersonaCount=${persisted.count { it.speakerType == SpeakerType.PERSONA }}, " +
+                    "draftAttachmentCount=${snapshot?.draftAttachments?.size}, " +
+                    "ownedAttachmentCount=${attachments.count { it.messageId != null }}, " +
+                    "isGenerating=${snapshot?.isGenerating}, " +
+                    "pendingGenerationWork=${harness.viewModel.hasPendingGenerationWork()}, " +
+                    "errorPresent=${snapshot?.generationError != null}, " +
+                    "errorMentionsImage=${snapshot?.generationError?.contains("image", ignoreCase = true)}, " +
+                    "providerRequestCount=${provider.requestCount}",
+                timeout
+            )
+        }
         assertTrue(failed.generationError.orEmpty().contains("vision-capable"))
         assertEquals(0, provider.requestCount)
         assertEquals(listOf(SpeakerType.PERSONA), harness.messageRepository.getMessagesForChatOnce(harness.chatId).map { it.speakerType })
