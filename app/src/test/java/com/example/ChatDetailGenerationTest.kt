@@ -2074,6 +2074,19 @@ class ChatDetailGenerationTest {
         harness.viewModel.discardPartial()
     }
 
+    @Test
+    fun freshEmptyChatHydratesHistoryBeforeAnyMessageOrProviderCall() = runBlocking {
+        val provider = CountingProvider()
+        val harness = createHarness(provider, ResponseLengthProfile.NORMAL)
+        val state = harness.viewModel.uiState.value as ChatUiState.Success
+        assertTrue("A new empty chat must finish the initial history query", state.historyLoaded)
+        assertTrue(state.messages.isEmpty())
+        assertTrue(withTimeout(5_000) {
+            harness.messageRepository.getMessagesForChat(harness.chatId).first().isEmpty()
+        })
+        assertEquals(0, provider.requestCount)
+    }
+
     private data class Harness(
         val chatId: String,
         val viewModel: ChatDetailViewModel,
@@ -2165,8 +2178,22 @@ class ChatDetailGenerationTest {
                 "Success(historyLoaded=${snapshot.historyLoaded}, messageCount=${snapshot.messages.size}, isGenerating=${snapshot.isGenerating})"
             } else snapshot::class.java.simpleName
             val persistedCount = messageRepository.getMessagesForChatOnce(chatId).size
+            // Probe a NEW independent Room collector only after the existing
+            // ViewModel hydration wait has failed. Running it beforehand could
+            // accidentally hide the timing issue we are trying to isolate.
+            val directFlowCount = kotlinx.coroutines.withTimeoutOrNull(3_000) {
+                messageRepository.getMessagesForChat(chatId).first().size
+            }
+            val settingsFlowReady = kotlinx.coroutines.withTimeoutOrNull(3_000) {
+                chatRepository.getChatSettingsFlow(chatId).filterNotNull().first().chatId == chatId
+            }
+            val viewModelScopeActive = viewModel.viewModelScope.coroutineContext[kotlinx.coroutines.Job]?.isActive
             throw AssertionError(
-                "Chat test ViewModel never loaded history: state=$status, persistedMessages=$persistedCount",
+                "Chat test ViewModel never loaded history: state=$status, " +
+                    "persistedMessages=$persistedCount, " +
+                    "independentMessageFlowCount=${directFlowCount ?: "TIMED_OUT"}, " +
+                    "independentSettingsFlowReady=${settingsFlowReady ?: "TIMED_OUT"}, " +
+                    "viewModelScopeActive=$viewModelScopeActive",
                 timeout
             )
         }
