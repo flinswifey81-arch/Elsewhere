@@ -169,7 +169,7 @@ fun StoryMemoriesScreen(
             confirmButton = {
                 TextButton(
                     enabled = !working &&
-                        (memory.claim != "BELIEF" || selectedKnowers.size == 1) &&
+                        (memory.claim != "BELIEF" || selectedKnowers.size <= 1) &&
                         (memory.claim != "CONTRADICTION" || selectedKnowers.isEmpty()),
                     onClick = {
                         val chosen = selectedKnowers

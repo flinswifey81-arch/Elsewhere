@@ -246,6 +246,26 @@ class StoryMemoryStorageTest {
     }
 
     @Test
+    fun revokingBeliefKnowledgePreservesAttributionWithoutGrantingPrivateAccess() = runBlocking {
+        chat()
+        database.chatDao().insertChatParticipant(
+            com.example.data.model.ChatParticipantEntity("chat-a", "rowan")
+        )
+        val memory = repository.saveManual("chat-a", "Rowan believes the compass is cursed.",
+            StoryMemoryClaim.BELIEF)
+        val assigned = repository.setCharacterKnowledge("chat-a", memory.memoryId, setOf("rowan"))
+        assertEquals("rowan", assigned.believedById)
+        val cleared = repository.setCharacterKnowledge("chat-a", memory.memoryId, emptySet())
+        assertEquals("STORYTELLER_ONLY", cleared.visibility)
+        assertEquals("rowan", cleared.believedById)
+        assertEquals(StoryMemoryExclusion.NOT_KNOWN_TO_RECIPIENT,
+            repository.eligibility(cleared, "chat-a", null,
+                StoryActorRef(StoryActorKind.CHARACTER, "rowan")).reason)
+        assertEquals(StoryMemoryExclusion.ELIGIBLE,
+            repository.eligibility(cleared, "chat-a", null, narrator).reason)
+    }
+
+    @Test
     fun invalidMissingChatOrBlankInputCannotCreateOrMutateMemory() = runBlocking {
         assertTrue(runCatching { repository.saveManual("missing", "Text") }.isFailure)
         chat()

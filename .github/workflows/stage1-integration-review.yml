@@ -60,3 +60,59 @@ jobs:
                       print(f"FAIL: {case.get('classname')}.{case.get('name')}: {failure.get('message', '')}")
                       print((failure.text or "")[:3500])
           PY
+
+  broad-regressions:
+    if: github.event_name == 'workflow_dispatch' || (github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.head_ref, 'work/memory-stage1-'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools
+      - run: sdkmanager "platforms;android-36.1" "build-tools;36.0.0"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: true
+      - name: Broad chat, Worlds, Lorebook and memory regression
+        run: |
+          bash ./gradlew :app:testSandboxUnitTest --no-daemon \
+            --tests com.example.AppDatabaseMigrationTest \
+            --tests com.example.WorldRepositoryTest \
+            --tests com.example.WorldDefinitionCodecTest \
+            --tests com.example.WorldsScreenTest \
+            --tests com.example.EnsembleCoLeadContextTest \
+            --tests com.example.domain.backup.BackupCryptoTest \
+            --tests com.example.domain.backup.BackupRepositoryTest \
+            --tests 'com.example.domain.memory.*' \
+            --tests com.example.domain.StoryMemoryStorageTest \
+            --tests com.example.StoryMemoriesScreenTest \
+            --tests com.example.ChatDetailGenerationTest \
+            --tests com.example.RetainedChatViewModelStoresTest \
+            --tests com.example.ReplyNotificationPolicyTest \
+            --tests com.example.ChatSettingsScreenInitTest \
+            --tests com.example.EndpointSelectionPersistenceTest \
+            --tests com.example.LorebookRepositoryTest \
+            --tests com.example.ChatLorebooksScreenTest \
+            --tests com.example.GroupCharacterControlsTest \
+            --tests com.example.NpcRepositoryTest \
+            --tests com.example.LorebookUiTest.manualEditorExposesAllLoreEntryControls \
+            --tests com.example.LorebookUiTest.pastedJsonPreviewShowsStoryScopeAndEntryDetailsBeforeImport
+      - name: Print failing cases
+        if: failure()
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          from xml.etree import ElementTree as ET
+          for report in Path("app/build/test-results/testSandboxUnitTest").glob("TEST-*.xml"):
+              for case in ET.parse(report).getroot().iter("testcase"):
+                  for failure in (*case.findall("failure"), *case.findall("error")):
+                      print(f"FAIL: {case.get('classname')}.{case.get('name')}: {failure.get('message', '')}")
+                      print((failure.text or "")[:3500])
+          PY

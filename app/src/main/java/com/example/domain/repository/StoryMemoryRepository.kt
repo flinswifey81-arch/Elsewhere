@@ -125,7 +125,7 @@ class StoryMemoryRepository(
                 "Contradictions remain storyteller-only until resolved."
             }
             if (old.claim == StoryMemoryClaim.BELIEF.name) {
-                require(characterIds.size == 1) { "Choose the one Character who holds this belief." }
+                require(characterIds.size <= 1) { "A belief may belong to at most one Character." }
             }
             dao.clearKnowledgeForMemory(memoryId)
             characterIds.sorted().forEach { characterId ->
@@ -140,8 +140,10 @@ class StoryMemoryRepository(
             old.copy(
                 visibility = if (characterIds.isEmpty()) StoryMemoryVisibility.STORYTELLER_ONLY.name
                     else StoryMemoryVisibility.CHARACTER_ONLY.name,
-                believedByKind = if (believer == null) null else StoryActorKind.CHARACTER.name,
-                believedById = believer,
+                // Revoking the Character's access must not erase historically
+                // attributed belief ownership from storyteller continuity.
+                believedByKind = if (believer == null) old.believedByKind else StoryActorKind.CHARACTER.name,
+                believedById = believer ?: old.believedById,
                 updatedAtEpochMillis = System.currentTimeMillis()
             ).also { dao.update(it) }
         }
