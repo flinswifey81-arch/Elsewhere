@@ -21,6 +21,8 @@ import com.example.domain.memory.LegacyMemoryEligibilityFilter
 import com.example.domain.memory.StoryActorKind
 import com.example.domain.memory.StoryActorRef
 import com.example.domain.repository.StoryMemoryRepository
+import com.example.domain.memory.StoryMemoryPromptBudget
+import com.example.domain.memory.StoryMemoryRecord
 import com.example.domain.coop.CoopGenerationCommand
 import com.example.domain.coop.CoopGenerationRequestPayload
 import com.example.domain.coop.CoopGenerationAuthorization
@@ -1197,21 +1199,33 @@ class ChatDetailViewModel(
             recipient = StoryActorRef(StoryActorKind.NARRATOR, "narrator:$chatId"),
             sceneText = searchScene(history, current)
         )?.selected.orEmpty()
-        val messages = com.example.domain.compiler.ScenarioContextCompiler().compile(
-            com.example.data.model.ScenarioCodec.decode(session.definitionJson), persona, settings, history, current,
-            summary = summary,
-            memories = LegacyMemoryEligibilityFilter.eligible(
-                memories = memoryRepository.getMemoriesOnce(chatId, "narrator:$chatId"),
-                chatId = chatId,
-                recipient = StoryActorRef(StoryActorKind.NARRATOR, "narrator:$chatId"),
-                boundary = chatSummary?.chat?.contextResetOrderIndex,
-                archivedMessages = messageRepository.getMessagesForChatOnce(chatId)
-            ),
-            lore = lorebookRepository?.resolveActiveLore(chatId, history, current, AutomaticMemoryManager.DEFAULT_RECENT_MESSAGE_LIMIT).orEmpty(),
-            continuation = continuation,
-            worldContext = scenarioRepository?.worldContextForChat(chatId),
-            storyMemories = selectedStoryMemories
-        ).map { if (it.sourceMessageId == source?.messageId && images.isNotEmpty()) it.copy(images = images) else it }
+        val legacyMemories = LegacyMemoryEligibilityFilter.eligible(
+            memories = memoryRepository.getMemoriesOnce(chatId, "narrator:$chatId"),
+            chatId = chatId,
+            recipient = StoryActorRef(StoryActorKind.NARRATOR, "narrator:$chatId"),
+            boundary = chatSummary?.chat?.contextResetOrderIndex,
+            archivedMessages = messageRepository.getMessagesForChatOnce(chatId)
+        )
+        val activeLore = lorebookRepository?.resolveActiveLore(
+            chatId, history, current, AutomaticMemoryManager.DEFAULT_RECENT_MESSAGE_LIMIT
+        ).orEmpty()
+        val worldContext = scenarioRepository?.worldContextForChat(chatId)
+        val scenarioDefinition = com.example.data.model.ScenarioCodec.decode(session.definitionJson)
+        val scenarioCompiler = com.example.domain.compiler.ScenarioContextCompiler()
+        fun compileWithMemories(story: List<StoryMemoryRecord>) = scenarioCompiler.compile(
+            scenarioDefinition, persona, settings, history, current,
+            summary = summary, memories = legacyMemories, lore = activeLore,
+            continuation = continuation, worldContext = worldContext,
+            storyMemories = story
+        )
+        val baseline = compileWithMemories(emptyList())
+        val allowedStoryMemories = StoryMemoryPromptBudget.select(
+            baseline, selectedStoryMemories, modelProvider.cachedContextLength(modelId)
+        ).selected
+        val messages = (if (allowedStoryMemories.isEmpty()) baseline
+            else compileWithMemories(allowedStoryMemories)).map {
+            if (it.sourceMessageId == source?.messageId && images.isNotEmpty()) it.copy(images = images) else it
+        }
         return PreparedGeneration(ResponseSpeaker("narrator:$chatId", "Narrator", SpeakerType.NARRATOR), messages,
             GenerationOptions(modelId = modelId, routing = ModelRouting.fromSettings(settings.providerRoutingMode, settings.providerEndpoint),
                 temperature = settings.temperature, topP = settings.topP, maxTokens = null), activePersonaId = personaId)
@@ -1342,7 +1356,8 @@ class ChatDetailViewModel(
         // Solo and Group episodes share their World's approved setting and continuity
         // just as Scenario episodes do. This is a local Room read, not another model call.
         val activeWorldContext = scenarioRepository?.worldContextForChat(chatId)
-        val contextMessages = if (summary.chat.chatType == ChatType.GROUP) {
+        fun compileWithMemories(story: List<StoryMemoryRecord>) =
+            if (summary.chat.chatType == ChatType.GROUP) {
             val state = _uiState.value as? ChatUiState.Success
             val activeCharacterNames = state?.groupCharacters
                 ?.filter { it.isActive }
@@ -1361,7 +1376,7 @@ class ChatDetailViewModel(
                 customTargetMax = settings.customTargetMax,
                 customHardMax = settings.customHardMax,
                 durableMemories = durableMemories,
-                storyMemories = selectedStoryMemories,
+                storyMemories = story,
                 rollingSummary = rollingSummary,
                 activeLore = activeLore,
                 worldContext = activeWorldContext,
@@ -1382,7 +1397,7 @@ class ChatDetailViewModel(
                 customTargetMax = settings.customTargetMax,
                 customHardMax = settings.customHardMax,
                 durableMemories = durableMemories,
-                storyMemories = selectedStoryMemories,
+                storyMemories = story,
                 rollingSummary = rollingSummary,
                 activeLore = activeLore,
                 worldContext = activeWorldContext,
@@ -1397,11 +1412,18 @@ class ChatDetailViewModel(
             )
         }
 
+        val modelId = settings.selectedModelId ?: "openrouter/auto"
+        val baseline = compileWithMemories(emptyList())
+        val allowedStoryMemories = StoryMemoryPromptBudget.select(
+            baseline, selectedStoryMemories, modelProvider.cachedContextLength(modelId)
+        ).selected
+        val contextMessages = if (allowedStoryMemories.isEmpty()) baseline
+            else compileWithMemories(allowedStoryMemories)
+
         val imageSourceMessage = relevantPersonaMessage?.takeIf { !isContinuation && activeCoopRoom == null }
         val currentImages = imageSourceMessage?.let { source ->
             messageAttachmentRepository?.providerImagesForMessage(source.messageId).orEmpty()
         }.orEmpty()
-        val modelId = settings.selectedModelId ?: "openrouter/auto"
         if (currentImages.isNotEmpty()) {
             when (modelProvider.supportsImageInput(modelId)) {
                 false -> {
