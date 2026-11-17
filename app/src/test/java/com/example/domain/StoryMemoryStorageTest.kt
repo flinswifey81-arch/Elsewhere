@@ -255,4 +255,60 @@ class StoryMemoryStorageTest {
         assertTrue(runCatching { repository.update("chat-a", saved.memoryId, text = "") }.isFailure)
         assertEquals("Keep me", repository.get("chat-a", saved.memoryId)?.content)
     }
+
+    @Test
+    fun retrievalSelectsOnlyRecipientKnowledgeAndExactWackRestorations() = runBlocking {
+        chat()
+        database.chatDao().insertChatParticipant(
+            com.example.data.model.ChatParticipantEntity("chat-a", "rowan")
+        )
+        val note = repository.saveManual("chat-a", "The silver compass is beneath the altar.",
+            StoryMemoryClaim.PROMISE)
+        repository.setCharacterKnowledge("chat-a", note.memoryId, setOf("rowan"))
+        val rowan = StoryActorRef(StoryActorKind.CHARACTER, "rowan")
+        suspend fun search(recipient: StoryActorRef) = repository.retrieveForGeneration(
+            chatId = "chat-a", recipient = recipient,
+            sceneText = "Where did we leave the silver compass?", activeActors = setOf(rowan)
+        )
+        assertEquals(listOf(note.memoryId), search(rowan).selected.map { it.memoryId })
+        assertTrue(search(StoryActorRef(StoryActorKind.CHARACTER, "stranger")).selected.isEmpty())
+        assertTrue(search(narrator).selected.isEmpty())
+        database.chatDao().setContextResetBoundary("chat-a", 100L, 100L)
+        assertTrue(search(rowan).selected.isEmpty())
+        repository.restoreAcrossWack("chat-a", note.memoryId)
+        assertEquals(listOf(note.memoryId), search(rowan).selected.map { it.memoryId })
+        assertTrue(search(narrator).selected.isEmpty())
+    }
+
+    @Test
+    fun retrievalCannotSelectMemoryFromDiscardedVariantOrChangedSource() = runBlocking {
+        chat()
+        database.chatDao().insertChatParticipant(
+            com.example.data.model.ChatParticipantEntity("chat-a", "rowan")
+        )
+        val first = MessageEntity(
+            messageId = "primary", chatId = "chat-a",
+            speakerType = SpeakerType.PERSONA, speakerId = "mara",
+            speakerDisplayNameSnapshot = "Mara", content = "The silver compass is safe",
+            orderIndex = 17L, variantGroupId = "variant-17", isPrimaryVariant = true
+        )
+        val alternate = first.copy(messageId = "alternate", content = "The silver compass was lost",
+            isPrimaryVariant = false)
+        database.messageDao().insertMessage(first)
+        database.messageDao().insertMessage(alternate)
+        val note = repository.saveFromMessage("chat-a", "primary")
+        repository.setCharacterKnowledge("chat-a", note.memoryId, setOf("rowan"))
+        val rowan = StoryActorRef(StoryActorKind.CHARACTER, "rowan")
+        suspend fun search() = repository.retrieveForGeneration(
+            "chat-a", rowan, "silver compass", activeActors = setOf(rowan)
+        )
+        assertEquals(1, search().selected.size)
+        database.messageDao().updateMessage(first.copy(isPrimaryVariant = false))
+        database.messageDao().updateMessage(alternate.copy(isPrimaryVariant = true))
+        assertTrue(search().selected.isEmpty())
+        database.messageDao().updateMessage(first.copy(isPrimaryVariant = true,
+            content = "The silver compass is broken", editedAt = 7L))
+        database.messageDao().updateMessage(alternate.copy(isPrimaryVariant = false))
+        assertTrue(search().selected.isEmpty())
+    }
 }
