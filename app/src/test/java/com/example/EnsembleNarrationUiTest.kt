@@ -72,7 +72,7 @@ class EnsembleNarrationUiTest {
         composeRule.onNodeWithText("Lady Ashford").assertExists()
         composeRule.onNodeWithTag("message_avatar_NARRATOR_narrator").assertDoesNotExist()
 
-        composeRule.onNodeWithContentDescription("Menu").performClick()
+        composeRule.onNodeWithContentDescription("Message menu").performClick()
         composeRule.onNodeWithText("Copy").performClick()
         composeRule.runOnIdle {
             assertTrue(copied.contains("The fire drops to a low red glow."))
