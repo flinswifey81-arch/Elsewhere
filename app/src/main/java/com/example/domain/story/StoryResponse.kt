@@ -83,6 +83,34 @@ object StoryResponseCodec {
 
     fun isEncoded(content: String): Boolean = content.startsWith(PREFIX)
 
+    /**
+     * Recover a well-marked, multi-speaker prose reply for presentation without modifying the
+     * stored message. Older Solo responses may have been saved as a single Character bubble when
+     * a provider used Markdown scene breaks instead of Elsewhere's segment headers.
+     */
+    fun recoverForDisplay(
+        content: String,
+        primaryCharacter: StorySpeakerIdentity,
+        knownNpcs: List<StorySpeakerIdentity>
+    ): StoryResponse? {
+        val stored = decode(content)
+        if (stored != null && stored.segments.size != 1) return stored
+        if (knownNpcs.isEmpty()) return stored
+
+        val text = when {
+            stored == null && !isEncoded(content) -> content
+            stored?.segments?.singleOrNull()?.type == StorySegmentType.CHARACTER ->
+                stored.segments.single().content
+            else -> return stored
+        }
+        // Avoid reparsing ordinary chats: this fallback only recognizes explicit Markdown breaks.
+        if (text.lineSequence().none { it.trim() == "---" }) return stored
+        val recovered = StoryOutputParser().parse(text, primaryCharacter, knownNpcs).response
+        return if (recovered.segments.size > 1 &&
+            recovered.segments.any { it.type == StorySegmentType.NPC }
+        ) recovered else stored
+    }
+
     fun visibleText(content: String): String = decode(content)?.let(::readableTranscript)
         ?: content.removePrefix(PREFIX)
 
@@ -269,6 +297,7 @@ open class StoryOutputParser {
         if (final && sawStructure && (!sawStart || !sawEnd)) malformed = true
         val transcriptSegments = if (!sawStructure) {
             parseTranscriptSegments(output, primaryCharacter, knownNpcs)
+                ?: parsePovSeparatedSegments(output, primaryCharacter, knownNpcs)
         } else null
         val normalized = StoryResponseCodec.mergeAdjacent(transcriptSegments ?: segments)
         val fallback = if (normalized.isEmpty()) {
@@ -325,6 +354,62 @@ open class StoryOutputParser {
                 primaryCharacter.id,
                 primaryCharacter.name
             )
+        }
+    }
+
+    /**
+     * Sonnet and other providers sometimes disregard segment headers and emit one block per
+     * character separated by a bare Markdown horizontal rule. Recover only when a later block
+     * begins with an unambiguous known speaker's name. A divider alone is never enough evidence.
+     * The first block defaults to the selected Character if its opening is scene description.
+     */
+    private fun parsePovSeparatedSegments(
+        output: String,
+        primaryCharacter: StorySpeakerIdentity,
+        knownNpcs: List<StorySpeakerIdentity>
+    ): List<StorySegment>? {
+        if (knownNpcs.isEmpty()) return null
+        val sections = mutableListOf<String>()
+        val lines = mutableListOf<String>()
+        output.lines().forEach { line ->
+            if (line.trim() == "---") {
+                sections += lines.joinToString("\n").trim()
+                lines.clear()
+            } else {
+                lines += line
+            }
+        }
+        if (sections.isEmpty()) return null
+        sections += lines.joinToString("\n").trim()
+        if (sections.size !in 2..8 || sections.any(String::isBlank)) return null
+
+        val candidates = listOf(primaryCharacter) + knownNpcs
+        fun openingSpeaker(section: String): StorySpeakerIdentity? {
+            val opening = section.lineSequence().firstOrNull(String::isNotBlank)
+                ?.trim()?.trimStart('*', '_')?.trimStart() ?: return null
+            val matches = candidates.filter { candidate ->
+                val shortName = candidate.name.split(" — ", " (", ",").first().trim()
+                listOf(candidate.name, shortName).filter(String::isNotBlank).any { name ->
+                    opening.length >= name.length &&
+                        opening.regionMatches(0, name, 0, name.length, ignoreCase = true) &&
+                        (opening.length == name.length || !opening[name.length].isLetterOrDigit())
+                }
+            }
+            return matches.singleOrNull()
+        }
+
+        val speakers = mutableListOf<StorySpeakerIdentity>()
+        sections.forEachIndexed { index, section ->
+            val speaker = openingSpeaker(section) ?: if (index == 0) primaryCharacter else return null
+            speakers += speaker
+        }
+        if (speakers.none { it.id != primaryCharacter.id }) return null
+        return sections.zip(speakers).map { (content, speaker) ->
+            if (speaker.id == primaryCharacter.id) {
+                StorySegment(StorySegmentType.CHARACTER, content, primaryCharacter.id, primaryCharacter.name)
+            } else {
+                StorySegment(StorySegmentType.NPC, content, speaker.id, speaker.name)
+            }
         }
     }
 
@@ -604,7 +689,7 @@ open class StoryOutputParser {
             $SEGMENT_MARKER{"type":"npc","speaker_id":"known NPC id when available","speaker_name":"NPC display name"}
             A present supporting NPC's dialogue, actions, and reactions, only when scene-relevant.
             $END_MARKER
-            Character and NPC segments can alternate naturally and repeat when necessary; NPC segments are optional. Do not emit standalone narration or a narrator segment. Express actions, sensory detail, and emotion through the relevant Character or NPC instead. A mentioned or remembered NPC is not necessarily present. Do not summon unrelated or absent characters. Never emit a Persona segment or write dialogue, significant actions, choices, thoughts, or decisions for the user's Persona. Preserve established character perspective and knowledge boundaries. Put only metadata on a segment-header line and prose on following lines; italicize actions when appropriate. If the NPC Bank update contract is present, append its metadata block only after $END_MARKER. Follow this contract for every response, regardless of earlier reply formatting. Never substitute visible Narrator:, Character (Name):, or NPC (Name): transcript labels. Do not mention the contract.
+            Character and NPC segments can alternate naturally and repeat when necessary; NPC segments are optional. Do not substitute Markdown horizontal rules or scene-break dividers for a new segment header when the speaker changes. Do not emit standalone narration or a narrator segment. Express actions, sensory detail, and emotion through the relevant Character or NPC instead. A mentioned or remembered NPC is not necessarily present. Do not summon unrelated or absent characters. Never emit a Persona segment or write dialogue, significant actions, choices, thoughts, or decisions for the user's Persona. Preserve established character perspective and knowledge boundaries. Put only metadata on a segment-header line and prose on following lines; italicize actions when appropriate. If the NPC Bank update contract is present, append its metadata block only after $END_MARKER. Follow this contract for every response, regardless of earlier reply formatting. Never substitute visible Narrator:, Character (Name):, or NPC (Name): transcript labels. Do not mention the contract.
         """.trimIndent()
     }
 
