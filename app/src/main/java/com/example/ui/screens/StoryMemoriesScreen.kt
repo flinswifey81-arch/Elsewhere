@@ -13,6 +13,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import com.example.data.model.StoryMemoryEntity
+import com.example.data.model.CharacterEntity
 import com.example.domain.memory.StoryMemoryClaim
 import com.example.domain.memory.StoryMemoryLifecycle
 import com.example.domain.repository.ChatRepository
@@ -43,13 +44,23 @@ fun StoryMemoriesScreen(
     var editing by remember { mutableStateOf<StoryMemoryEntity?>(null) }
     var removing by remember { mutableStateOf<StoryMemoryEntity?>(null) }
     var restoring by remember { mutableStateOf<StoryMemoryEntity?>(null) }
+    var grantingKnowledge by remember { mutableStateOf<StoryMemoryEntity?>(null) }
+    var selectedKnowers by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var characters by remember(chatId) { mutableStateOf<List<CharacterEntity>>(emptyList()) }
+    var knowers by remember(chatId) { mutableStateOf<Map<String, Set<String>>>(emptyMap()) }
 
     LaunchedEffect(chatId) {
-        boundary = chatRepository.getChatSummaryById(chatId)?.chat?.contextResetOrderIndex
+        val summary = chatRepository.getChatSummaryById(chatId)
+        boundary = summary?.chat?.contextResetOrderIndex
+        characters = summary?.characters.orEmpty()
     }
     LaunchedEffect(chatId, repository) {
         try {
-            repository.observe(chatId).collect { memories = it; loading = false }
+            repository.observe(chatId).collect { current ->
+                memories = current
+                knowers = current.associate { it.memoryId to repository.getCharacterKnowers(chatId, it.memoryId) }
+                loading = false
+            }
         } catch (failure: Exception) {
             error = failure.message ?: "Unable to load saved story memories."
             loading = false
@@ -76,7 +87,7 @@ fun StoryMemoriesScreen(
         title = { Text(if (editing == null) "Save Story Memory" else "Edit Story Memory") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("Only this chat stores this record. Saved story memories are not yet automatically sent to a model.",
+                Text("Only this chat stores this record. Knowledge must be assigned explicitly before a Character may recall it. No extra model call is made here.",
                     style = MaterialTheme.typography.bodySmall)
                 OutlinedTextField(
                     draft, { draft = it.take(12_000) },
@@ -99,7 +110,7 @@ fun StoryMemoriesScreen(
                         }
                     }
                 }
-                Text("Knowledge: Storyteller only. No Character is automatically granted private information.",
+                Text("Knowledge: Storyteller only by default. Use Who knows this? after saving to grant it.",
                     style = MaterialTheme.typography.bodySmall)
             }
         },
@@ -124,6 +135,57 @@ fun StoryMemoriesScreen(
         }
     )
 
+    grantingKnowledge?.let { memory ->
+        AlertDialog(
+            onDismissRequest = { if (!working) grantingKnowledge = null },
+            title = { Text("Who knows this?") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Only explicitly selected Characters may recall this as their own knowledge. Leave everyone unchecked for storyteller-only continuity.",
+                        style = MaterialTheme.typography.bodySmall)
+                    if (characters.isEmpty()) Text("There are no Character participants in this chat.")
+                    characters.forEach { character ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(
+                                checked = character.characterId in selectedKnowers,
+                                onCheckedChange = { checked ->
+                                    selectedKnowers = if (checked) selectedKnowers + character.characterId
+                                        else selectedKnowers - character.characterId
+                                },
+                                enabled = !working && (memory.claim != "BELIEF" || selectedKnowers.isEmpty() ||
+                                    character.characterId in selectedKnowers) &&
+                                    memory.claim != "CONTRADICTION"
+                            )
+                            Text(character.displayName)
+                        }
+                    }
+                    if (memory.claim == "CONTRADICTION") Text(
+                        "Contradictions must remain storyteller-only.",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = !working &&
+                        (memory.claim != "BELIEF" || selectedKnowers.size == 1) &&
+                        (memory.claim != "CONTRADICTION" || selectedKnowers.isEmpty()),
+                    onClick = {
+                        val chosen = selectedKnowers
+                        applyChange {
+                            repository.setCharacterKnowledge(chatId, memory.memoryId, chosen)
+                            grantingKnowledge = null
+                        }
+                    }
+                ) { Text("Save knowledge") }
+            },
+            dismissButton = {
+                TextButton(onClick = { grantingKnowledge = null }, enabled = !working) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
     removing?.let { memory ->
         AlertDialog(
             onDismissRequest = { removing = null },
@@ -198,7 +260,7 @@ fun StoryMemoriesScreen(
                 item {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("Your chat-local story archive", style = MaterialTheme.typography.titleMedium)
-                        Text("Create, correct and pin memories here. Model retrieval is not active yet. This page does not change legacy 'Update Memory Now'.",
+                        Text("Create, correct, pin and assign knowledge here. Model retrieval is not active yet. This page does not change legacy 'Update Memory Now'.",
                             style = MaterialTheme.typography.bodySmall)
                         if (boundary != null) Text(
                             "This chat has a Wack boundary. Old memories require individual Restore approval.",
@@ -214,7 +276,11 @@ fun StoryMemoriesScreen(
                             Text(memory.content, style = MaterialTheme.typography.bodyLarge)
                             Text(
                                 "${memory.claim.lowercase().replace('_', ' ')} • " +
-                                    "${memory.lifecycle.lowercase()} • storyteller only • " +
+                                    "${memory.lifecycle.lowercase()} • " +
+                                    (if (memory.visibility == "CHARACTER_ONLY") {
+                                        "known to " + characters.filter { it.characterId in knowers[memory.memoryId].orEmpty() }
+                                            .joinToString(", ") { it.displayName }.ifBlank { "no Characters" }
+                                    } else "storyteller only") + " • " +
                                     (if (memory.originKind == "MESSAGE") "from selected message" else "manually saved"),
                                 style = MaterialTheme.typography.labelSmall
                             )
@@ -222,6 +288,10 @@ fun StoryMemoriesScreen(
                             if (memory.pinned) Text("Pinned for future relevance", style = MaterialTheme.typography.labelSmall)
                             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                 TextButton(enabled = !working, onClick = { editing = memory }) { Text("Edit") }
+                                TextButton(enabled = !working, onClick = {
+                                    selectedKnowers = knowers[memory.memoryId].orEmpty()
+                                    grantingKnowledge = memory
+                                }) { Text("Who knows this?") }
                                 TextButton(enabled = !working, onClick = {
                                     applyChange { repository.update(chatId, memory.memoryId, pinned = !memory.pinned) }
                                 }) { Text(if (memory.pinned) "Unpin" else "Pin") }
