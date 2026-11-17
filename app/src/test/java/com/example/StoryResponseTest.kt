@@ -281,4 +281,93 @@ class StoryResponseTest {
             reparsed.response.segments.map { it.type }
         )
     }
+
+
+    @Test
+    fun markdownPovDividerRecoversFlinsAndVarkaIntoIndependentSegments() {
+        val flins = StorySpeakerIdentity("character-flins", "Flins — Mondstadt District Attorney (Solo Ensemble)")
+        val varka = StorySpeakerIdentity("npc-varka", "Varka — Mondstadt Police Commissioner")
+        val response = """
+            *The door swept open on a tide of laughter and conversation, and Flins glanced toward the sound with polite curiosity—then went utterly still.*
+
+            *Flins set his teacup down with what he hoped was ordinary precision.*
+
+            "Darling," *he said quietly,* "I believe we should—"
+
+            ---
+
+            *Varka had been mid-sentence when the door opened. The scent hit him like a gale off the northern peaks, and every word he'd been about to say evaporated.*
+
+            *Varka was already halfway out of his seat, cedar and spiced cider rising around him.*
+
+            "Flins," *he breathed,* "do you—"
+        """.trimIndent()
+
+        val parsed = parser.parse(response, flins, listOf(varka))
+        assertFalse(parsed.usedStructuredFormat)
+        assertEquals(
+            listOf(StorySegmentType.CHARACTER, StorySegmentType.NPC),
+            parsed.response.segments.map { it.type }
+        )
+        assertEquals(flins.id, parsed.response.segments[0].speakerId)
+        assertEquals(varka.id, parsed.response.segments[1].speakerId)
+        assertTrue(parsed.response.segments[0].content.contains("Flins set his teacup down"))
+        assertTrue(parsed.response.segments[1].content.contains("Varka had been mid-sentence"))
+        assertFalse(parsed.response.segments.any { it.content.lines().any { line -> line.trim() == "---" } })
+
+        // New persisted responses are attributed, and already-saved plain prose can be
+        // displayed correctly without another provider request or a database write.
+        val repairedPlain = requireNotNull(
+            StoryResponseCodec.recoverForDisplay(response, flins, listOf(varka))
+        )
+        assertEquals(parsed.response.segments, repairedPlain.segments)
+
+        val oldSingleBubble = StoryResponseCodec.encode(
+            com.example.domain.story.StoryResponse(
+                segments = listOf(
+                    com.example.domain.story.StorySegment(
+                        StorySegmentType.CHARACTER, response, flins.id, flins.name
+                    )
+                )
+            )
+        )
+        val repairedStored = requireNotNull(
+            StoryResponseCodec.recoverForDisplay(oldSingleBubble, flins, listOf(varka))
+        )
+        assertEquals(parsed.response.segments, repairedStored.segments)
+        assertEquals(2, parser.parse(
+            StoryResponseCodec.promptStructuredHistory(oldSingleBubble, flins, listOf(varka)),
+            flins, listOf(varka)
+        ).response.segments.size)
+    }
+
+    @Test
+    fun plainSceneBreakDoesNotInventNpcSpeaker() {
+        val flins = StorySpeakerIdentity("character-flins", "Flins")
+        val varka = StorySpeakerIdentity("npc-varka", "Varka")
+        val ordinary = """
+            *Flins considered the case in silence.*
+
+            ---
+
+            *The bar had gone quiet. A photograph of Varka stood beside the register.*
+        """.trimIndent()
+        assertEquals(ordinary, parser.parse(ordinary, flins, listOf(varka))
+            .response.segments.single().content)
+        assertEquals(null, StoryResponseCodec.recoverForDisplay(ordinary, flins, listOf(varka)))
+
+        // A stranger or a name mentioned later in a paragraph is not grounds to attribute
+        // their POV, and missing NPC dossiers are never guessed from scene prose.
+        val unknown = """
+            *Flins waited.*
+
+            ---
+
+            *Mysterious Stranger walked in.*
+        """.trimIndent()
+        assertEquals(1, parser.parse(unknown, flins, listOf(varka)).response.segments.size)
+        assertEquals(1, parser.parse(
+            "*Flins waited.*\n\n---\n\n*Varka entered.*", flins
+        ).response.segments.size)
+    }
 }
