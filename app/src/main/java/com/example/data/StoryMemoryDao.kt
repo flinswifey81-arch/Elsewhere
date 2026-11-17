@@ -40,6 +40,9 @@ interface StoryMemoryDao {
     @Query("SELECT * FROM story_memory_returns WHERE memoryId = :memoryId")
     suspend fun returns(memoryId: String): List<StoryMemoryReturnEntity>
 
+    @Query("SELECT * FROM story_memory_returns WHERE chatId = :chatId")
+    suspend fun returnsForChat(chatId: String): List<StoryMemoryReturnEntity>
+
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insert(memory: StoryMemoryEntity)
 

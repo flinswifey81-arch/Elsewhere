@@ -211,6 +211,41 @@ class StoryMemoryRepository(
             }
         }
 
+    /** One local Room snapshot, one recipient, and no paid provider calls. */
+    suspend fun retrieveForGeneration(
+        chatId: String,
+        recipient: StoryActorRef,
+        sceneText: String,
+        activeActors: Set<StoryActorRef> = emptySet(),
+        maxMemories: Int = 8,
+        maxSelectedTextCharacters: Int = 4_000
+    ): StoryMemorySearchResult = database.withTransaction {
+        val chat = requireNotNull(database.chatDao().getChatById(chatId)) {
+            "Chat no longer exists."
+        }
+        val archived = database.messageDao().getMessagesForChatOnce(chatId)
+        val returns = dao.returnsForChat(chatId).map(::toExplicitReturn).toSet()
+        // Corrupt or unknown historical values fail closed; do not project
+        // an unrecognizable audience or source into a provider prompt.
+        val candidates = dao.forChat(chatId).mapNotNull { memory ->
+            try { recordFor(memory) } catch (_: IllegalArgumentException) { null }
+        }
+        StoryMemoryLocalRetriever.search(
+            candidates = candidates,
+            request = StoryMemorySearchRequest(
+                readContext = StoryMemoryReadContext(
+                    chatId = chatId, branchId = null,
+                    wackBoundaryOrderIndex = chat.contextResetOrderIndex,
+                    recipient = recipient, archivedMessages = archived,
+                    explicitReturns = returns
+                ),
+                sceneText = sceneText, activeActors = activeActors,
+                maxMemories = maxMemories,
+                maxSelectedTextCharacters = maxSelectedTextCharacters
+            )
+        )
+    }
+
     suspend fun eligibility(
         memory: StoryMemoryEntity,
         chatId: String,
@@ -218,8 +253,23 @@ class StoryMemoryRepository(
         recipient: StoryActorRef
     ): StoryMemoryDecision {
         if (memory.chatId != chatId) return StoryMemoryDecision(StoryMemoryExclusion.OTHER_STORY_OR_SCOPE)
+        val record = recordFor(memory)
+        return StoryMemoryEligibilityPolicy.evaluate(record, StoryMemoryReadContext(
+            chatId = chatId, branchId = null, wackBoundaryOrderIndex = boundary,
+            recipient = recipient,
+            archivedMessages = database.messageDao().getMessagesForChatOnce(chatId),
+            explicitReturns = dao.returns(memory.memoryId).map(::toExplicitReturn).toSet()
+        ))
+    }
+
+    private fun toExplicitReturn(row: StoryMemoryReturnEntity): ExplicitMemoryReturn =
+        ExplicitMemoryReturn(
+            row.memoryId, row.chatId, row.resetBoundaryOrderIndex,
+            row.approvedAtOrderIndex, row.branchId, row.initiatedByUser
+        )
+
+    private suspend fun recordFor(memory: StoryMemoryEntity): StoryMemoryRecord {
         val actors = dao.actors(memory.memoryId)
-        val returns = dao.returns(memory.memoryId)
         fun actor(kind: String, id: String): StoryActorRef? = runCatching {
             StoryActorRef(StoryActorKind.valueOf(kind), id)
         }.getOrNull()
@@ -227,9 +277,10 @@ class StoryMemoryRepository(
             .mapNotNull { actor(it.actorKind, it.actorId) }.toSet()
         val mentioned = actors.filter { it.relation == "MENTIONED" }
             .mapNotNull { actor(it.actorKind, it.actorId) }.toSet()
-        val converted = StoryMemoryRecord(
+        return StoryMemoryRecord(
             memoryId = memory.memoryId,
-            content = memory.content, createdAtEpochMillis = memory.createdAtEpochMillis,
+            content = memory.content,
+            createdAtEpochMillis = memory.createdAtEpochMillis,
             updatedAtEpochMillis = memory.updatedAtEpochMillis,
             ownerId = memory.ownerId, sourceChatId = memory.chatId,
             scope = StoryMemoryOwnerScope.valueOf(memory.scope), branchId = memory.branchId,
@@ -243,7 +294,10 @@ class StoryMemoryRepository(
                     sourceCreatedAtEpochMillis = requireNotNull(memory.sourceCreatedAtEpochMillis),
                     sourceSha256 = memory.sourceSha256
                 )
-            } else StoryMemoryOrigin.Manual(memory.sourceOrderIndex),
+            } else {
+                require(memory.originKind == "MANUAL") { "Unsupported memory provenance" }
+                StoryMemoryOrigin.Manual(memory.sourceOrderIndex)
+            },
             claim = StoryMemoryClaim.valueOf(memory.claim),
             visibility = StoryMemoryVisibility.valueOf(memory.visibility),
             knownBy = knownBy,
@@ -255,15 +309,5 @@ class StoryMemoryRepository(
             hidden = memory.hidden, pinned = memory.pinned,
             userEditedAt = memory.userEditedAt
         )
-        val localReturns = returns.map {
-            ExplicitMemoryReturn(it.memoryId, it.chatId, it.resetBoundaryOrderIndex,
-                it.approvedAtOrderIndex, it.branchId, it.initiatedByUser)
-        }.toSet()
-        return StoryMemoryEligibilityPolicy.evaluate(converted, StoryMemoryReadContext(
-            chatId = chatId, branchId = null, wackBoundaryOrderIndex = boundary,
-            recipient = recipient,
-            archivedMessages = database.messageDao().getMessagesForChatOnce(chatId),
-            explicitReturns = localReturns
-        ))
     }
 }
