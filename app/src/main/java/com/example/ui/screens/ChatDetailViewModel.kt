@@ -17,6 +17,9 @@ import com.example.domain.compiler.ContextCompilerV1
 import com.example.domain.generation.GenerationLifecycleReporter
 import com.example.domain.memory.AutomaticMemoryManager
 import com.example.domain.memory.ContextResetPolicy
+import com.example.domain.memory.LegacyMemoryEligibilityFilter
+import com.example.domain.memory.StoryActorKind
+import com.example.domain.memory.StoryActorRef
 import com.example.domain.coop.CoopGenerationCommand
 import com.example.domain.coop.CoopGenerationRequestPayload
 import com.example.domain.coop.CoopGenerationAuthorization
@@ -1187,9 +1190,13 @@ class ChatDetailViewModel(
         val messages = com.example.domain.compiler.ScenarioContextCompiler().compile(
             com.example.data.model.ScenarioCodec.decode(session.definitionJson), persona, settings, history, current,
             summary = summary,
-            memories = memoryRepository.getMemoriesOnce(chatId, "narrator:$chatId").filter { memory ->
-                memory.sourceMessageId == null || (history + current).any { it.messageId == memory.sourceMessageId }
-            },
+            memories = LegacyMemoryEligibilityFilter.eligible(
+                memories = memoryRepository.getMemoriesOnce(chatId, "narrator:$chatId"),
+                chatId = chatId,
+                recipient = StoryActorRef(StoryActorKind.NARRATOR, "narrator:$chatId"),
+                boundary = chatSummary?.chat?.contextResetOrderIndex,
+                archivedMessages = messageRepository.getMessagesForChatOnce(chatId)
+            ),
             lore = lorebookRepository?.resolveActiveLore(chatId, history, current, AutomaticMemoryManager.DEFAULT_RECENT_MESSAGE_LIMIT).orEmpty(),
             continuation = continuation,
             worldContext = scenarioRepository?.worldContextForChat(chatId)
@@ -1240,7 +1247,13 @@ class ChatDetailViewModel(
             }
             return null
         }
-        val durableMemories = memoryRepository.getMemoriesOnce(chatId, fullCharacter.characterId)
+        val durableMemories = LegacyMemoryEligibilityFilter.eligible(
+            memories = memoryRepository.getMemoriesOnce(chatId, fullCharacter.characterId),
+            chatId = chatId,
+            recipient = StoryActorRef(StoryActorKind.CHARACTER, fullCharacter.characterId),
+            boundary = summary.chat.contextResetOrderIndex,
+            archivedMessages = messageRepository.getMessagesForChatOnce(chatId)
+        )
         val rollingSummary = ContextResetPolicy.eligibleSummary(
             memoryRepository.getSummaryOnce(chatId),
             summary.chat.contextResetOrderIndex

@@ -15,6 +15,9 @@ import com.example.data.model.ChatType
 import com.example.domain.compiler.ContextCompilerV1
 import com.example.domain.repository.NpcRepository
 import com.example.domain.memory.ContextResetPolicy
+import com.example.domain.memory.LegacyMemoryEligibilityFilter
+import com.example.domain.memory.StoryActorKind
+import com.example.domain.memory.StoryActorRef
 import com.example.domain.provider.RoleplayMessage
 import com.example.ui.components.elsewhereCardBorder
 import com.example.ui.components.elsewhereDestructiveButtonColors
@@ -55,7 +58,8 @@ fun ContextInspectorScreen(
             val character = selectedCharacter?.let { appContainer.characterRepository.getCharacterById(it.characterId) }
             val persona = summary?.personas?.firstOrNull()?.let { appContainer.personaRepository.getPersonaById(it.personaId) }
             val npcBankEnabled = appContainer.npcRepository?.getSettings(chatId)?.isEnabled == true
-            val allPrimaryHistory = appContainer.messageRepository.getMessagesForChatOnce(chatId)
+            val archivedHistory = appContainer.messageRepository.getMessagesForChatOnce(chatId)
+            val allPrimaryHistory = archivedHistory
                 .map { message ->
                     if (message.speakerType == com.example.data.model.SpeakerType.CHARACTER) {
                         message.copy(
@@ -68,7 +72,13 @@ fun ContextInspectorScreen(
             val resetBoundary = summary?.chat?.contextResetOrderIndex
             val history = ContextResetPolicy.eligiblePrimaryMessages(allPrimaryHistory, resetBoundary)
             val memories = character?.let {
-                appContainer.memoryRepository.getMemoriesOnce(chatId, it.characterId)
+                LegacyMemoryEligibilityFilter.eligible(
+                    memories = appContainer.memoryRepository.getMemoriesOnce(chatId, it.characterId),
+                    chatId = chatId,
+                    recipient = StoryActorRef(StoryActorKind.CHARACTER, it.characterId),
+                    boundary = resetBoundary,
+                    archivedMessages = archivedHistory
+                )
             }.orEmpty()
             val rollingSummary = ContextResetPolicy.eligibleSummary(
                 appContainer.memoryRepository.getSummaryOnce(chatId),
@@ -92,7 +102,13 @@ fun ContextInspectorScreen(
                 if (session != null) {
                     inspectedCharacterName = "Scenario Narrator"
                     val current = history.last()
-                    val scenarioMemories = appContainer.memoryRepository.getMemoriesOnce(chatId, "narrator:$chatId")
+                    val scenarioMemories = LegacyMemoryEligibilityFilter.eligible(
+                        memories = appContainer.memoryRepository.getMemoriesOnce(chatId, "narrator:$chatId"),
+                        chatId = chatId,
+                        recipient = StoryActorRef(StoryActorKind.NARRATOR, "narrator:$chatId"),
+                        boundary = resetBoundary,
+                        archivedMessages = archivedHistory
+                    )
                     durableMemories = scenarioMemories
                     durableMemoryCount = scenarioMemories.size
                     compiledMessages = com.example.domain.compiler.ScenarioContextCompiler().compile(
