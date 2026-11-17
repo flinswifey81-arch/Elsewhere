@@ -20,6 +20,7 @@ import com.example.domain.memory.ContextResetPolicy
 import com.example.domain.memory.LegacyMemoryEligibilityFilter
 import com.example.domain.memory.StoryActorKind
 import com.example.domain.memory.StoryActorRef
+import com.example.domain.repository.StoryMemoryRepository
 import com.example.domain.coop.CoopGenerationCommand
 import com.example.domain.coop.CoopGenerationRequestPayload
 import com.example.domain.coop.CoopGenerationAuthorization
@@ -166,7 +167,8 @@ class ChatDetailViewModel(
     private val dataCoordinator: AppDataMaintenanceCoordinator = AppDataMaintenanceCoordinator.Global,
     private val scenarioRepository: com.example.domain.repository.ScenarioRepository? = null,
     private val storyOutputParserFactory: () -> StoryOutputParser = ::StoryOutputParser,
-    private val generationLifecycle: GenerationLifecycleReporter? = null
+    private val generationLifecycle: GenerationLifecycleReporter? = null,
+    private val storyMemoryRepository: StoryMemoryRepository? = null
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow<ChatUiState>(ChatUiState.Loading)
@@ -1164,6 +1166,9 @@ class ChatDetailViewModel(
         }
     }
 
+    private fun searchScene(history: List<MessageEntity>, current: MessageEntity): String =
+        (history.takeLast(6) + current).joinToString(" ") { it.content }.takeLast(4_000)
+
     private suspend fun prepareScenario(current: MessageEntity, history: List<MessageEntity>, continuation: Boolean): PreparedGeneration? {
         val settings = chatRepository.getEffectiveChatSettings(chatId) ?: currentChatSettings ?: return null
         val session = scenarioRepository?.session(chatId)
@@ -1187,6 +1192,11 @@ class ChatDetailViewModel(
         }
         val summary = ContextResetPolicy.eligibleSummary(memoryRepository.getSummaryOnce(chatId), chatSummary?.chat?.contextResetOrderIndex)
             ?.takeIf { it.summarizedThroughOrderIndex < current.orderIndex }?.summary
+        val selectedStoryMemories = storyMemoryRepository?.retrieveForGeneration(
+            chatId = chatId,
+            recipient = StoryActorRef(StoryActorKind.NARRATOR, "narrator:$chatId"),
+            sceneText = searchScene(history, current)
+        )?.selected.orEmpty()
         val messages = com.example.domain.compiler.ScenarioContextCompiler().compile(
             com.example.data.model.ScenarioCodec.decode(session.definitionJson), persona, settings, history, current,
             summary = summary,
@@ -1199,7 +1209,8 @@ class ChatDetailViewModel(
             ),
             lore = lorebookRepository?.resolveActiveLore(chatId, history, current, AutomaticMemoryManager.DEFAULT_RECENT_MESSAGE_LIMIT).orEmpty(),
             continuation = continuation,
-            worldContext = scenarioRepository?.worldContextForChat(chatId)
+            worldContext = scenarioRepository?.worldContextForChat(chatId),
+            storyMemories = selectedStoryMemories
         ).map { if (it.sourceMessageId == source?.messageId && images.isNotEmpty()) it.copy(images = images) else it }
         return PreparedGeneration(ResponseSpeaker("narrator:$chatId", "Narrator", SpeakerType.NARRATOR), messages,
             GenerationOptions(modelId = modelId, routing = ModelRouting.fromSettings(settings.providerRoutingMode, settings.providerEndpoint),
@@ -1266,6 +1277,19 @@ class ChatDetailViewModel(
             recentMessageLimit = AutomaticMemoryManager.DEFAULT_RECENT_MESSAGE_LIMIT
         ).orEmpty()
         val activeCoopRoom = coopSessionManager?.state?.value?.room?.takeIf { it.chatId == chatId }
+        // Co-op remains on its previous shared-context contract until both
+        // devices agree on memory source and recipient eligibility.
+        val selectedStoryMemories = if (activeCoopRoom == null) {
+            storyMemoryRepository?.retrieveForGeneration(
+                chatId = chatId,
+                recipient = StoryActorRef(StoryActorKind.CHARACTER, fullCharacter.characterId),
+                sceneText = searchScene(history, currentMessage),
+                activeActors = setOf(
+                    StoryActorRef(StoryActorKind.CHARACTER, fullCharacter.characterId),
+                    StoryActorRef(StoryActorKind.PERSONA, fullPersona.personaId)
+                )
+            )?.selected.orEmpty()
+        } else emptyList()
         val npcBankEnabled = activeCoopRoom == null && npcRepository?.getSettings(chatId)?.isEnabled == true
         val projectedNpcDossiers = if (npcBankEnabled) {
             npcRepository?.getProjectedDossiers(chatId).orEmpty()
@@ -1337,6 +1361,7 @@ class ChatDetailViewModel(
                 customTargetMax = settings.customTargetMax,
                 customHardMax = settings.customHardMax,
                 durableMemories = durableMemories,
+                storyMemories = selectedStoryMemories,
                 rollingSummary = rollingSummary,
                 activeLore = activeLore,
                 worldContext = activeWorldContext,
@@ -1357,6 +1382,7 @@ class ChatDetailViewModel(
                 customTargetMax = settings.customTargetMax,
                 customHardMax = settings.customHardMax,
                 durableMemories = durableMemories,
+                storyMemories = selectedStoryMemories,
                 rollingSummary = rollingSummary,
                 activeLore = activeLore,
                 worldContext = activeWorldContext,
@@ -2344,7 +2370,8 @@ class ChatDetailViewModel(
         private val npcRepository: NpcRepository? = null,
         private val npcOutputParser: NpcStructuredOutputParser? = null,
         private val scenarioRepository: com.example.domain.repository.ScenarioRepository? = null,
-        private val generationLifecycle: GenerationLifecycleReporter? = null
+        private val generationLifecycle: GenerationLifecycleReporter? = null,
+        private val storyMemoryRepository: StoryMemoryRepository? = null
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
@@ -2356,7 +2383,8 @@ class ChatDetailViewModel(
                 npcRepository,
                 npcOutputParser,
                 scenarioRepository = scenarioRepository,
-                generationLifecycle = generationLifecycle
+                generationLifecycle = generationLifecycle,
+                storyMemoryRepository = storyMemoryRepository
             ) as T
         }
     }
