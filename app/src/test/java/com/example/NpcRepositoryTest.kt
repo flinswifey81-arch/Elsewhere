@@ -638,4 +638,50 @@ class NpcRepositoryTest {
         createdAt = 1,
         updatedAt = 1
     )
+
+    @Test
+    fun wackExcludesEarlierNpcUpdatesFromGenerationButKeepsSavedBankIntact() = runBlocking {
+        repository.saveManual(dossier().copy(
+            role = "User-authored guide", goals = "User-approved background",
+            sceneMode = "HERE"
+        ))
+        val before = MessageEntity(
+            messageId = "before-wack", chatId = "chat",
+            speakerType = SpeakerType.CHARACTER, speakerId = "character",
+            speakerDisplayNameSnapshot = "Character", content = "Past story",
+            orderIndex = 17L
+        )
+        database.messageDao().insertMessage(before)
+        repository.applyStructuredUpdates(
+            chatId = "chat", sourceMessageId = before.messageId,
+            variantGroupId = before.variantGroupId, sourceRevision = 0, isApplied = true,
+            updates = listOf(NpcStructuredUpdate(
+                "npc", null, null, null, null, null, null, "OLD_WACK_SECRET_GOAL", null
+            ))
+        )
+        assertTrue(repository.getProjectedDossiers("chat").single().goals.contains("OLD_WACK_SECRET_GOAL"))
+        val afterBoundary = repository.getProjectedDossiers("chat", afterOrderIndex = 100L).single()
+        assertEquals("User-approved background", afterBoundary.goals)
+        assertTrue(afterBoundary.role.contains("User-authored guide"))
+        val visible = repository.relevantContext("chat", emptyList(),
+            afterOrderIndex = 100L).orEmpty()
+        assertTrue(visible.contains("User-approved background"))
+        assertFalse(visible.contains("OLD_WACK_SECRET_GOAL"))
+        // Wack never deletes or rewrites the original bank and historical records.
+        assertTrue(repository.getProjectedDossiers("chat").single().goals.contains("OLD_WACK_SECRET_GOAL"))
+        val after = before.copy(
+            messageId = "after-wack", orderIndex = 110L, variantGroupId = "after-wack",
+            content = "Present story"
+        )
+        database.messageDao().insertMessage(after)
+        repository.applyStructuredUpdates(
+            chatId = "chat", sourceMessageId = after.messageId,
+            variantGroupId = after.variantGroupId, sourceRevision = 0, isApplied = true,
+            updates = listOf(NpcStructuredUpdate(
+                "npc", null, null, null, null, null, null, "NEW_POST_WACK_GOAL", null
+            ))
+        )
+        assertEquals("NEW_POST_WACK_GOAL",
+            repository.getProjectedDossiers("chat", afterOrderIndex = 100L).single().goals)
+    }
 }

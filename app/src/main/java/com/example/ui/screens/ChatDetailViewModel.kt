@@ -1306,7 +1306,9 @@ class ChatDetailViewModel(
         } else emptyList()
         val npcBankEnabled = activeCoopRoom == null && npcRepository?.getSettings(chatId)?.isEnabled == true
         val projectedNpcDossiers = if (npcBankEnabled) {
-            npcRepository?.getProjectedDossiers(chatId).orEmpty()
+            npcRepository?.getProjectedDossiers(
+                chatId, afterOrderIndex = summary.chat.contextResetOrderIndex
+            ).orEmpty()
         } else emptyList()
         val sceneCast = NpcSceneCastResolver.resolve(projectedNpcDossiers, history + currentMessage)
         val presentNpcs = sceneCast.filter { it.presence == NpcScenePresence.PRESENT }.map { it.dossier }
@@ -1343,6 +1345,7 @@ class ChatDetailViewModel(
                 activePersonaId = fullPersona.personaId,
                 isGroup = summary.chat.chatType == ChatType.GROUP,
                 asOfOrderIndex = (history + currentMessage).maxOfOrNull { it.orderIndex },
+                afterOrderIndex = summary.chat.contextResetOrderIndex,
                 limit = if (ensembleNarrationEnabled) {
                     NpcRepository.SOLO_ENSEMBLE_NPC_CONTEXT_LIMIT
                 } else {

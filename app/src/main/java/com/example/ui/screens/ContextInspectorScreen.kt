@@ -144,7 +144,9 @@ fun ContextInspectorScreen(
                 val currentMessage = history.last()
                 val priorHistory = history.dropLast(1)
                 val projectedNpcDossiers = if (npcBankEnabled) {
-                    appContainer.npcRepository?.getProjectedDossiers(chatId).orEmpty()
+                    appContainer.npcRepository?.getProjectedDossiers(
+                        chatId, afterOrderIndex = resetBoundary
+                    ).orEmpty()
                 } else emptyList()
                 val knownNpcSpeakers = projectedNpcDossiers.map { dossier ->
                     com.example.domain.story.StorySpeakerIdentity(dossier.npcId, dossier.displayName)
@@ -163,6 +165,7 @@ fun ContextInspectorScreen(
                         activePersonaId = persona.personaId,
                         isGroup = summary.chat.chatType == ChatType.GROUP,
                         asOfOrderIndex = history.maxOfOrNull { it.orderIndex },
+                        afterOrderIndex = resetBoundary,
                         limit = if (ensembleNarrationEnabled) {
                             NpcRepository.SOLO_ENSEMBLE_NPC_CONTEXT_LIMIT
                         } else {

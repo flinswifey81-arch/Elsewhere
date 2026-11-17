@@ -165,8 +165,14 @@ class NpcRepository(
         }
     }
 
-    suspend fun getProjectedDossiers(chatId: String): List<NpcDossier> = withContext(Dispatchers.IO) {
-        project(dao.getDossiers(chatId), dao.getUpdates(chatId))
+    /** Keep the editable Bank intact; only generation-side projections honor Wack. */
+    suspend fun getProjectedDossiers(
+        chatId: String, afterOrderIndex: Long? = null
+    ): List<NpcDossier> = withContext(Dispatchers.IO) {
+        val updates = dao.getUpdates(chatId).filter {
+            afterOrderIndex == null || it.sourceOrderIndex > afterOrderIndex
+        }
+        project(dao.getDossiers(chatId), updates)
     }
 
     suspend fun saveManual(dossier: NpcDossier) = dataCoordinator.withMutation {
@@ -559,12 +565,16 @@ class NpcRepository(
         activePersonaId: String? = null,
         isGroup: Boolean = false,
         asOfOrderIndex: Long? = null,
-        limit: Int = DEFAULT_NPC_CONTEXT_LIMIT
+        limit: Int = DEFAULT_NPC_CONTEXT_LIMIT,
+        afterOrderIndex: Long? = null
     ): String? =
         withContext(Dispatchers.IO) {
             val bases = dao.getDossiers(chatId)
             val updates = dao.getUpdates(chatId).let { all ->
-                if (asOfOrderIndex == null) all else all.filter { it.sourceOrderIndex <= asOfOrderIndex }
+                all.filter { event ->
+                    (asOfOrderIndex == null || event.sourceOrderIndex <= asOfOrderIndex) &&
+                        (afterOrderIndex == null || event.sourceOrderIndex > afterOrderIndex)
+                }
             }
             val dossiers = project(bases, updates)
             if (dossiers.isEmpty()) return@withContext null

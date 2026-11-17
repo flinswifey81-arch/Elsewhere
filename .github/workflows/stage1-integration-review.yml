@@ -42,6 +42,7 @@ jobs:
             --tests com.example.AppDatabaseMigrationTest \
             --tests com.example.domain.backup.BackupRepositoryTest \
             --tests com.example.WorldEpisodeContextCompilerTest \
+            --tests com.example.NpcRepositoryTest \
             --tests com.example.domain.ContextResetPolicyTest \
             --tests com.example.domain.AutomaticMemoryManagerTest \
             --tests com.example.domain.ContextBudgetProbeTest \
