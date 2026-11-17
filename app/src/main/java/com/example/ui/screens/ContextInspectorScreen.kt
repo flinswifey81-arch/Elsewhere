@@ -40,6 +40,7 @@ fun ContextInspectorScreen(
     var modelId by remember { mutableStateOf("") }
     var routingMode by remember { mutableStateOf("") }
     var durableMemoryCount by remember { mutableStateOf(0) }
+    var selectedStoryMemoryCount by remember { mutableStateOf(0) }
     var durableMemories by remember { mutableStateOf<List<com.example.data.model.RoleplayMemoryEntity>>(emptyList()) }
     var hasRollingSummary by remember { mutableStateOf(false) }
     var inspectedCharacterName by remember { mutableStateOf<String?>(null) }
@@ -71,6 +72,8 @@ fun ContextInspectorScreen(
                 .filter { it.isPrimaryVariant }
             val resetBoundary = summary?.chat?.contextResetOrderIndex
             val history = ContextResetPolicy.eligiblePrimaryMessages(allPrimaryHistory, resetBoundary)
+            val acceptedWorldContext = appContainer.scenarioRepository?.worldContextForChat(chatId)
+            selectedStoryMemoryCount = 0
             val memories = character?.let {
                 LegacyMemoryEligibilityFilter.eligible(
                     memories = appContainer.memoryRepository.getMemoriesOnce(chatId, it.characterId),
@@ -111,10 +114,18 @@ fun ContextInspectorScreen(
                     )
                     durableMemories = scenarioMemories
                     durableMemoryCount = scenarioMemories.size
+                    val selectedStoryMemories = appContainer.storyMemoryRepository?.retrieveForGeneration(
+                        chatId = chatId,
+                        recipient = StoryActorRef(StoryActorKind.NARRATOR, "narrator:$chatId"),
+                        sceneText = history.takeLast(7).joinToString(" ") { it.content }.takeLast(4_000)
+                    )?.selected.orEmpty()
+                    selectedStoryMemoryCount = selectedStoryMemories.size
                     compiledMessages = com.example.domain.compiler.ScenarioContextCompiler().compile(
                         com.example.data.model.ScenarioCodec.decode(session.definitionJson), persona, settings,
                         history.dropLast(1), current, summary = rollingSummary, memories = scenarioMemories,
-                        lore = appContainer.lorebookRepository?.resolveActiveLore(chatId, history.dropLast(1), current, 24).orEmpty()
+                        lore = appContainer.lorebookRepository?.resolveActiveLore(chatId, history.dropLast(1), current, 24).orEmpty(),
+                        worldContext = acceptedWorldContext,
+                        storyMemories = selectedStoryMemories
                     )
                     includedMessages = history.size.coerceAtMost(25)
                 }
@@ -156,6 +167,16 @@ fun ContextInspectorScreen(
                 ).orEmpty()
                 val trimmed = priorHistory.takeLast(com.example.domain.memory.AutomaticMemoryManager.DEFAULT_RECENT_MESSAGE_LIMIT)
                 includedMessages = trimmed.size + 1
+                val selectedStoryMemories = appContainer.storyMemoryRepository?.retrieveForGeneration(
+                    chatId = chatId,
+                    recipient = StoryActorRef(StoryActorKind.CHARACTER, character.characterId),
+                    sceneText = history.takeLast(7).joinToString(" ") { it.content }.takeLast(4_000),
+                    activeActors = setOf(
+                        StoryActorRef(StoryActorKind.CHARACTER, character.characterId),
+                        StoryActorRef(StoryActorKind.PERSONA, persona.personaId)
+                    )
+                )?.selected.orEmpty()
+                selectedStoryMemoryCount = selectedStoryMemories.size
                 val compiler = ContextCompilerV1()
                 compiledMessages = if (summary.chat.chatType == ChatType.GROUP) {
                     val activeIds = appContainer.chatRepository.getParticipantsForChatOnce(chatId)
@@ -176,7 +197,9 @@ fun ContextInspectorScreen(
                         customTargetMax = settings.customTargetMax,
                         customHardMax = settings.customHardMax,
                         durableMemories = memories,
+                        storyMemories = selectedStoryMemories,
                         rollingSummary = rollingSummary,
+                        worldContext = acceptedWorldContext,
                         activeLore = activeLore,
                         supportingCastContext = supportingCast,
                         npcBankEnabled = npcBankEnabled,
@@ -194,7 +217,9 @@ fun ContextInspectorScreen(
                         customTargetMax = settings.customTargetMax,
                         customHardMax = settings.customHardMax,
                         durableMemories = memories,
+                        storyMemories = selectedStoryMemories,
                         rollingSummary = rollingSummary,
+                        worldContext = acceptedWorldContext,
                         activeLore = activeLore,
                         supportingCastContext = supportingCast,
                         npcBankEnabled = npcBankEnabled,
@@ -252,6 +277,7 @@ fun ContextInspectorScreen(
                                 Text("Excluded by Wack: $preResetMessagesExcluded", style = MaterialTheme.typography.bodySmall)
                             }
                             Text("Durable Memories: $durableMemoryCount", style = MaterialTheme.typography.bodySmall)
+            Text("Selected Story Memories: $selectedStoryMemoryCount", style = MaterialTheme.typography.bodySmall)
                             Text("Rolling Summary: ${if (hasRollingSummary) "Included" else "Not yet needed"}", style = MaterialTheme.typography.bodySmall)
                         }
                     }

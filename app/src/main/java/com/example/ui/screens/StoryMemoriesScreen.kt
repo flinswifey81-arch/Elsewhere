@@ -22,8 +22,8 @@ import com.example.ui.components.elsewhereTopAppBarColors
 import kotlinx.coroutines.launch
 
 /**
- * Local manual story archive. Does not inject the saved records into model
- * requests; retrieval/ranking are a separate, independently gated milestone.
+ * Chat-local, user-controlled story archive. Retrieval is recipient-scoped,
+ * source-linked and bounded, never an additional paid model request.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -261,7 +261,7 @@ fun StoryMemoriesScreen(
                 item {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("Your chat-local story archive", style = MaterialTheme.typography.titleMedium)
-                        Text("Create, correct, pin and assign knowledge here. Model retrieval is not active yet. This page does not change legacy 'Update Memory Now'.",
+                        Text("Create, correct, pin and assign knowledge here. Eligible memories can be recalled during generation, without any separate OpenRouter call. This does not change legacy 'Update Memory Now'.",
                             style = MaterialTheme.typography.bodySmall)
                         if (boundary != null) Text(
                             "This chat has a Wack boundary. Old memories require individual Restore approval.",
