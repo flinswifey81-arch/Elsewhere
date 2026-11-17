@@ -1928,7 +1928,10 @@ class ChatDetailGenerationTest {
         assertFalse(requestText.contains("OLD_TRANSCRIPT_CHARACTER"))
         assertFalse(requestText.contains("OLD_ALTERNATE_VARIANT"))
         assertFalse(requestText.contains("OLD_ROLLING_SUMMARY"))
-        assertTrue(requestText.contains("DURABLE_MEMORY_STAYS"))
+        // Wack keeps the historical durable-memory row in Room, but Stage 1
+        // cannot let an origin-unknown legacy fact re-enter generation without
+        // an explicit, separately audited return grant.
+        assertFalse(requestText.contains("DURABLE_MEMORY_STAYS"))
         assertTrue(requestText.contains("POST_RESET_PERSONA"))
         preservedImage.delete()
         Unit
