@@ -63,6 +63,9 @@ interface ModelProvider {
     /** Null means the provider catalog has not established capability either way. */
     suspend fun supportsImageInput(modelId: String): Boolean? = null
 
+    /** Read previously fetched model metadata; never make an extra network request here. */
+    fun cachedContextLength(modelId: String): Int? = null
+
     fun streamResponse(
         messages: List<RoleplayMessage>,
         options: GenerationOptions
