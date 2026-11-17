@@ -43,7 +43,9 @@ jobs:
             --tests com.example.domain.backup.BackupRepositoryTest \
             --tests com.example.WorldEpisodeContextCompilerTest \
             --tests com.example.domain.ContextResetPolicyTest \
-            --tests com.example.domain.AutomaticMemoryManagerTest
+            --tests com.example.domain.AutomaticMemoryManagerTest \
+            --tests com.example.domain.ContextBudgetProbeTest \
+            --tests 'com.example.domain.Stage0*'
       - name: Report precise test failures
         if: failure()
         run: |
