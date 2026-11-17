@@ -110,6 +110,50 @@ class StoryMemoryRepository(
         }
     }
 
+    /** Explicit knowledge assignments are restricted to Character participants. */
+    suspend fun setCharacterKnowledge(
+        chatId: String, memoryId: String, characterIds: Set<String>
+    ): StoryMemoryEntity = dataCoordinator.withMutation {
+        database.withTransaction {
+            val old = requireNotNull(get(chatId, memoryId)) { "Memory does not belong to this chat." }
+            val participants = database.chatDao().getParticipantsForChatOnce(chatId)
+                .map { it.characterId }.toSet()
+            require(characterIds.all { it in participants }) {
+                "A knowledge recipient must be a Character participating in this chat."
+            }
+            require(characterIds.isEmpty() || old.claim != StoryMemoryClaim.CONTRADICTION.name) {
+                "Contradictions remain storyteller-only until resolved."
+            }
+            if (old.claim == StoryMemoryClaim.BELIEF.name) {
+                require(characterIds.size == 1) { "Choose the one Character who holds this belief." }
+            }
+            dao.clearKnowledgeForMemory(memoryId)
+            characterIds.sorted().forEach { characterId ->
+                dao.insertActor(StoryMemoryActorEntity(
+                    memoryId = memoryId,
+                    actorKind = StoryActorKind.CHARACTER.name,
+                    actorId = characterId, relation = "KNOWS"
+                ))
+            }
+            val believer = characterIds.singleOrNull()
+                ?.takeIf { old.claim == StoryMemoryClaim.BELIEF.name }
+            old.copy(
+                visibility = if (characterIds.isEmpty()) StoryMemoryVisibility.STORYTELLER_ONLY.name
+                    else StoryMemoryVisibility.CHARACTER_ONLY.name,
+                believedByKind = if (believer == null) null else StoryActorKind.CHARACTER.name,
+                believedById = believer,
+                updatedAtEpochMillis = System.currentTimeMillis()
+            ).also { dao.update(it) }
+        }
+    }
+
+    suspend fun getCharacterKnowers(chatId: String, memoryId: String): Set<String> {
+        requireNotNull(get(chatId, memoryId)) { "Memory does not belong to this chat." }
+        return dao.actors(memoryId).filter {
+            it.relation == "KNOWS" && it.actorKind == StoryActorKind.CHARACTER.name
+        }.map { it.actorId }.toSet()
+    }
+
     suspend fun delete(chatId: String, memoryId: String) = dataCoordinator.withMutation {
         database.withTransaction {
             get(chatId, memoryId)?.let { dao.delete(it) }
@@ -141,12 +185,19 @@ class StoryMemoryRepository(
                 require(record.sourceOrderIndex <= boundary) {
                     "This memory was created after the current Wack."
                 }
-                val withoutWack = eligibility(
-                    record, chatId, boundary = null,
-                    recipient = StoryActorRef(StoryActorKind.NARRATOR, "narrator:$chatId")
-                )
-                require(withoutWack.eligible) {
-                    "This memory is not currently restorable: ${withoutWack.reason}"
+                // Character-only memories can be restored without leaking that
+                // private knowledge to the narrator or to another Character.
+                val recipients = listOf(StoryActorRef(StoryActorKind.NARRATOR, "narrator:$chatId")) +
+                    dao.actors(memoryId).filter { it.relation == "KNOWS" }.mapNotNull { row ->
+                        runCatching {
+                            StoryActorRef(StoryActorKind.valueOf(row.actorKind), row.actorId)
+                        }.getOrNull()
+                    }
+                val decisions = recipients.map { recipient ->
+                    eligibility(record, chatId, boundary = null, recipient = recipient)
+                }
+                require(decisions.any { it.eligible }) {
+                    "This memory is not currently restorable: ${decisions.firstOrNull()?.reason}"
                 }
                 StoryMemoryReturnEntity(
                     memoryId = record.memoryId, resetBoundaryOrderIndex = boundary,

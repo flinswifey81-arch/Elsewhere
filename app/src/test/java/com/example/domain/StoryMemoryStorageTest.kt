@@ -192,6 +192,60 @@ class StoryMemoryStorageTest {
     }
 
     @Test
+    fun explicitCharacterKnowledgeIsRestrictedToChatParticipantsAndRevocable() = runBlocking {
+        chat()
+        database.chatDao().insertChatParticipant(
+            com.example.data.model.ChatParticipantEntity("chat-a", "rowan")
+        )
+        val saved = repository.saveManual("chat-a", "Only Rowan knows the vault location")
+        val other = StoryActorRef(StoryActorKind.CHARACTER, "someone-else")
+        val rowan = StoryActorRef(StoryActorKind.CHARACTER, "rowan")
+        assertEquals(StoryMemoryExclusion.NOT_KNOWN_TO_RECIPIENT,
+            repository.eligibility(saved, "chat-a", null, rowan).reason)
+        assertTrue(runCatching {
+            repository.setCharacterKnowledge("chat-a", saved.memoryId, setOf("someone-else"))
+        }.isFailure)
+        val granted = repository.setCharacterKnowledge("chat-a", saved.memoryId, setOf("rowan"))
+        assertEquals("CHARACTER_ONLY", granted.visibility)
+        assertEquals(setOf("rowan"), repository.getCharacterKnowers("chat-a", saved.memoryId))
+        assertEquals(StoryMemoryExclusion.ELIGIBLE,
+            repository.eligibility(granted, "chat-a", null, rowan).reason)
+        assertEquals(StoryMemoryExclusion.NOT_KNOWN_TO_RECIPIENT,
+            repository.eligibility(granted, "chat-a", null, other).reason)
+        assertEquals(StoryMemoryExclusion.NOT_KNOWN_TO_RECIPIENT,
+            repository.eligibility(granted, "chat-a", null, narrator).reason)
+        val revoked = repository.setCharacterKnowledge("chat-a", saved.memoryId, emptySet())
+        assertEquals("STORYTELLER_ONLY", revoked.visibility)
+        assertTrue(repository.getCharacterKnowers("chat-a", saved.memoryId).isEmpty())
+        assertEquals(StoryMemoryExclusion.ELIGIBLE,
+            repository.eligibility(revoked, "chat-a", null, narrator).reason)
+    }
+
+    @Test
+    fun characterScopedWackRestoreKeepsPrivateKnowledgePrivate() = runBlocking {
+        chat(boundary = 100L)
+        database.chatDao().insertChatParticipant(
+            com.example.data.model.ChatParticipantEntity("chat-a", "rowan")
+        )
+        val source = MessageEntity(
+            messageId = "before", chatId = "chat-a",
+            speakerType = SpeakerType.CHARACTER, speakerId = "rowan",
+            speakerDisplayNameSnapshot = "Rowan", content = "The hidden vault", orderIndex = 17L
+        )
+        database.messageDao().insertMessage(source)
+        val saved = repository.saveFromMessage("chat-a", "before")
+        val restricted = repository.setCharacterKnowledge("chat-a", saved.memoryId, setOf("rowan"))
+        val rowan = StoryActorRef(StoryActorKind.CHARACTER, "rowan")
+        assertEquals(StoryMemoryExclusion.WACK_BOUNDARY,
+            repository.eligibility(restricted, "chat-a", 100L, rowan).reason)
+        repository.restoreAcrossWack("chat-a", saved.memoryId)
+        assertEquals(StoryMemoryExclusion.ELIGIBLE,
+            repository.eligibility(restricted, "chat-a", 100L, rowan).reason)
+        assertEquals(StoryMemoryExclusion.NOT_KNOWN_TO_RECIPIENT,
+            repository.eligibility(restricted, "chat-a", 100L, narrator).reason)
+    }
+
+    @Test
     fun invalidMissingChatOrBlankInputCannotCreateOrMutateMemory() = runBlocking {
         assertTrue(runCatching { repository.saveManual("missing", "Text") }.isFailure)
         chat()

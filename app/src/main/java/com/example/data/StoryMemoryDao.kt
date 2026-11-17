@@ -31,6 +31,9 @@ interface StoryMemoryDao {
     @Query("SELECT * FROM story_memory_actors WHERE memoryId = :memoryId")
     suspend fun actors(memoryId: String): List<StoryMemoryActorEntity>
 
+    @Query("DELETE FROM story_memory_actors WHERE memoryId = :memoryId AND relation = 'KNOWS'")
+    suspend fun clearKnowledgeForMemory(memoryId: String)
+
     @Query("SELECT * FROM story_memory_returns ORDER BY memoryId, resetBoundaryOrderIndex")
     suspend fun getAllReturns(): List<StoryMemoryReturnEntity>
 
