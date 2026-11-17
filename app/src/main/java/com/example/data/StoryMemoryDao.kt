@@ -31,6 +31,9 @@ interface StoryMemoryDao {
     @Query("SELECT * FROM story_memory_actors WHERE memoryId = :memoryId")
     suspend fun actors(memoryId: String): List<StoryMemoryActorEntity>
 
+    @Query("SELECT a.* FROM story_memory_actors a INNER JOIN story_memories m ON a.memoryId = m.memoryId WHERE m.chatId = :chatId")
+    suspend fun actorsForChat(chatId: String): List<StoryMemoryActorEntity>
+
     @Query("DELETE FROM story_memory_actors WHERE memoryId = :memoryId AND relation = 'KNOWS'")
     suspend fun clearKnowledgeForMemory(memoryId: String)
 

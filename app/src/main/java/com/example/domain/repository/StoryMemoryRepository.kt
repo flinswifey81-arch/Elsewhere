@@ -229,8 +229,11 @@ class StoryMemoryRepository(
         val returns = dao.returnsForChat(chatId).map(::toExplicitReturn).toSet()
         // Corrupt or unknown historical values fail closed; do not project
         // an unrecognizable audience or source into a provider prompt.
+        val actorsByMemory = dao.actorsForChat(chatId).groupBy { it.memoryId }
         val candidates = dao.forChat(chatId).mapNotNull { memory ->
-            try { recordFor(memory) } catch (_: IllegalArgumentException) { null }
+            try {
+                recordFor(memory, actorsByMemory[memory.memoryId].orEmpty())
+            } catch (_: IllegalArgumentException) { null }
         }
         StoryMemoryLocalRetriever.search(
             candidates = candidates,
@@ -255,7 +258,7 @@ class StoryMemoryRepository(
         recipient: StoryActorRef
     ): StoryMemoryDecision {
         if (memory.chatId != chatId) return StoryMemoryDecision(StoryMemoryExclusion.OTHER_STORY_OR_SCOPE)
-        val record = recordFor(memory)
+        val record = recordFor(memory, dao.actors(memory.memoryId))
         return StoryMemoryEligibilityPolicy.evaluate(record, StoryMemoryReadContext(
             chatId = chatId, branchId = null, wackBoundaryOrderIndex = boundary,
             recipient = recipient,
@@ -270,8 +273,9 @@ class StoryMemoryRepository(
             row.approvedAtOrderIndex, row.branchId, row.initiatedByUser
         )
 
-    private suspend fun recordFor(memory: StoryMemoryEntity): StoryMemoryRecord {
-        val actors = dao.actors(memory.memoryId)
+    private fun recordFor(
+        memory: StoryMemoryEntity, actors: List<StoryMemoryActorEntity>
+    ): StoryMemoryRecord {
         fun actor(kind: String, id: String): StoryActorRef? = runCatching {
             StoryActorRef(StoryActorKind.valueOf(kind), id)
         }.getOrNull()
