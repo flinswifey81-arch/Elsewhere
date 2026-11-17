@@ -182,17 +182,17 @@ class StoryMemoryLocalRetrieverTest {
     fun largeArchiveUsesExactVariantAndKnowledgeRulesWithoutHistoryInjection() {
         val archive = (1..10_000).map { n ->
             MessageEntity(
-                messageId = "message-$" + n, chatId = "chat-a",
+                messageId = "message-" + n, chatId = "chat-a",
                 speakerType = SpeakerType.CHARACTER, speakerId = "rowan",
                 speakerDisplayNameSnapshot = "Rowan",
-                content = if (n == 17) "The compass is beneath the altar." else "Ordinary turn $" + n,
+                content = if (n == 17) "The compass is beneath the altar." else "Ordinary turn " + n,
                 orderIndex = n.toLong(),
-                variantGroupId = "group-$" + n, isPrimaryVariant = true
+                variantGroupId = "group-" + n, isPrimaryVariant = true
             )
         }
         val memories = (1..500).map { n ->
             val source = archive[n - 1]
-            manual("m-$" + n, source.content, order = source.orderIndex).copy(
+            manual("m-" + n, source.content, order = source.orderIndex).copy(
                 origin = StoryMemoryOrigin.Message(
                     source.messageId, source.variantGroupId, source.orderIndex,
                     source.speakerType, source.speakerId, source.createdAt,
