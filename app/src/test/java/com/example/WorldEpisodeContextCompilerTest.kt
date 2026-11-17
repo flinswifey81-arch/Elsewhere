@@ -6,6 +6,10 @@ import com.example.data.model.PersonaEntity
 import com.example.data.model.ResponseLengthProfile
 import com.example.data.model.SpeakerType
 import com.example.domain.compiler.ContextCompilerV1
+import com.example.domain.compiler.ScenarioContextCompiler
+import com.example.domain.memory.*
+import com.example.data.model.ScenarioDefinition
+import com.example.data.model.ChatSettingsEntity
 import com.example.domain.provider.Role
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -83,5 +87,62 @@ class WorldEpisodeContextCompilerTest {
         )
         assertFalse(prompt.first().content.contains("--- SHARED WORLD BASELINE & APPROVED CONTINUITY ---"))
         assertFalse(prompt.first().content.contains("The archway was repaired."))
+    }
+
+    private fun rememberedCompass(): StoryMemoryRecord = StoryMemoryRecord(
+        memoryId = "silver-compass", content = "Mara promised Rowan the silver compass.",
+        createdAtEpochMillis = 10L, updatedAtEpochMillis = 10L,
+        ownerId = "episode", sourceChatId = "episode",
+        scope = StoryMemoryOwnerScope.CHAT, branchId = null,
+        origin = StoryMemoryOrigin.Manual(17L),
+        claim = StoryMemoryClaim.PROMISE,
+        visibility = StoryMemoryVisibility.CHARACTER_ONLY,
+        knownBy = setOf(StoryActorRef(StoryActorKind.CHARACTER, character.characterId)),
+        review = StoryMemoryReview.APPROVED
+    )
+
+    @Test
+    fun eligibleStoryMemoryAppearsInSoloAndGroupWithoutReplacingPersonaAgency() {
+        val memory = rememberedCompass()
+        val solo = ContextCompilerV1().compileSoloContext(
+            character = character, persona = persona,
+            chatHistory = emptyList(), currentMessage = greeting,
+            responseProfile = ResponseLengthProfile.NORMAL,
+            customMin = null, customTargetMax = null, customHardMax = null,
+            storyMemories = listOf(memory)
+        ).first().content
+        assertTrue(solo.contains("Mara promised Rowan the silver compass."))
+        assertTrue(solo.contains("RECIPIENT APPROVED"))
+        assertTrue(solo.contains("Never write dialogue for the user/Persona"))
+        val group = ContextCompilerV1().compileGroupCharacterContext(
+            character = character, persona = persona,
+            activeCharacterNames = listOf("Varka", "Kaeya"),
+            chatHistory = emptyList(), currentMessage = greeting,
+            responseProfile = ResponseLengthProfile.NORMAL,
+            customMin = null, customTargetMax = null, customHardMax = null,
+            storyMemories = listOf(memory)
+        ).first().content
+        assertTrue(group.contains("Mara promised Rowan the silver compass."))
+        assertTrue(group.contains("Respond only as Varka"))
+        val old = ContextCompilerV1().compileSoloContext(
+            character = character, persona = persona, chatHistory = emptyList(),
+            currentMessage = greeting, responseProfile = ResponseLengthProfile.NORMAL,
+            customMin = null, customTargetMax = null, customHardMax = null
+        ).first().content
+        assertFalse(old.contains("Mara promised Rowan the silver compass."))
+    }
+
+    @Test
+    fun scenarioStoryMemoryIsLabeledNarratorOnlyAndNeverCreatesNewTurns() {
+        val result = ScenarioContextCompiler().compile(
+            scenario = ScenarioDefinition(title = "A journey", premise = "Keep going."),
+            persona = persona, settings = ChatSettingsEntity(chatId = "episode"),
+            history = emptyList(), current = greeting,
+            storyMemories = listOf(rememberedCompass())
+        )
+        assertEquals(2, result.size)
+        assertTrue(result.first().content.contains("NARRATOR CONTINUITY, NOT UNIVERSAL NPC KNOWLEDGE"))
+        assertTrue(result.first().content.contains("Mara promised Rowan the silver compass."))
+        assertTrue(result.first().content.contains("Never invent the player's dialogue"))
     }
 }

@@ -16,6 +16,7 @@ import com.example.domain.story.StoryOutputParser
 import com.example.domain.story.StorySegmentType
 import com.example.domain.story.StoryResponseCodec
 import com.example.domain.story.StorySpeakerIdentity
+import com.example.domain.memory.StoryMemoryRecord
 
 class ContextCompilerV1 {
 
@@ -30,6 +31,7 @@ class ContextCompilerV1 {
         customTargetMax: Int?,
         customHardMax: Int?,
         durableMemories: List<RoleplayMemoryEntity> = emptyList(),
+        storyMemories: List<StoryMemoryRecord> = emptyList(),
         rollingSummary: String? = null,
         recentMessageLimit: Int = 24,
         groupParticipantNames: List<String> = emptyList(),
@@ -210,6 +212,15 @@ class ContextCompilerV1 {
                 append('\n')
             }
 
+            if (storyMemories.isNotEmpty()) {
+                appendLine("--- RELEVANT CHAT STORY MEMORY (RECIPIENT APPROVED) ---")
+                appendLine("Only the responding Character may treat these approved local memories as known. Do not transfer private knowledge to other Characters, override later events, or promote them to shared World canon.")
+                storyMemories.forEach { memory ->
+                    appendLine("- [${memory.claim.name}] ${memory.content}")
+                }
+                appendLine()
+            }
+
             if (!rollingSummary.isNullOrBlank()) {
                 append("--- ROLLING CONVERSATION SUMMARY ---\n")
                 append(rollingSummary)
@@ -348,6 +359,7 @@ class ContextCompilerV1 {
         customTargetMax: Int?,
         customHardMax: Int?,
         durableMemories: List<RoleplayMemoryEntity> = emptyList(),
+        storyMemories: List<StoryMemoryRecord> = emptyList(),
         rollingSummary: String? = null,
         recentMessageLimit: Int = 24,
         activeLore: List<ActiveLoreEntry> = emptyList(),
@@ -368,6 +380,7 @@ class ContextCompilerV1 {
             customTargetMax = customTargetMax,
             customHardMax = customHardMax,
             durableMemories = durableMemories,
+            storyMemories = storyMemories,
             rollingSummary = rollingSummary,
             recentMessageLimit = recentMessageLimit,
             groupParticipantNames = activeCharacterNames,

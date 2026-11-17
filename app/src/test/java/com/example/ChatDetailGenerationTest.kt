@@ -39,6 +39,8 @@ import com.example.domain.repository.AppDataMaintenanceCoordinator
 import com.example.domain.repository.ChatRepository
 import com.example.domain.repository.LorebookRepository
 import com.example.domain.repository.MemoryRepository
+import com.example.domain.repository.StoryMemoryRepository
+import com.example.domain.memory.StoryMemoryClaim
 import com.example.domain.repository.MessageRepository
 import com.example.domain.repository.MessageAttachmentRepository
 import com.example.domain.repository.NpcRepository
@@ -59,7 +61,6 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.yield
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.setMain
 import kotlinx.coroutines.withTimeout
@@ -81,7 +82,10 @@ class ChatDetailGenerationTest {
     private lateinit var database: AppDatabase
     private lateinit var viewModels: TestViewModelOwner
     private lateinit var dataCoordinator: AppDataMaintenanceCoordinator
-    private val mainDispatcher = UnconfinedTestDispatcher()
+    // runBlocking does not advance a virtual TestCoroutineScheduler. Room's
+    // asynchronous history Flow must not be starved by a test-only Main dispatcher.
+    // Adapted from the isolated three-trial passing PR #46 experiment.
+    private val mainDispatcher = Dispatchers.Unconfined
 
     @Before
     fun setUp() {
@@ -206,6 +210,62 @@ class ChatDetailGenerationTest {
         withTimeout(5_000) { while (savedReplyIds.size < 2) yield() }
         // A saved Continue updates the existing message instead of inventing a new chat turn.
         assertEquals(listOf(persisted.last().messageId, persisted.last().messageId), savedReplyIds)
+    }
+
+    @Test
+    fun storyMemoryRecallsInNextPromptButWackBlocksUntilUserRestoresIt() = runBlocking {
+        // Full ViewModel -> Room -> recipient retrieval -> compiler -> provider path.
+        // No network/OpenRouter request: SequentialResponseProvider is local.
+        val provider = SequentialResponseProvider(listOf(
+            "The story continues.", "A fresh chapter.", "The secret is remembered."
+        ))
+        val stories = StoryMemoryRepository(database, dataCoordinator)
+        val harness = createHarness(
+            provider, ResponseLengthProfile.NORMAL, storyMemoryRepository = stories
+        )
+        val memory = stories.saveManual(
+            harness.chatId, "The silver compass is buried under the willow tree.",
+            StoryMemoryClaim.PROMISE
+        )
+        stories.setCharacterKnowledge(harness.chatId, memory.memoryId, setOf("character-1"))
+
+        harness.viewModel.onDraftChanged("Where is our silver compass?")
+        harness.viewModel.sendMessage()
+        withTimeout(15_000) {
+            harness.viewModel.uiState.first {
+                it is ChatUiState.Success && !it.isGenerating && it.messages.size == 2
+            }
+        }
+        assertEquals(1, provider.requests.size)
+        assertTrue(provider.requests.single().first().content.contains("silver compass is buried"))
+
+        harness.viewModel.wackContext()
+        withTimeout(15_000) {
+            harness.viewModel.uiState.first {
+                it is ChatUiState.Success && it.chatSummary.chat.contextResetOrderIndex != null &&
+                    it.inChatToolStatus?.message?.contains("Wack complete") == true
+            }
+        }
+        harness.viewModel.onDraftChanged("Where did we put the compass in this new story?")
+        harness.viewModel.sendMessage()
+        withTimeout(15_000) {
+            harness.viewModel.uiState.first {
+                it is ChatUiState.Success && !it.isGenerating && it.messages.size == 4
+            }
+        }
+        assertEquals(2, provider.requests.size)
+        assertFalse(provider.requests[1].first().content.contains("silver compass is buried"))
+
+        stories.restoreAcrossWack(harness.chatId, memory.memoryId)
+        harness.viewModel.onDraftChanged("Do you remember the silver compass?")
+        harness.viewModel.sendMessage()
+        withTimeout(15_000) {
+            harness.viewModel.uiState.first {
+                it is ChatUiState.Success && !it.isGenerating && it.messages.size == 6
+            }
+        }
+        assertEquals(3, provider.requests.size)
+        assertTrue(provider.requests[2].first().content.contains("silver compass is buried"))
     }
 
     @Test
@@ -1870,7 +1930,10 @@ class ChatDetailGenerationTest {
         assertFalse(requestText.contains("OLD_TRANSCRIPT_CHARACTER"))
         assertFalse(requestText.contains("OLD_ALTERNATE_VARIANT"))
         assertFalse(requestText.contains("OLD_ROLLING_SUMMARY"))
-        assertTrue(requestText.contains("DURABLE_MEMORY_STAYS"))
+        // Wack keeps the historical durable-memory row in Room, but Stage 1
+        // cannot let an origin-unknown legacy fact re-enter generation without
+        // an explicit, separately audited return grant.
+        assertFalse(requestText.contains("DURABLE_MEMORY_STAYS"))
         assertTrue(requestText.contains("POST_RESET_PERSONA"))
         preservedImage.delete()
         Unit
@@ -2049,7 +2112,8 @@ class ChatDetailGenerationTest {
         narratorInstructions: String = "",
         npcBankEnabledInitially: Boolean = false,
         initialStoredCharacterContent: String? = null,
-        storyOutputParserFactory: () -> StoryOutputParser = ::StoryOutputParser
+        storyOutputParserFactory: () -> StoryOutputParser = ::StoryOutputParser,
+        storyMemoryRepository: StoryMemoryRepository? = null
     ): Harness {
         val moshi = Moshi.Builder().addLast(KotlinJsonAdapterFactory()).build()
         val characterRepository = CharacterRepository(database.characterDao(), moshi, dataCoordinator = dataCoordinator)
@@ -2102,7 +2166,8 @@ class ChatDetailGenerationTest {
                 npcRepository = npcRepository,
                 npcOutputParser = npcParser,
                 dataCoordinator = dataCoordinator,
-                storyOutputParserFactory = storyOutputParserFactory
+                storyOutputParserFactory = storyOutputParserFactory,
+                storyMemoryRepository = storyMemoryRepository
             )
         }
         // ChatUiState.Success is emitted before the Room history collector delivers its

@@ -4,6 +4,7 @@ import com.example.data.model.*
 import com.example.domain.provider.Role
 import com.example.domain.provider.RoleplayMessage
 import com.example.domain.lore.ActiveLoreEntry
+import com.example.domain.memory.StoryMemoryRecord
 
 /** Scenario instructions never pass through the Character compiler. */
 class ScenarioContextCompiler {
@@ -18,7 +19,8 @@ class ScenarioContextCompiler {
         lore: List<ActiveLoreEntry> = emptyList(),
         continuation: Boolean = false,
         recentMessageLimit: Int = 24,
-        worldContext: String? = null
+        worldContext: String? = null,
+        storyMemories: List<StoryMemoryRecord> = emptyList()
     ): List<RoleplayMessage> {
         val instructions = buildString {
             appendLine("You are the collaborative narrator of an open-ended roleplay scenario. Portray the world and multiple distinct NPCs in ONE response, with clear names for NPC dialogue when helpful. Introduce new characters naturally when appropriate. Keep their voices, motivations, relationships and knowledge distinct. Hidden information is not automatically known to every NPC.")
@@ -52,6 +54,10 @@ class ScenarioContextCompiler {
             section("Player persona instructions", ManualPersonaFieldsCodec.readStored(persona)?.backstoryInstructions)
             lore.forEach { section("ACTIVE LORE: ${it.title}", it.currentContent) }
             if (memories.isNotEmpty()) section("SESSION MEMORY", memories.joinToString("\n") { it.content })
+            if (storyMemories.isNotEmpty()) section(
+                "APPROVED LOCAL STORY MEMORY (NARRATOR CONTINUITY, NOT UNIVERSAL NPC KNOWLEDGE)",
+                storyMemories.joinToString(separator = " | ") { "[${it.claim.name}] ${it.content}" }
+            )
             section("EARLIER SESSION SUMMARY", summary)
             section("RESPONSE LENGTH", when (settings.responseLengthProfile) {
                 ResponseLengthProfile.SHORT -> "Target 400-800 characters; maximum 1000 characters."

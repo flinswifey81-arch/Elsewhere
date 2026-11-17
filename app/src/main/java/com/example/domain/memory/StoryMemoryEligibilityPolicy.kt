@@ -7,7 +7,7 @@ import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 
 /**
- * Stage 1 eligibility CONTRACT, not a Room entity and not yet wired into generation.
+ * Stage 1 eligibility contract used for local, recipient-scoped generation reads.
  *
  * A source can exist in the local archive without being eligible to appear in a prompt.
  * Gate provenance, selected variant, Wack, branch, ownership and knowledge BEFORE
@@ -88,7 +88,18 @@ data class StoryMemoryReadContext(
     /** All local source records, including unselected and pre-Wack messages; never sent wholesale. */
     val archivedMessages: List<MessageEntity>,
     val explicitReturns: Set<ExplicitMemoryReturn> = emptySet()
-)
+) {
+    // Reused for every candidate in this one generation. Without the indexes,
+    // evaluating hundreds of memories against 10,000 messages rescans the
+    // full archive per record and per alternate variant.
+    internal val sourceById: Map<String, MessageEntity> by lazy(LazyThreadSafetyMode.NONE) {
+        archivedMessages.associateBy { it.messageId }
+    }
+    internal val selectedByVariant: Map<String, List<MessageEntity>> by lazy(LazyThreadSafetyMode.NONE) {
+        archivedMessages.filter { it.isPrimaryVariant }
+            .groupBy { it.variantGroupId }
+    }
+}
 
 enum class StoryMemoryExclusion {
     ELIGIBLE,
@@ -135,8 +146,7 @@ object StoryMemoryEligibilityPolicy {
             is StoryMemoryOrigin.Manual -> origin.createdAtOrderIndex
             is StoryMemoryOrigin.Message -> {
                 val check = checkSource(
-                    context.archivedMessages,
-                    context.chatId,
+                    context,
                     origin.messageId,
                     origin.variantGroupId,
                     origin.orderIndex,
@@ -154,10 +164,9 @@ object StoryMemoryEligibilityPolicy {
     }
 
     /**
-     * Transitional read policy for the EXISTING Room memory shape, which lacks
-     * branch/visibility and may lack a source ID. This is NOT yet called from
-     * ChatDetailViewModel; doing so changes production recall behavior and needs
-     * migration/backup and generation regression approval.
+     * Transitional read policy for legacy Room memories lacking branch,
+     * visibility and sometimes source IDs. The production app is unchanged
+     * until this reviewed branch passes the release and device gates.
      */
     fun evaluateLegacy(
         memory: RoleplayMemoryEntity,
@@ -183,10 +192,10 @@ object StoryMemoryEligibilityPolicy {
             return if (hasExplicitReturn(memory.memoryId, context)) allow
                 else deny(StoryMemoryExclusion.LEGACY_ORIGIN_UNKNOWN)
         }
-        val source = context.archivedMessages.firstOrNull { it.messageId == sourceId }
+        val source = context.sourceById[sourceId]
             ?: return deny(StoryMemoryExclusion.SOURCE_MISSING)
         val check = checkSource(
-            context.archivedMessages, context.chatId,
+            context,
             sourceId, source.variantGroupId, source.orderIndex,
             source.speakerType, source.speakerId, source.createdAt, sourceSha256 = null
         )
@@ -231,8 +240,7 @@ object StoryMemoryEligibilityPolicy {
     }
 
     private fun checkSource(
-        messages: List<MessageEntity>,
-        chatId: String,
+        context: StoryMemoryReadContext,
         messageId: String,
         variantGroupId: String,
         orderIndex: Long,
@@ -241,15 +249,14 @@ object StoryMemoryEligibilityPolicy {
         sourceCreatedAtEpochMillis: Long,
         sourceSha256: String?
     ): StoryMemoryExclusion {
-        val source = messages.firstOrNull { it.messageId == messageId }
+        val source = context.sourceById[messageId]
             ?: return StoryMemoryExclusion.SOURCE_MISSING
-        if (source.chatId != chatId || source.variantGroupId != variantGroupId ||
+        if (source.chatId != context.chatId || source.variantGroupId != variantGroupId ||
             source.orderIndex != orderIndex || source.speakerType != speakerType ||
             source.speakerId != speakerId || source.createdAt != sourceCreatedAtEpochMillis
         ) return StoryMemoryExclusion.SOURCE_CHANGED
-        val selected = messages.filter {
-            it.chatId == chatId && it.variantGroupId == variantGroupId && it.isPrimaryVariant
-        }
+        val selected = context.selectedByVariant[variantGroupId].orEmpty()
+            .filter { it.chatId == context.chatId }
         if (selected.size > 1) return StoryMemoryExclusion.AMBIGUOUS_SELECTED_VARIANTS
         if (!source.isPrimaryVariant || selected.singleOrNull()?.messageId != messageId) {
             return StoryMemoryExclusion.SOURCE_NOT_SELECTED

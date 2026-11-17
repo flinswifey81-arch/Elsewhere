@@ -121,7 +121,8 @@ fun ChatDetailScreen(
             scenarioRepository = appContainer.scenarioRepository,
             npcRepository = appContainer.npcRepository,
             npcOutputParser = appContainer.npcOutputParser,
-            generationLifecycle = appContainer.generationNotifications
+            generationLifecycle = appContainer.generationNotifications,
+            storyMemoryRepository = appContainer.storyMemoryRepository
         )
     )
 

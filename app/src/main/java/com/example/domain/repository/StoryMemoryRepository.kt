@@ -110,6 +110,52 @@ class StoryMemoryRepository(
         }
     }
 
+    /** Explicit knowledge assignments are restricted to Character participants. */
+    suspend fun setCharacterKnowledge(
+        chatId: String, memoryId: String, characterIds: Set<String>
+    ): StoryMemoryEntity = dataCoordinator.withMutation {
+        database.withTransaction {
+            val old = requireNotNull(get(chatId, memoryId)) { "Memory does not belong to this chat." }
+            val participants = database.chatDao().getParticipantsForChatOnce(chatId)
+                .map { it.characterId }.toSet()
+            require(characterIds.all { it in participants }) {
+                "A knowledge recipient must be a Character participating in this chat."
+            }
+            require(characterIds.isEmpty() || old.claim != StoryMemoryClaim.CONTRADICTION.name) {
+                "Contradictions remain storyteller-only until resolved."
+            }
+            if (old.claim == StoryMemoryClaim.BELIEF.name) {
+                require(characterIds.size <= 1) { "A belief may belong to at most one Character." }
+            }
+            dao.clearKnowledgeForMemory(memoryId)
+            characterIds.sorted().forEach { characterId ->
+                dao.insertActor(StoryMemoryActorEntity(
+                    memoryId = memoryId,
+                    actorKind = StoryActorKind.CHARACTER.name,
+                    actorId = characterId, relation = "KNOWS"
+                ))
+            }
+            val believer = characterIds.singleOrNull()
+                ?.takeIf { old.claim == StoryMemoryClaim.BELIEF.name }
+            old.copy(
+                visibility = if (characterIds.isEmpty()) StoryMemoryVisibility.STORYTELLER_ONLY.name
+                    else StoryMemoryVisibility.CHARACTER_ONLY.name,
+                // Revoking the Character's access must not erase historically
+                // attributed belief ownership from storyteller continuity.
+                believedByKind = if (believer == null) old.believedByKind else StoryActorKind.CHARACTER.name,
+                believedById = believer ?: old.believedById,
+                updatedAtEpochMillis = System.currentTimeMillis()
+            ).also { dao.update(it) }
+        }
+    }
+
+    suspend fun getCharacterKnowers(chatId: String, memoryId: String): Set<String> {
+        requireNotNull(get(chatId, memoryId)) { "Memory does not belong to this chat." }
+        return dao.actors(memoryId).filter {
+            it.relation == "KNOWS" && it.actorKind == StoryActorKind.CHARACTER.name
+        }.map { it.actorId }.toSet()
+    }
+
     suspend fun delete(chatId: String, memoryId: String) = dataCoordinator.withMutation {
         database.withTransaction {
             get(chatId, memoryId)?.let { dao.delete(it) }
@@ -141,12 +187,19 @@ class StoryMemoryRepository(
                 require(record.sourceOrderIndex <= boundary) {
                     "This memory was created after the current Wack."
                 }
-                val withoutWack = eligibility(
-                    record, chatId, boundary = null,
-                    recipient = StoryActorRef(StoryActorKind.NARRATOR, "narrator:$chatId")
-                )
-                require(withoutWack.eligible) {
-                    "This memory is not currently restorable: ${withoutWack.reason}"
+                // Character-only memories can be restored without leaking that
+                // private knowledge to the narrator or to another Character.
+                val recipients = listOf(StoryActorRef(StoryActorKind.NARRATOR, "narrator:$chatId")) +
+                    dao.actors(memoryId).filter { it.relation == "KNOWS" }.mapNotNull { row ->
+                        runCatching {
+                            StoryActorRef(StoryActorKind.valueOf(row.actorKind), row.actorId)
+                        }.getOrNull()
+                    }
+                val decisions = recipients.map { recipient ->
+                    eligibility(record, chatId, boundary = null, recipient = recipient)
+                }
+                require(decisions.any { it.eligible }) {
+                    "This memory is not currently restorable: ${decisions.firstOrNull()?.reason}"
                 }
                 StoryMemoryReturnEntity(
                     memoryId = record.memoryId, resetBoundaryOrderIndex = boundary,
@@ -160,6 +213,44 @@ class StoryMemoryRepository(
             }
         }
 
+    /** One local Room snapshot, one recipient, and no paid provider calls. */
+    suspend fun retrieveForGeneration(
+        chatId: String,
+        recipient: StoryActorRef,
+        sceneText: String,
+        activeActors: Set<StoryActorRef> = emptySet(),
+        maxMemories: Int = 8,
+        maxSelectedTextCharacters: Int = 4_000
+    ): StoryMemorySearchResult = database.withTransaction {
+        val chat = requireNotNull(database.chatDao().getChatById(chatId)) {
+            "Chat no longer exists."
+        }
+        val archived = database.messageDao().getMessagesForChatOnce(chatId)
+        val returns = dao.returnsForChat(chatId).map(::toExplicitReturn).toSet()
+        // Corrupt or unknown historical values fail closed; do not project
+        // an unrecognizable audience or source into a provider prompt.
+        val actorsByMemory = dao.actorsForChat(chatId).groupBy { it.memoryId }
+        val candidates = dao.forChat(chatId).mapNotNull { memory ->
+            try {
+                recordFor(memory, actorsByMemory[memory.memoryId].orEmpty())
+            } catch (_: IllegalArgumentException) { null }
+        }
+        StoryMemoryLocalRetriever.search(
+            candidates = candidates,
+            request = StoryMemorySearchRequest(
+                readContext = StoryMemoryReadContext(
+                    chatId = chatId, branchId = null,
+                    wackBoundaryOrderIndex = chat.contextResetOrderIndex,
+                    recipient = recipient, archivedMessages = archived,
+                    explicitReturns = returns
+                ),
+                sceneText = sceneText, activeActors = activeActors,
+                maxMemories = maxMemories,
+                maxSelectedTextCharacters = maxSelectedTextCharacters
+            )
+        )
+    }
+
     suspend fun eligibility(
         memory: StoryMemoryEntity,
         chatId: String,
@@ -167,8 +258,24 @@ class StoryMemoryRepository(
         recipient: StoryActorRef
     ): StoryMemoryDecision {
         if (memory.chatId != chatId) return StoryMemoryDecision(StoryMemoryExclusion.OTHER_STORY_OR_SCOPE)
-        val actors = dao.actors(memory.memoryId)
-        val returns = dao.returns(memory.memoryId)
+        val record = recordFor(memory, dao.actors(memory.memoryId))
+        return StoryMemoryEligibilityPolicy.evaluate(record, StoryMemoryReadContext(
+            chatId = chatId, branchId = null, wackBoundaryOrderIndex = boundary,
+            recipient = recipient,
+            archivedMessages = database.messageDao().getMessagesForChatOnce(chatId),
+            explicitReturns = dao.returns(memory.memoryId).map(::toExplicitReturn).toSet()
+        ))
+    }
+
+    private fun toExplicitReturn(row: StoryMemoryReturnEntity): ExplicitMemoryReturn =
+        ExplicitMemoryReturn(
+            row.memoryId, row.chatId, row.resetBoundaryOrderIndex,
+            row.approvedAtOrderIndex, row.branchId, row.initiatedByUser
+        )
+
+    private fun recordFor(
+        memory: StoryMemoryEntity, actors: List<StoryMemoryActorEntity>
+    ): StoryMemoryRecord {
         fun actor(kind: String, id: String): StoryActorRef? = runCatching {
             StoryActorRef(StoryActorKind.valueOf(kind), id)
         }.getOrNull()
@@ -176,9 +283,10 @@ class StoryMemoryRepository(
             .mapNotNull { actor(it.actorKind, it.actorId) }.toSet()
         val mentioned = actors.filter { it.relation == "MENTIONED" }
             .mapNotNull { actor(it.actorKind, it.actorId) }.toSet()
-        val converted = StoryMemoryRecord(
+        return StoryMemoryRecord(
             memoryId = memory.memoryId,
-            content = memory.content, createdAtEpochMillis = memory.createdAtEpochMillis,
+            content = memory.content,
+            createdAtEpochMillis = memory.createdAtEpochMillis,
             updatedAtEpochMillis = memory.updatedAtEpochMillis,
             ownerId = memory.ownerId, sourceChatId = memory.chatId,
             scope = StoryMemoryOwnerScope.valueOf(memory.scope), branchId = memory.branchId,
@@ -192,7 +300,10 @@ class StoryMemoryRepository(
                     sourceCreatedAtEpochMillis = requireNotNull(memory.sourceCreatedAtEpochMillis),
                     sourceSha256 = memory.sourceSha256
                 )
-            } else StoryMemoryOrigin.Manual(memory.sourceOrderIndex),
+            } else {
+                require(memory.originKind == "MANUAL") { "Unsupported memory provenance" }
+                StoryMemoryOrigin.Manual(memory.sourceOrderIndex)
+            },
             claim = StoryMemoryClaim.valueOf(memory.claim),
             visibility = StoryMemoryVisibility.valueOf(memory.visibility),
             knownBy = knownBy,
@@ -204,15 +315,5 @@ class StoryMemoryRepository(
             hidden = memory.hidden, pinned = memory.pinned,
             userEditedAt = memory.userEditedAt
         )
-        val localReturns = returns.map {
-            ExplicitMemoryReturn(it.memoryId, it.chatId, it.resetBoundaryOrderIndex,
-                it.approvedAtOrderIndex, it.branchId, it.initiatedByUser)
-        }.toSet()
-        return StoryMemoryEligibilityPolicy.evaluate(converted, StoryMemoryReadContext(
-            chatId = chatId, branchId = null, wackBoundaryOrderIndex = boundary,
-            recipient = recipient,
-            archivedMessages = database.messageDao().getMessagesForChatOnce(chatId),
-            explicitReturns = localReturns
-        ))
     }
 }

@@ -15,6 +15,11 @@ import com.example.data.model.ChatType
 import com.example.domain.compiler.ContextCompilerV1
 import com.example.domain.repository.NpcRepository
 import com.example.domain.memory.ContextResetPolicy
+import com.example.domain.memory.StoryMemoryPromptBudget
+import com.example.domain.memory.StoryMemoryRecord
+import com.example.domain.memory.LegacyMemoryEligibilityFilter
+import com.example.domain.memory.StoryActorKind
+import com.example.domain.memory.StoryActorRef
 import com.example.domain.provider.RoleplayMessage
 import com.example.ui.components.elsewhereCardBorder
 import com.example.ui.components.elsewhereDestructiveButtonColors
@@ -37,6 +42,7 @@ fun ContextInspectorScreen(
     var modelId by remember { mutableStateOf("") }
     var routingMode by remember { mutableStateOf("") }
     var durableMemoryCount by remember { mutableStateOf(0) }
+    var selectedStoryMemoryCount by remember { mutableStateOf(0) }
     var durableMemories by remember { mutableStateOf<List<com.example.data.model.RoleplayMemoryEntity>>(emptyList()) }
     var hasRollingSummary by remember { mutableStateOf(false) }
     var inspectedCharacterName by remember { mutableStateOf<String?>(null) }
@@ -55,7 +61,8 @@ fun ContextInspectorScreen(
             val character = selectedCharacter?.let { appContainer.characterRepository.getCharacterById(it.characterId) }
             val persona = summary?.personas?.firstOrNull()?.let { appContainer.personaRepository.getPersonaById(it.personaId) }
             val npcBankEnabled = appContainer.npcRepository?.getSettings(chatId)?.isEnabled == true
-            val allPrimaryHistory = appContainer.messageRepository.getMessagesForChatOnce(chatId)
+            val archivedHistory = appContainer.messageRepository.getMessagesForChatOnce(chatId)
+            val allPrimaryHistory = archivedHistory
                 .map { message ->
                     if (message.speakerType == com.example.data.model.SpeakerType.CHARACTER) {
                         message.copy(
@@ -67,8 +74,16 @@ fun ContextInspectorScreen(
                 .filter { it.isPrimaryVariant }
             val resetBoundary = summary?.chat?.contextResetOrderIndex
             val history = ContextResetPolicy.eligiblePrimaryMessages(allPrimaryHistory, resetBoundary)
+            val acceptedWorldContext = appContainer.scenarioRepository?.worldContextForChat(chatId)
+            selectedStoryMemoryCount = 0
             val memories = character?.let {
-                appContainer.memoryRepository.getMemoriesOnce(chatId, it.characterId)
+                LegacyMemoryEligibilityFilter.eligible(
+                    memories = appContainer.memoryRepository.getMemoriesOnce(chatId, it.characterId),
+                    chatId = chatId,
+                    recipient = StoryActorRef(StoryActorKind.CHARACTER, it.characterId),
+                    boundary = resetBoundary,
+                    archivedMessages = archivedHistory
+                )
             }.orEmpty()
             val rollingSummary = ContextResetPolicy.eligibleSummary(
                 appContainer.memoryRepository.getSummaryOnce(chatId),
@@ -92,21 +107,46 @@ fun ContextInspectorScreen(
                 if (session != null) {
                     inspectedCharacterName = "Scenario Narrator"
                     val current = history.last()
-                    val scenarioMemories = appContainer.memoryRepository.getMemoriesOnce(chatId, "narrator:$chatId")
+                    val scenarioMemories = LegacyMemoryEligibilityFilter.eligible(
+                        memories = appContainer.memoryRepository.getMemoriesOnce(chatId, "narrator:$chatId"),
+                        chatId = chatId,
+                        recipient = StoryActorRef(StoryActorKind.NARRATOR, "narrator:$chatId"),
+                        boundary = resetBoundary,
+                        archivedMessages = archivedHistory
+                    )
                     durableMemories = scenarioMemories
                     durableMemoryCount = scenarioMemories.size
-                    compiledMessages = com.example.domain.compiler.ScenarioContextCompiler().compile(
-                        com.example.data.model.ScenarioCodec.decode(session.definitionJson), persona, settings,
-                        history.dropLast(1), current, summary = rollingSummary, memories = scenarioMemories,
-                        lore = appContainer.lorebookRepository?.resolveActiveLore(chatId, history.dropLast(1), current, 24).orEmpty()
+                    val selectedStoryMemories = appContainer.storyMemoryRepository?.retrieveForGeneration(
+                        chatId = chatId,
+                        recipient = StoryActorRef(StoryActorKind.NARRATOR, "narrator:$chatId"),
+                        sceneText = history.takeLast(7).joinToString(" ") { it.content }.takeLast(4_000)
+                    )?.selected.orEmpty()
+                    val scenarioDefinition = com.example.data.model.ScenarioCodec.decode(session.definitionJson)
+                    val activeLore = appContainer.lorebookRepository?.resolveActiveLore(
+                        chatId, history.dropLast(1), current, 24
+                    ).orEmpty()
+                    val scenarioCompiler = com.example.domain.compiler.ScenarioContextCompiler()
+                    fun compileWithMemories(story: List<StoryMemoryRecord>) = scenarioCompiler.compile(
+                        scenarioDefinition, persona, settings, history.dropLast(1), current,
+                        summary = rollingSummary, memories = scenarioMemories, lore = activeLore,
+                        worldContext = acceptedWorldContext, storyMemories = story
                     )
+                    val baseline = compileWithMemories(emptyList())
+                    val allowed = StoryMemoryPromptBudget.select(
+                        baseline, selectedStoryMemories,
+                        appContainer.modelProvider.cachedContextLength(settings.selectedModelId ?: "openrouter/auto")
+                    ).selected
+                    selectedStoryMemoryCount = allowed.size
+                    compiledMessages = if (allowed.isEmpty()) baseline else compileWithMemories(allowed)
                     includedMessages = history.size.coerceAtMost(25)
                 }
             } else if (character != null && persona != null && history.isNotEmpty()) {
                 val currentMessage = history.last()
                 val priorHistory = history.dropLast(1)
                 val projectedNpcDossiers = if (npcBankEnabled) {
-                    appContainer.npcRepository?.getProjectedDossiers(chatId).orEmpty()
+                    appContainer.npcRepository?.getProjectedDossiers(
+                        chatId, afterOrderIndex = resetBoundary
+                    ).orEmpty()
                 } else emptyList()
                 val knownNpcSpeakers = projectedNpcDossiers.map { dossier ->
                     com.example.domain.story.StorySpeakerIdentity(dossier.npcId, dossier.displayName)
@@ -125,6 +165,7 @@ fun ContextInspectorScreen(
                         activePersonaId = persona.personaId,
                         isGroup = summary.chat.chatType == ChatType.GROUP,
                         asOfOrderIndex = history.maxOfOrNull { it.orderIndex },
+                        afterOrderIndex = resetBoundary,
                         limit = if (ensembleNarrationEnabled) {
                             NpcRepository.SOLO_ENSEMBLE_NPC_CONTEXT_LIMIT
                         } else {
@@ -140,15 +181,27 @@ fun ContextInspectorScreen(
                 ).orEmpty()
                 val trimmed = priorHistory.takeLast(com.example.domain.memory.AutomaticMemoryManager.DEFAULT_RECENT_MESSAGE_LIMIT)
                 includedMessages = trimmed.size + 1
+                val selectedStoryMemories = appContainer.storyMemoryRepository?.retrieveForGeneration(
+                    chatId = chatId,
+                    recipient = StoryActorRef(StoryActorKind.CHARACTER, character.characterId),
+                    sceneText = history.takeLast(7).joinToString(" ") { it.content }.takeLast(4_000),
+                    activeActors = setOf(
+                        StoryActorRef(StoryActorKind.CHARACTER, character.characterId),
+                        StoryActorRef(StoryActorKind.PERSONA, persona.personaId)
+                    )
+                )?.selected.orEmpty()
                 val compiler = ContextCompilerV1()
-                compiledMessages = if (summary.chat.chatType == ChatType.GROUP) {
-                    val activeIds = appContainer.chatRepository.getParticipantsForChatOnce(chatId)
+                val activeIds = if (summary.chat.chatType == ChatType.GROUP) {
+                    appContainer.chatRepository.getParticipantsForChatOnce(chatId)
                         .filter { it.isActive }
                         .sortedBy { it.sortPosition }
                         .map { it.characterId }
-                    val activeNames = activeIds.mapNotNull { id ->
-                        appContainer.characterRepository.getCharacterById(id)?.displayName
-                    }
+                } else emptyList()
+                val activeNames = activeIds.mapNotNull { id ->
+                    appContainer.characterRepository.getCharacterById(id)?.displayName
+                }
+                fun compileWithMemories(story: List<StoryMemoryRecord>) =
+                    if (summary.chat.chatType == ChatType.GROUP) {
                     compiler.compileGroupCharacterContext(
                         character = character,
                         persona = persona,
@@ -160,7 +213,9 @@ fun ContextInspectorScreen(
                         customTargetMax = settings.customTargetMax,
                         customHardMax = settings.customHardMax,
                         durableMemories = memories,
+                        storyMemories = story,
                         rollingSummary = rollingSummary,
+                        worldContext = acceptedWorldContext,
                         activeLore = activeLore,
                         supportingCastContext = supportingCast,
                         npcBankEnabled = npcBankEnabled,
@@ -178,7 +233,9 @@ fun ContextInspectorScreen(
                         customTargetMax = settings.customTargetMax,
                         customHardMax = settings.customHardMax,
                         durableMemories = memories,
+                        storyMemories = story,
                         rollingSummary = rollingSummary,
+                        worldContext = acceptedWorldContext,
                         activeLore = activeLore,
                         supportingCastContext = supportingCast,
                         npcBankEnabled = npcBankEnabled,
@@ -188,6 +245,13 @@ fun ContextInspectorScreen(
                         coLeadNpcNames = coLeadNpcNames
                     )
                 }
+                val baseline = compileWithMemories(emptyList())
+                val allowed = StoryMemoryPromptBudget.select(
+                    baseline, selectedStoryMemories,
+                    appContainer.modelProvider.cachedContextLength(settings.selectedModelId ?: "openrouter/auto")
+                ).selected
+                selectedStoryMemoryCount = allowed.size
+                compiledMessages = if (allowed.isEmpty()) baseline else compileWithMemories(allowed)
             }
         } finally {
             isLoading = false
@@ -236,6 +300,7 @@ fun ContextInspectorScreen(
                                 Text("Excluded by Wack: $preResetMessagesExcluded", style = MaterialTheme.typography.bodySmall)
                             }
                             Text("Durable Memories: $durableMemoryCount", style = MaterialTheme.typography.bodySmall)
+            Text("Selected Story Memories: $selectedStoryMemoryCount", style = MaterialTheme.typography.bodySmall)
                             Text("Rolling Summary: ${if (hasRollingSummary) "Included" else "Not yet needed"}", style = MaterialTheme.typography.bodySmall)
                         }
                     }

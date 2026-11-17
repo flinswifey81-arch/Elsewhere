@@ -31,11 +31,20 @@ interface StoryMemoryDao {
     @Query("SELECT * FROM story_memory_actors WHERE memoryId = :memoryId")
     suspend fun actors(memoryId: String): List<StoryMemoryActorEntity>
 
+    @Query("SELECT a.* FROM story_memory_actors a INNER JOIN story_memories m ON a.memoryId = m.memoryId WHERE m.chatId = :chatId")
+    suspend fun actorsForChat(chatId: String): List<StoryMemoryActorEntity>
+
+    @Query("DELETE FROM story_memory_actors WHERE memoryId = :memoryId AND relation = 'KNOWS'")
+    suspend fun clearKnowledgeForMemory(memoryId: String)
+
     @Query("SELECT * FROM story_memory_returns ORDER BY memoryId, resetBoundaryOrderIndex")
     suspend fun getAllReturns(): List<StoryMemoryReturnEntity>
 
     @Query("SELECT * FROM story_memory_returns WHERE memoryId = :memoryId")
     suspend fun returns(memoryId: String): List<StoryMemoryReturnEntity>
+
+    @Query("SELECT * FROM story_memory_returns WHERE chatId = :chatId")
+    suspend fun returnsForChat(chatId: String): List<StoryMemoryReturnEntity>
 
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insert(memory: StoryMemoryEntity)

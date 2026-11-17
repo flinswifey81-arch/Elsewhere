@@ -17,6 +17,12 @@ import com.example.domain.compiler.ContextCompilerV1
 import com.example.domain.generation.GenerationLifecycleReporter
 import com.example.domain.memory.AutomaticMemoryManager
 import com.example.domain.memory.ContextResetPolicy
+import com.example.domain.memory.LegacyMemoryEligibilityFilter
+import com.example.domain.memory.StoryActorKind
+import com.example.domain.memory.StoryActorRef
+import com.example.domain.repository.StoryMemoryRepository
+import com.example.domain.memory.StoryMemoryPromptBudget
+import com.example.domain.memory.StoryMemoryRecord
 import com.example.domain.coop.CoopGenerationCommand
 import com.example.domain.coop.CoopGenerationRequestPayload
 import com.example.domain.coop.CoopGenerationAuthorization
@@ -163,7 +169,8 @@ class ChatDetailViewModel(
     private val dataCoordinator: AppDataMaintenanceCoordinator = AppDataMaintenanceCoordinator.Global,
     private val scenarioRepository: com.example.domain.repository.ScenarioRepository? = null,
     private val storyOutputParserFactory: () -> StoryOutputParser = ::StoryOutputParser,
-    private val generationLifecycle: GenerationLifecycleReporter? = null
+    private val generationLifecycle: GenerationLifecycleReporter? = null,
+    private val storyMemoryRepository: StoryMemoryRepository? = null
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow<ChatUiState>(ChatUiState.Loading)
@@ -1161,6 +1168,9 @@ class ChatDetailViewModel(
         }
     }
 
+    private fun searchScene(history: List<MessageEntity>, current: MessageEntity): String =
+        (history.takeLast(6) + current).joinToString(" ") { it.content }.takeLast(4_000)
+
     private suspend fun prepareScenario(current: MessageEntity, history: List<MessageEntity>, continuation: Boolean): PreparedGeneration? {
         val settings = chatRepository.getEffectiveChatSettings(chatId) ?: currentChatSettings ?: return null
         val session = scenarioRepository?.session(chatId)
@@ -1184,16 +1194,38 @@ class ChatDetailViewModel(
         }
         val summary = ContextResetPolicy.eligibleSummary(memoryRepository.getSummaryOnce(chatId), chatSummary?.chat?.contextResetOrderIndex)
             ?.takeIf { it.summarizedThroughOrderIndex < current.orderIndex }?.summary
-        val messages = com.example.domain.compiler.ScenarioContextCompiler().compile(
-            com.example.data.model.ScenarioCodec.decode(session.definitionJson), persona, settings, history, current,
-            summary = summary,
-            memories = memoryRepository.getMemoriesOnce(chatId, "narrator:$chatId").filter { memory ->
-                memory.sourceMessageId == null || (history + current).any { it.messageId == memory.sourceMessageId }
-            },
-            lore = lorebookRepository?.resolveActiveLore(chatId, history, current, AutomaticMemoryManager.DEFAULT_RECENT_MESSAGE_LIMIT).orEmpty(),
-            continuation = continuation,
-            worldContext = scenarioRepository?.worldContextForChat(chatId)
-        ).map { if (it.sourceMessageId == source?.messageId && images.isNotEmpty()) it.copy(images = images) else it }
+        val selectedStoryMemories = storyMemoryRepository?.retrieveForGeneration(
+            chatId = chatId,
+            recipient = StoryActorRef(StoryActorKind.NARRATOR, "narrator:$chatId"),
+            sceneText = searchScene(history, current)
+        )?.selected.orEmpty()
+        val legacyMemories = LegacyMemoryEligibilityFilter.eligible(
+            memories = memoryRepository.getMemoriesOnce(chatId, "narrator:$chatId"),
+            chatId = chatId,
+            recipient = StoryActorRef(StoryActorKind.NARRATOR, "narrator:$chatId"),
+            boundary = chatSummary?.chat?.contextResetOrderIndex,
+            archivedMessages = messageRepository.getMessagesForChatOnce(chatId)
+        )
+        val activeLore = lorebookRepository?.resolveActiveLore(
+            chatId, history, current, AutomaticMemoryManager.DEFAULT_RECENT_MESSAGE_LIMIT
+        ).orEmpty()
+        val worldContext = scenarioRepository?.worldContextForChat(chatId)
+        val scenarioDefinition = com.example.data.model.ScenarioCodec.decode(session.definitionJson)
+        val scenarioCompiler = com.example.domain.compiler.ScenarioContextCompiler()
+        fun compileWithMemories(story: List<StoryMemoryRecord>) = scenarioCompiler.compile(
+            scenarioDefinition, persona, settings, history, current,
+            summary = summary, memories = legacyMemories, lore = activeLore,
+            continuation = continuation, worldContext = worldContext,
+            storyMemories = story
+        )
+        val baseline = compileWithMemories(emptyList())
+        val allowedStoryMemories = StoryMemoryPromptBudget.select(
+            baseline, selectedStoryMemories, modelProvider.cachedContextLength(modelId)
+        ).selected
+        val messages = (if (allowedStoryMemories.isEmpty()) baseline
+            else compileWithMemories(allowedStoryMemories)).map {
+            if (it.sourceMessageId == source?.messageId && images.isNotEmpty()) it.copy(images = images) else it
+        }
         return PreparedGeneration(ResponseSpeaker("narrator:$chatId", "Narrator", SpeakerType.NARRATOR), messages,
             GenerationOptions(modelId = modelId, routing = ModelRouting.fromSettings(settings.providerRoutingMode, settings.providerEndpoint),
                 temperature = settings.temperature, topP = settings.topP, maxTokens = null), activePersonaId = personaId)
@@ -1240,7 +1272,13 @@ class ChatDetailViewModel(
             }
             return null
         }
-        val durableMemories = memoryRepository.getMemoriesOnce(chatId, fullCharacter.characterId)
+        val durableMemories = LegacyMemoryEligibilityFilter.eligible(
+            memories = memoryRepository.getMemoriesOnce(chatId, fullCharacter.characterId),
+            chatId = chatId,
+            recipient = StoryActorRef(StoryActorKind.CHARACTER, fullCharacter.characterId),
+            boundary = summary.chat.contextResetOrderIndex,
+            archivedMessages = messageRepository.getMessagesForChatOnce(chatId)
+        )
         val rollingSummary = ContextResetPolicy.eligibleSummary(
             memoryRepository.getSummaryOnce(chatId),
             summary.chat.contextResetOrderIndex
@@ -1253,9 +1291,24 @@ class ChatDetailViewModel(
             recentMessageLimit = AutomaticMemoryManager.DEFAULT_RECENT_MESSAGE_LIMIT
         ).orEmpty()
         val activeCoopRoom = coopSessionManager?.state?.value?.room?.takeIf { it.chatId == chatId }
+        // Co-op remains on its previous shared-context contract until both
+        // devices agree on memory source and recipient eligibility.
+        val selectedStoryMemories = if (activeCoopRoom == null) {
+            storyMemoryRepository?.retrieveForGeneration(
+                chatId = chatId,
+                recipient = StoryActorRef(StoryActorKind.CHARACTER, fullCharacter.characterId),
+                sceneText = searchScene(history, currentMessage),
+                activeActors = setOf(
+                    StoryActorRef(StoryActorKind.CHARACTER, fullCharacter.characterId),
+                    StoryActorRef(StoryActorKind.PERSONA, fullPersona.personaId)
+                )
+            )?.selected.orEmpty()
+        } else emptyList()
         val npcBankEnabled = activeCoopRoom == null && npcRepository?.getSettings(chatId)?.isEnabled == true
         val projectedNpcDossiers = if (npcBankEnabled) {
-            npcRepository?.getProjectedDossiers(chatId).orEmpty()
+            npcRepository?.getProjectedDossiers(
+                chatId, afterOrderIndex = summary.chat.contextResetOrderIndex
+            ).orEmpty()
         } else emptyList()
         val sceneCast = NpcSceneCastResolver.resolve(projectedNpcDossiers, history + currentMessage)
         val presentNpcs = sceneCast.filter { it.presence == NpcScenePresence.PRESENT }.map { it.dossier }
@@ -1292,6 +1345,7 @@ class ChatDetailViewModel(
                 activePersonaId = fullPersona.personaId,
                 isGroup = summary.chat.chatType == ChatType.GROUP,
                 asOfOrderIndex = (history + currentMessage).maxOfOrNull { it.orderIndex },
+                afterOrderIndex = summary.chat.contextResetOrderIndex,
                 limit = if (ensembleNarrationEnabled) {
                     NpcRepository.SOLO_ENSEMBLE_NPC_CONTEXT_LIMIT
                 } else {
@@ -1305,7 +1359,8 @@ class ChatDetailViewModel(
         // Solo and Group episodes share their World's approved setting and continuity
         // just as Scenario episodes do. This is a local Room read, not another model call.
         val activeWorldContext = scenarioRepository?.worldContextForChat(chatId)
-        val contextMessages = if (summary.chat.chatType == ChatType.GROUP) {
+        fun compileWithMemories(story: List<StoryMemoryRecord>) =
+            if (summary.chat.chatType == ChatType.GROUP) {
             val state = _uiState.value as? ChatUiState.Success
             val activeCharacterNames = state?.groupCharacters
                 ?.filter { it.isActive }
@@ -1324,6 +1379,7 @@ class ChatDetailViewModel(
                 customTargetMax = settings.customTargetMax,
                 customHardMax = settings.customHardMax,
                 durableMemories = durableMemories,
+                storyMemories = story,
                 rollingSummary = rollingSummary,
                 activeLore = activeLore,
                 worldContext = activeWorldContext,
@@ -1344,6 +1400,7 @@ class ChatDetailViewModel(
                 customTargetMax = settings.customTargetMax,
                 customHardMax = settings.customHardMax,
                 durableMemories = durableMemories,
+                storyMemories = story,
                 rollingSummary = rollingSummary,
                 activeLore = activeLore,
                 worldContext = activeWorldContext,
@@ -1358,11 +1415,18 @@ class ChatDetailViewModel(
             )
         }
 
+        val modelId = settings.selectedModelId ?: "openrouter/auto"
+        val baseline = compileWithMemories(emptyList())
+        val allowedStoryMemories = StoryMemoryPromptBudget.select(
+            baseline, selectedStoryMemories, modelProvider.cachedContextLength(modelId)
+        ).selected
+        val contextMessages = if (allowedStoryMemories.isEmpty()) baseline
+            else compileWithMemories(allowedStoryMemories)
+
         val imageSourceMessage = relevantPersonaMessage?.takeIf { !isContinuation && activeCoopRoom == null }
         val currentImages = imageSourceMessage?.let { source ->
             messageAttachmentRepository?.providerImagesForMessage(source.messageId).orEmpty()
         }.orEmpty()
-        val modelId = settings.selectedModelId ?: "openrouter/auto"
         if (currentImages.isNotEmpty()) {
             when (modelProvider.supportsImageInput(modelId)) {
                 false -> {
@@ -2331,7 +2395,8 @@ class ChatDetailViewModel(
         private val npcRepository: NpcRepository? = null,
         private val npcOutputParser: NpcStructuredOutputParser? = null,
         private val scenarioRepository: com.example.domain.repository.ScenarioRepository? = null,
-        private val generationLifecycle: GenerationLifecycleReporter? = null
+        private val generationLifecycle: GenerationLifecycleReporter? = null,
+        private val storyMemoryRepository: StoryMemoryRepository? = null
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
@@ -2343,7 +2408,8 @@ class ChatDetailViewModel(
                 npcRepository,
                 npcOutputParser,
                 scenarioRepository = scenarioRepository,
-                generationLifecycle = generationLifecycle
+                generationLifecycle = generationLifecycle,
+                storyMemoryRepository = storyMemoryRepository
             ) as T
         }
     }

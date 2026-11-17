@@ -192,6 +192,80 @@ class StoryMemoryStorageTest {
     }
 
     @Test
+    fun explicitCharacterKnowledgeIsRestrictedToChatParticipantsAndRevocable() = runBlocking {
+        chat()
+        database.chatDao().insertChatParticipant(
+            com.example.data.model.ChatParticipantEntity("chat-a", "rowan")
+        )
+        val saved = repository.saveManual("chat-a", "Only Rowan knows the vault location")
+        val other = StoryActorRef(StoryActorKind.CHARACTER, "someone-else")
+        val rowan = StoryActorRef(StoryActorKind.CHARACTER, "rowan")
+        assertEquals(StoryMemoryExclusion.NOT_KNOWN_TO_RECIPIENT,
+            repository.eligibility(saved, "chat-a", null, rowan).reason)
+        assertTrue(runCatching {
+            repository.setCharacterKnowledge("chat-a", saved.memoryId, setOf("someone-else"))
+        }.isFailure)
+        val granted = repository.setCharacterKnowledge("chat-a", saved.memoryId, setOf("rowan"))
+        assertEquals("CHARACTER_ONLY", granted.visibility)
+        assertEquals(setOf("rowan"), repository.getCharacterKnowers("chat-a", saved.memoryId))
+        assertEquals(StoryMemoryExclusion.ELIGIBLE,
+            repository.eligibility(granted, "chat-a", null, rowan).reason)
+        assertEquals(StoryMemoryExclusion.NOT_KNOWN_TO_RECIPIENT,
+            repository.eligibility(granted, "chat-a", null, other).reason)
+        assertEquals(StoryMemoryExclusion.NOT_KNOWN_TO_RECIPIENT,
+            repository.eligibility(granted, "chat-a", null, narrator).reason)
+        val revoked = repository.setCharacterKnowledge("chat-a", saved.memoryId, emptySet())
+        assertEquals("STORYTELLER_ONLY", revoked.visibility)
+        assertTrue(repository.getCharacterKnowers("chat-a", saved.memoryId).isEmpty())
+        assertEquals(StoryMemoryExclusion.ELIGIBLE,
+            repository.eligibility(revoked, "chat-a", null, narrator).reason)
+    }
+
+    @Test
+    fun characterScopedWackRestoreKeepsPrivateKnowledgePrivate() = runBlocking {
+        chat(boundary = 100L)
+        database.chatDao().insertChatParticipant(
+            com.example.data.model.ChatParticipantEntity("chat-a", "rowan")
+        )
+        val source = MessageEntity(
+            messageId = "before", chatId = "chat-a",
+            speakerType = SpeakerType.CHARACTER, speakerId = "rowan",
+            speakerDisplayNameSnapshot = "Rowan", content = "The hidden vault", orderIndex = 17L
+        )
+        database.messageDao().insertMessage(source)
+        val saved = repository.saveFromMessage("chat-a", "before")
+        val restricted = repository.setCharacterKnowledge("chat-a", saved.memoryId, setOf("rowan"))
+        val rowan = StoryActorRef(StoryActorKind.CHARACTER, "rowan")
+        assertEquals(StoryMemoryExclusion.WACK_BOUNDARY,
+            repository.eligibility(restricted, "chat-a", 100L, rowan).reason)
+        repository.restoreAcrossWack("chat-a", saved.memoryId)
+        assertEquals(StoryMemoryExclusion.ELIGIBLE,
+            repository.eligibility(restricted, "chat-a", 100L, rowan).reason)
+        assertEquals(StoryMemoryExclusion.NOT_KNOWN_TO_RECIPIENT,
+            repository.eligibility(restricted, "chat-a", 100L, narrator).reason)
+    }
+
+    @Test
+    fun revokingBeliefKnowledgePreservesAttributionWithoutGrantingPrivateAccess() = runBlocking {
+        chat()
+        database.chatDao().insertChatParticipant(
+            com.example.data.model.ChatParticipantEntity("chat-a", "rowan")
+        )
+        val memory = repository.saveManual("chat-a", "Rowan believes the compass is cursed.",
+            StoryMemoryClaim.BELIEF)
+        val assigned = repository.setCharacterKnowledge("chat-a", memory.memoryId, setOf("rowan"))
+        assertEquals("rowan", assigned.believedById)
+        val cleared = repository.setCharacterKnowledge("chat-a", memory.memoryId, emptySet())
+        assertEquals("STORYTELLER_ONLY", cleared.visibility)
+        assertEquals("rowan", cleared.believedById)
+        assertEquals(StoryMemoryExclusion.NOT_KNOWN_TO_RECIPIENT,
+            repository.eligibility(cleared, "chat-a", null,
+                StoryActorRef(StoryActorKind.CHARACTER, "rowan")).reason)
+        assertEquals(StoryMemoryExclusion.ELIGIBLE,
+            repository.eligibility(cleared, "chat-a", null, narrator).reason)
+    }
+
+    @Test
     fun invalidMissingChatOrBlankInputCannotCreateOrMutateMemory() = runBlocking {
         assertTrue(runCatching { repository.saveManual("missing", "Text") }.isFailure)
         chat()
@@ -200,5 +274,61 @@ class StoryMemoryStorageTest {
         val saved = repository.saveManual("chat-a", "Keep me")
         assertTrue(runCatching { repository.update("chat-a", saved.memoryId, text = "") }.isFailure)
         assertEquals("Keep me", repository.get("chat-a", saved.memoryId)?.content)
+    }
+
+    @Test
+    fun retrievalSelectsOnlyRecipientKnowledgeAndExactWackRestorations() = runBlocking {
+        chat()
+        database.chatDao().insertChatParticipant(
+            com.example.data.model.ChatParticipantEntity("chat-a", "rowan")
+        )
+        val note = repository.saveManual("chat-a", "The silver compass is beneath the altar.",
+            StoryMemoryClaim.PROMISE)
+        repository.setCharacterKnowledge("chat-a", note.memoryId, setOf("rowan"))
+        val rowan = StoryActorRef(StoryActorKind.CHARACTER, "rowan")
+        suspend fun search(recipient: StoryActorRef) = repository.retrieveForGeneration(
+            chatId = "chat-a", recipient = recipient,
+            sceneText = "Where did we leave the silver compass?", activeActors = setOf(rowan)
+        )
+        assertEquals(listOf(note.memoryId), search(rowan).selected.map { it.memoryId })
+        assertTrue(search(StoryActorRef(StoryActorKind.CHARACTER, "stranger")).selected.isEmpty())
+        assertTrue(search(narrator).selected.isEmpty())
+        database.chatDao().setContextResetBoundary("chat-a", 100L, 100L)
+        assertTrue(search(rowan).selected.isEmpty())
+        repository.restoreAcrossWack("chat-a", note.memoryId)
+        assertEquals(listOf(note.memoryId), search(rowan).selected.map { it.memoryId })
+        assertTrue(search(narrator).selected.isEmpty())
+    }
+
+    @Test
+    fun retrievalCannotSelectMemoryFromDiscardedVariantOrChangedSource() = runBlocking {
+        chat()
+        database.chatDao().insertChatParticipant(
+            com.example.data.model.ChatParticipantEntity("chat-a", "rowan")
+        )
+        val first = MessageEntity(
+            messageId = "primary", chatId = "chat-a",
+            speakerType = SpeakerType.PERSONA, speakerId = "mara",
+            speakerDisplayNameSnapshot = "Mara", content = "The silver compass is safe",
+            orderIndex = 17L, variantGroupId = "variant-17", isPrimaryVariant = true
+        )
+        val alternate = first.copy(messageId = "alternate", content = "The silver compass was lost",
+            isPrimaryVariant = false)
+        database.messageDao().insertMessage(first)
+        database.messageDao().insertMessage(alternate)
+        val note = repository.saveFromMessage("chat-a", "primary")
+        repository.setCharacterKnowledge("chat-a", note.memoryId, setOf("rowan"))
+        val rowan = StoryActorRef(StoryActorKind.CHARACTER, "rowan")
+        suspend fun search() = repository.retrieveForGeneration(
+            "chat-a", rowan, "silver compass", activeActors = setOf(rowan)
+        )
+        assertEquals(1, search().selected.size)
+        database.messageDao().updateMessage(first.copy(isPrimaryVariant = false))
+        database.messageDao().updateMessage(alternate.copy(isPrimaryVariant = true))
+        assertTrue(search().selected.isEmpty())
+        database.messageDao().updateMessage(first.copy(isPrimaryVariant = true,
+            content = "The silver compass is broken", editedAt = 7L))
+        database.messageDao().updateMessage(alternate.copy(isPrimaryVariant = false))
+        assertTrue(search().selected.isEmpty())
     }
 }
