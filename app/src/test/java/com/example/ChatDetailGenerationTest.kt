@@ -61,7 +61,6 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.yield
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.setMain
 import kotlinx.coroutines.withTimeout
@@ -83,7 +82,10 @@ class ChatDetailGenerationTest {
     private lateinit var database: AppDatabase
     private lateinit var viewModels: TestViewModelOwner
     private lateinit var dataCoordinator: AppDataMaintenanceCoordinator
-    private val mainDispatcher = UnconfinedTestDispatcher()
+    // runBlocking does not advance a virtual TestCoroutineScheduler. Room's
+    // asynchronous history Flow must not be starved by a test-only Main dispatcher.
+    // Adapted from the isolated three-trial passing PR #46 experiment.
+    private val mainDispatcher = Dispatchers.Unconfined
 
     @Before
     fun setUp() {
