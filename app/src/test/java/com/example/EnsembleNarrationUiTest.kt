@@ -8,6 +8,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.example.data.model.MessageEntity
+import com.example.data.model.NpcDossier
 import com.example.data.model.SpeakerType
 import com.example.domain.story.StoryResponse
 import com.example.domain.story.StoryResponseCodec
@@ -71,12 +72,62 @@ class EnsembleNarrationUiTest {
         composeRule.onNodeWithText("Lady Ashford").assertExists()
         composeRule.onNodeWithTag("message_avatar_NARRATOR_narrator").assertDoesNotExist()
 
-        composeRule.onNodeWithContentDescription("Menu").performClick()
+        composeRule.onNodeWithContentDescription("Message menu").performClick()
         composeRule.onNodeWithText("Copy").performClick()
         composeRule.runOnIdle {
             assertTrue(copied.contains("The fire drops to a low red glow."))
             assertTrue(copied.contains("Lady Ashford:"))
             assertFalse(copied.contains("elsewhere-story-v1"))
         }
+    }
+
+
+    @Test
+    fun alreadySavedFlinsAndVarkaProseRendersTwoSeparateBubbles() {
+        val varka = NpcDossier(
+            npcId = "npc-varka", chatId = "chat", displayName = "Varka",
+            aliases = emptyList(), role = "Police Commissioner",
+            appearance = "", personality = "", relationshipToPersona = "",
+            personaRelationships = emptyMap(), characterKnowledge = emptyMap(),
+            goals = "", secrets = "", authorNotes = "", keepInScene = true,
+            isManualBase = true, createdAt = 1, updatedAt = 1, sceneMode = "AUTO"
+        )
+        val reply = MessageEntity(
+            messageId = "legacy-single-bubble",
+            chatId = "chat",
+            speakerType = SpeakerType.CHARACTER,
+            speakerId = "flins",
+            speakerDisplayNameSnapshot = "Flins",
+            content = """
+                *Flins set down his teacup, searching for the right words.*
+
+                "Darling," *he said,* "I believe we should—"
+
+                ---
+
+                *Varka had been mid-sentence when the door opened.*
+
+                "Flins," *he breathed,* "do you—"
+            """.trimIndent(),
+            orderIndex = 1
+        )
+        composeRule.setContent {
+            MaterialTheme {
+                MessageBubble(
+                    group = MessageGroup(reply, listOf(reply)),
+                    npcDossiers = listOf(varka),
+                    onSwitchVariant = {},
+                    onRegenerate = {},
+                    onContinue = {},
+                    onCopy = {},
+                    onEdit = { _, _ -> },
+                    onDelete = {},
+                    onShowMetadata = {}
+                )
+            }
+        }
+        composeRule.onNodeWithTag("story_speaker_CHARACTER_0").assertExists()
+        composeRule.onNodeWithTag("story_speaker_NPC_1").assertExists()
+        composeRule.onNodeWithText("Varka").assertExists()
     }
 }
