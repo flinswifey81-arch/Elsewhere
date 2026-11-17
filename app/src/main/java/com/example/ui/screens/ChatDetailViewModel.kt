@@ -1261,9 +1261,16 @@ class ChatDetailViewModel(
         val presentNpcs = sceneCast.filter { it.presence == NpcScenePresence.PRESENT }.map { it.dossier }
         // NPC Bank stores continuity; the active Scene Cast controls whether we need speaker splitting.
         // Without any present NPC, ordinary Solo prose stays untouched.
+        // A Solo co-lead setting must keep speaker attribution active even before the first
+        // NPC's presence has been inferred. The model may introduce a present co-lead in this
+        // reply; waiting for a *previous* mention collapses that first reply into one bubble.
+        // Co-lead priority itself still requires physical presence, as before.
         val ensembleNarrationEnabled = summary.chat.chatType == ChatType.SOLO &&
-            (settings.narratorEnabled || presentNpcs.isNotEmpty()) && activeCoopRoom == null
-        val knownNpcSpeakers = presentNpcs.map { dossier ->
+            (settings.narratorEnabled ||
+                (npcBankEnabled && (presentNpcs.isNotEmpty() || settings.coLeadEnsembleEnabled))) &&
+            activeCoopRoom == null
+        // Known identities are for attribution, not a license to summon absent NPCs.
+        val knownNpcSpeakers = (if (npcBankEnabled) projectedNpcDossiers else emptyList()).map { dossier ->
             StorySpeakerIdentity(dossier.npcId, dossier.displayName)
         }
         val coLeadNpcNames = if (ensembleNarrationEnabled && settings.coLeadEnsembleEnabled) {
