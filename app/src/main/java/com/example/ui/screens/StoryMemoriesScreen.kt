@@ -147,6 +147,7 @@ fun StoryMemoriesScreen(
                     characters.forEach { character ->
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Checkbox(
+                                modifier = Modifier.testTag("memory_knowledge_${character.characterId}"),
                                 checked = character.characterId in selectedKnowers,
                                 onCheckedChange = { checked ->
                                     selectedKnowers = if (checked) selectedKnowers + character.characterId

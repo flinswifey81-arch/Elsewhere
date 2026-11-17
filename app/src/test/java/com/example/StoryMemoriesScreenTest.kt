@@ -118,4 +118,48 @@ class StoryMemoriesScreenTest {
         assertEquals(1, runBlocking { database.storyMemoryDao().getAllReturns().size })
         assertEquals(2, runBlocking { database.storyMemoryDao().forChat("ui-story").size })
     }
+
+    @Test
+    fun knowledgeGrantRequiresExplicitCheckboxAndPersistsToSelectedCharacter() {
+        runBlocking {
+            database.characterDao().insertCharacter(
+                com.example.data.model.CharacterEntity(
+                    characterId = "rowan", displayName = "Rowan", characterName = "Rowan",
+                    aliases = emptyList(), importSchemaVersion = 1,
+                    identityJson = null, appearanceJson = null, personalityJson = null,
+                    voiceJson = null, behaviorJson = null, backstoryJson = null,
+                    knowledgeJson = null, worldContextJson = null, writingRulesJson = null,
+                    examplesJson = null, authorNotesJson = null, extensionFieldsJson = null
+                )
+            )
+            database.chatDao().insertChatParticipant(
+                com.example.data.model.ChatParticipantEntity(chatId = "ui-story", characterId = "rowan")
+            )
+            repository.saveManual("ui-story", "Rowan must remember the silver compass.")
+        }
+        composeRule.setContent {
+            MaterialTheme {
+                StoryMemoriesScreen("ui-story", repository, chats, onNavigateBack = {})
+            }
+        }
+        composeRule.waitUntil(15_000) {
+            composeRule.onAllNodesWithText("Who knows this?").fetchSemanticsNodes().isNotEmpty()
+        }
+        assertTrue(runBlocking {
+            database.storyMemoryDao().forChat("ui-story").single().visibility == "STORYTELLER_ONLY"
+        })
+        composeRule.onNodeWithText("Who knows this?").performClick()
+        composeRule.onNodeWithTag("memory_knowledge_rowan").performClick()
+        composeRule.onNodeWithText("Save knowledge").performClick()
+        composeRule.waitUntil(10_000) {
+            runBlocking { database.storyMemoryDao().forChat("ui-story").single().visibility == "CHARACTER_ONLY" }
+        }
+        assertEquals(
+            setOf("rowan"),
+            runBlocking {
+                val memory = database.storyMemoryDao().forChat("ui-story").single()
+                repository.getCharacterKnowers("ui-story", memory.memoryId)
+            }
+        )
+    }
 }
