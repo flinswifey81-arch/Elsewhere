@@ -15,6 +15,8 @@ import com.example.data.model.ChatType
 import com.example.domain.compiler.ContextCompilerV1
 import com.example.domain.repository.NpcRepository
 import com.example.domain.memory.ContextResetPolicy
+import com.example.domain.memory.StoryMemoryPromptBudget
+import com.example.domain.memory.StoryMemoryRecord
 import com.example.domain.memory.LegacyMemoryEligibilityFilter
 import com.example.domain.memory.StoryActorKind
 import com.example.domain.memory.StoryActorRef
@@ -119,14 +121,23 @@ fun ContextInspectorScreen(
                         recipient = StoryActorRef(StoryActorKind.NARRATOR, "narrator:$chatId"),
                         sceneText = history.takeLast(7).joinToString(" ") { it.content }.takeLast(4_000)
                     )?.selected.orEmpty()
-                    selectedStoryMemoryCount = selectedStoryMemories.size
-                    compiledMessages = com.example.domain.compiler.ScenarioContextCompiler().compile(
-                        com.example.data.model.ScenarioCodec.decode(session.definitionJson), persona, settings,
-                        history.dropLast(1), current, summary = rollingSummary, memories = scenarioMemories,
-                        lore = appContainer.lorebookRepository?.resolveActiveLore(chatId, history.dropLast(1), current, 24).orEmpty(),
-                        worldContext = acceptedWorldContext,
-                        storyMemories = selectedStoryMemories
+                    val scenarioDefinition = com.example.data.model.ScenarioCodec.decode(session.definitionJson)
+                    val activeLore = appContainer.lorebookRepository?.resolveActiveLore(
+                        chatId, history.dropLast(1), current, 24
+                    ).orEmpty()
+                    val scenarioCompiler = com.example.domain.compiler.ScenarioContextCompiler()
+                    fun compileWithMemories(story: List<StoryMemoryRecord>) = scenarioCompiler.compile(
+                        scenarioDefinition, persona, settings, history.dropLast(1), current,
+                        summary = rollingSummary, memories = scenarioMemories, lore = activeLore,
+                        worldContext = acceptedWorldContext, storyMemories = story
                     )
+                    val baseline = compileWithMemories(emptyList())
+                    val allowed = StoryMemoryPromptBudget.select(
+                        baseline, selectedStoryMemories,
+                        appContainer.modelProvider.cachedContextLength(settings.selectedModelId ?: "openrouter/auto")
+                    ).selected
+                    selectedStoryMemoryCount = allowed.size
+                    compiledMessages = if (allowed.isEmpty()) baseline else compileWithMemories(allowed)
                     includedMessages = history.size.coerceAtMost(25)
                 }
             } else if (character != null && persona != null && history.isNotEmpty()) {
@@ -176,16 +187,18 @@ fun ContextInspectorScreen(
                         StoryActorRef(StoryActorKind.PERSONA, persona.personaId)
                     )
                 )?.selected.orEmpty()
-                selectedStoryMemoryCount = selectedStoryMemories.size
                 val compiler = ContextCompilerV1()
-                compiledMessages = if (summary.chat.chatType == ChatType.GROUP) {
-                    val activeIds = appContainer.chatRepository.getParticipantsForChatOnce(chatId)
+                val activeIds = if (summary.chat.chatType == ChatType.GROUP) {
+                    appContainer.chatRepository.getParticipantsForChatOnce(chatId)
                         .filter { it.isActive }
                         .sortedBy { it.sortPosition }
                         .map { it.characterId }
-                    val activeNames = activeIds.mapNotNull { id ->
-                        appContainer.characterRepository.getCharacterById(id)?.displayName
-                    }
+                } else emptyList()
+                val activeNames = activeIds.mapNotNull { id ->
+                    appContainer.characterRepository.getCharacterById(id)?.displayName
+                }
+                fun compileWithMemories(story: List<StoryMemoryRecord>) =
+                    if (summary.chat.chatType == ChatType.GROUP) {
                     compiler.compileGroupCharacterContext(
                         character = character,
                         persona = persona,
@@ -197,7 +210,7 @@ fun ContextInspectorScreen(
                         customTargetMax = settings.customTargetMax,
                         customHardMax = settings.customHardMax,
                         durableMemories = memories,
-                        storyMemories = selectedStoryMemories,
+                        storyMemories = story,
                         rollingSummary = rollingSummary,
                         worldContext = acceptedWorldContext,
                         activeLore = activeLore,
@@ -217,7 +230,7 @@ fun ContextInspectorScreen(
                         customTargetMax = settings.customTargetMax,
                         customHardMax = settings.customHardMax,
                         durableMemories = memories,
-                        storyMemories = selectedStoryMemories,
+                        storyMemories = story,
                         rollingSummary = rollingSummary,
                         worldContext = acceptedWorldContext,
                         activeLore = activeLore,
@@ -229,6 +242,13 @@ fun ContextInspectorScreen(
                         coLeadNpcNames = coLeadNpcNames
                     )
                 }
+                val baseline = compileWithMemories(emptyList())
+                val allowed = StoryMemoryPromptBudget.select(
+                    baseline, selectedStoryMemories,
+                    appContainer.modelProvider.cachedContextLength(settings.selectedModelId ?: "openrouter/auto")
+                ).selected
+                selectedStoryMemoryCount = allowed.size
+                compiledMessages = if (allowed.isEmpty()) baseline else compileWithMemories(allowed)
             }
         } finally {
             isLoading = false
