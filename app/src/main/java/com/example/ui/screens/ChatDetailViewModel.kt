@@ -961,22 +961,6 @@ class ChatDetailViewModel(
             characterId = characterId
         ) ?: return
         val fullCharacter = prepared.character
-        // The estimate is conservative, not tokenizer-exact. Refuse an oversized
-        // request before opening a paid provider stream; never truncate canon.
-        val promptPreflight = com.example.domain.compiler.PromptPreflight.inspect(
-            messages = prepared.messages,
-            modelContextWindowTokens = modelProvider.cachedContextLength(prepared.options.modelId),
-            outputReserveTokens = prepared.options.maxTokens
-        )
-        if (!promptPreflight.allowed) {
-            updateSuccessState {
-                it.copy(generationError =
-                    "Context exceeds the safe input budget (estimated ${promptPreflight.estimatedInputTokens} tokens; " +
-                    "limit ${promptPreflight.inputCeilingTokens}). Reduce active lore or context before retrying. No API request was sent.")
-            }
-            return
-        }
-
         updateSuccessState {
             it.copy(
                 isGenerating = true,
@@ -1186,6 +1170,27 @@ class ChatDetailViewModel(
     private fun searchScene(history: List<MessageEntity>, current: MessageEntity): String =
         (history.takeLast(6) + current).joinToString(" ") { it.content }.takeLast(4_000)
 
+    /**
+     * Shared preflight for solo, scenario and co-op authorization.
+     * No provider call occurs when this check fails.
+     */
+    private fun isWithinPromptBudget(
+        messages: List<com.example.domain.provider.RoleplayMessage>,
+        modelId: String
+    ): Boolean {
+        val decision = com.example.domain.compiler.PromptPreflight.inspect(
+            messages = messages,
+            modelContextWindowTokens = modelProvider.cachedContextLength(modelId)
+        )
+        if (decision.allowed) return true
+        updateSuccessState {
+            it.copy(generationError =
+                "Context exceeds the safe input budget (estimated ${decision.estimatedInputTokens} tokens; " +
+                "limit ${decision.inputCeilingTokens}). Reduce active lore or context before retrying. No API request was sent.")
+        }
+        return false
+    }
+
     private suspend fun prepareScenario(current: MessageEntity, history: List<MessageEntity>, continuation: Boolean): PreparedGeneration? {
         val settings = chatRepository.getEffectiveChatSettings(chatId) ?: currentChatSettings ?: return null
         val session = scenarioRepository?.session(chatId)
@@ -1241,6 +1246,7 @@ class ChatDetailViewModel(
             else compileWithMemories(allowedStoryMemories)).map {
             if (it.sourceMessageId == source?.messageId && images.isNotEmpty()) it.copy(images = images) else it
         }
+        if (!isWithinPromptBudget(messages, modelId)) return null
         return PreparedGeneration(ResponseSpeaker("narrator:$chatId", "Narrator", SpeakerType.NARRATOR), messages,
             GenerationOptions(modelId = modelId, routing = ModelRouting.fromSettings(settings.providerRoutingMode, settings.providerEndpoint),
                 temperature = settings.temperature, topP = settings.topP, maxTokens = null), activePersonaId = personaId)
@@ -1476,6 +1482,7 @@ class ChatDetailViewModel(
             // small completion-token cap can exhaust the budget on reasoning before visible text.
             maxTokens = null
         )
+        if (!isWithinPromptBudget(providerMessages, modelId)) return null
         return PreparedGeneration(
             character = ResponseSpeaker(fullCharacter.characterId, fullCharacter.displayName),
             messages = providerMessages,
