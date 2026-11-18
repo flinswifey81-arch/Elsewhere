@@ -961,6 +961,21 @@ class ChatDetailViewModel(
             characterId = characterId
         ) ?: return
         val fullCharacter = prepared.character
+        // The estimate is conservative, not tokenizer-exact. Refuse an oversized
+        // request before opening a paid provider stream; never truncate canon.
+        val promptPreflight = com.example.domain.compiler.PromptPreflight.inspect(
+            messages = prepared.messages,
+            modelContextWindowTokens = modelProvider.cachedContextLength(prepared.options.modelId),
+            outputReserveTokens = prepared.options.maxTokens
+        )
+        if (!promptPreflight.allowed) {
+            updateSuccessState {
+                it.copy(generationError =
+                    "Context exceeds the safe input budget (estimated ${promptPreflight.estimatedInputTokens} tokens; " +
+                    "limit ${promptPreflight.inputCeilingTokens}). Reduce active lore or context before retrying. No API request was sent.")
+            }
+            return
+        }
 
         updateSuccessState {
             it.copy(
