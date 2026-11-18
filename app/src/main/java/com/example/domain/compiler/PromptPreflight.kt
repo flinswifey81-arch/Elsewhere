@@ -1,7 +1,6 @@
 package com.example.domain.compiler
 
 import com.example.domain.provider.RoleplayMessage
-import com.example.domain.memory.StoryMemoryPromptBudget
 
 /**
  * Local, zero-provider-call safety preflight. This deliberately does not claim
@@ -32,10 +31,13 @@ object PromptPreflight {
         val reserve = outputReserveTokens ?: minOf(4_096, maxOf(1_024, window / 4))
         require(reserve > 0)
         val ceiling = minOf(configuredInputCeilingTokens, (window - reserve).coerceAtLeast(0))
-        val estimate = StoryMemoryPromptBudget.approximateTokens(messages)
+        val estimate = messages.sumOf { message ->
+            val textTokens = (message.content.toByteArray(Charsets.UTF_8).size.toLong() + 1L) / 2L
+            textTokens + 48L + message.images.size.toLong() * 1_024L
+        }
         return PromptPreflightDecision(
-            estimatedInputTokens = estimate,
-            estimatedTotalTokens = estimate.toLong() + reserve,
+            estimatedInputTokens = estimate.coerceAtMost(Int.MAX_VALUE.toLong()).toInt(),
+            estimatedTotalTokens = estimate + reserve,
             inputCeilingTokens = ceiling,
             outputReserveTokens = reserve,
             modelWindowKnown = known,
