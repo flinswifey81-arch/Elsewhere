@@ -21,6 +21,15 @@ data class StoryRelationshipEntry(
     val to: StoryActorRef
 )
 
+/** Explicit, user-written promise and its two stable story participants. */
+data class StoryPromiseEntry(
+    val memory: StoryMemoryEntity,
+    val from: StoryActorRef,
+    val to: StoryActorRef
+)
+
+enum class StoryPromiseOutcome { KEPT, BROKEN, RELEASED }
+
 /**
  * Local user-controlled story memory. Kept out of generation until a separate
  * retrieval/assembler gate is reviewed. All edits take the shared maintenance
@@ -137,7 +146,8 @@ class StoryMemoryRepository(
                 originKind = "MANUAL",
                 sourceOrderIndex = ordinal + 1L,
                 createdAtEpochMillis = now,
-                updatedAtEpochMillis = now
+                updatedAtEpochMillis = now,
+                previousStateMemoryId = prior?.memoryId
             )
             dao.insert(entry)
             dao.insertActor(StoryMemoryActorEntity(
@@ -186,6 +196,18 @@ class StoryMemoryRepository(
 
     private fun relationshipPair(
         actors: List<StoryMemoryActorEntity>
+    ): Pair<StoryActorRef, StoryActorRef>? =
+        linkedPair(actors, "RELATIONSHIP_FROM", "RELATIONSHIP_TO")
+
+    private fun promisePair(
+        actors: List<StoryMemoryActorEntity>
+    ): Pair<StoryActorRef, StoryActorRef>? =
+        linkedPair(actors, "PROMISE_FROM", "PROMISE_TO")
+
+    private fun linkedPair(
+        actors: List<StoryMemoryActorEntity>,
+        fromRelation: String,
+        toRelation: String
     ): Pair<StoryActorRef, StoryActorRef>? {
         fun unique(relation: String): StoryActorRef? {
             val matches = actors.filter { it.relation == relation }
@@ -196,10 +218,162 @@ class StoryMemoryRepository(
             if (kind !in setOf(StoryActorKind.CHARACTER, StoryActorKind.PERSONA)) return null
             return StoryActorRef(kind, row.actorId)
         }
-        val from = unique("RELATIONSHIP_FROM") ?: return null
-        val to = unique("RELATIONSHIP_TO") ?: return null
+        val from = unique(fromRelation) ?: return null
+        val to = unique(toRelation) ?: return null
         return if (from == to) null else Pair(from, to)
     }
+
+
+    /** A new, explicitly authored obligation. Mentioning actors never grants knowledge. */
+    suspend fun savePromise(
+        chatId: String,
+        from: StoryActorRef,
+        to: StoryActorRef,
+        text: String
+    ): StoryPromiseEntry = dataCoordinator.withMutation {
+        val cleaned = text.trim()
+        require(cleaned.isNotEmpty() && cleaned.length <= 12_000) {
+            "Promise must contain 1–12,000 characters."
+        }
+        require(from != to) { "A promise requires different participants." }
+        require(from.kind in setOf(StoryActorKind.CHARACTER, StoryActorKind.PERSONA) &&
+            to.kind in setOf(StoryActorKind.CHARACTER, StoryActorKind.PERSONA)) {
+            "A promise must use Character or Persona participants."
+        }
+        database.withTransaction {
+            val summary = requireNotNull(database.chatDao().getChatSummaryById(chatId)) {
+                "Chat no longer exists."
+            }
+            val characterIds = summary.characters.map { it.characterId }.toSet()
+            val personaIds = summary.personas.map { it.personaId }.toSet()
+            fun valid(actor: StoryActorRef): Boolean = when (actor.kind) {
+                StoryActorKind.CHARACTER -> actor.stableId in characterIds
+                StoryActorKind.PERSONA -> actor.stableId in personaIds
+                else -> false
+            }
+            require(valid(from) && valid(to)) { "Promise participants must belong to this chat." }
+            val latest = maxOf(
+                database.chatDao().getLatestMessageOrderIndex(chatId) ?: -1L,
+                dao.maxSourceOrderForChat(chatId) ?: -1L,
+                summary.chat.contextResetOrderIndex ?: -1L
+            )
+            require(latest < Long.MAX_VALUE) { "Story memory chronology is exhausted." }
+            val memory = StoryMemoryEntity(
+                chatId = chatId, ownerId = chatId,
+                content = cleaned, claim = StoryMemoryClaim.PROMISE.name,
+                visibility = StoryMemoryVisibility.STORYTELLER_ONLY.name,
+                review = StoryMemoryReview.APPROVED.name,
+                lifecycle = StoryMemoryLifecycle.ACTIVE.name,
+                sourceOrderIndex = latest + 1L
+            )
+            dao.insert(memory)
+            for ((actor, relation) in listOf(from to "PROMISE_FROM", to to "PROMISE_TO")) {
+                dao.insertActor(StoryMemoryActorEntity(
+                    memoryId = memory.memoryId, actorKind = actor.kind.name,
+                    actorId = actor.stableId, relation = relation
+                ))
+            }
+            StoryPromiseEntry(memory, from, to)
+        }
+    }
+
+    /** A kept/broken/released outcome is a NEW state; the original remains preserved. */
+    suspend fun closePromise(
+        chatId: String,
+        promiseMemoryId: String,
+        outcome: StoryPromiseOutcome,
+        details: String
+    ): StoryPromiseEntry = dataCoordinator.withMutation {
+        val description = details.trim()
+        require(description.isNotEmpty() && description.length <= 4_000) {
+            "Write 1–4,000 characters describing the outcome."
+        }
+        database.withTransaction {
+            val chat = requireNotNull(database.chatDao().getChatById(chatId)) {
+                "Chat no longer exists."
+            }
+            val previous = requireNotNull(get(chatId, promiseMemoryId)) {
+                "Promise is not present in this chat."
+            }
+            require(previous.claim == StoryMemoryClaim.PROMISE.name &&
+                previous.lifecycle == StoryMemoryLifecycle.ACTIVE.name) {
+                "Only an open promise can receive a final outcome."
+            }
+            val pair = requireNotNull(promisePair(dao.actors(previous.memoryId))) {
+                "This promise has no verified Character/Persona participants."
+            }
+            // Wack is a hard boundary. Resolving an old promise must not copy
+            // its private pre-Wack content into post-Wack retrieval by accident.
+            val boundary = chat.contextResetOrderIndex
+            if (boundary != null && previous.sourceOrderIndex <= boundary) {
+                require(dao.returns(previous.memoryId).any {
+                    it.chatId == chatId && it.initiatedByUser &&
+                        it.resetBoundaryOrderIndex == boundary &&
+                        it.approvedAtOrderIndex > boundary &&
+                        it.branchId == previous.branchId
+                }) { "Restore this individual promise after Wack before recording an outcome." }
+            }
+            val label = when (outcome) {
+                StoryPromiseOutcome.KEPT -> "Kept"
+                StoryPromiseOutcome.BROKEN -> "Broken"
+                StoryPromiseOutcome.RELEASED -> "Released"
+            }
+            val content = previous.content + "\nOutcome — $label: " + description
+            require(content.length <= 12_000) {
+                "The promise and outcome together exceed 12,000 characters."
+            }
+            val latest = maxOf(
+                database.chatDao().getLatestMessageOrderIndex(chatId) ?: -1L,
+                dao.maxSourceOrderForChat(chatId) ?: -1L,
+                boundary ?: -1L
+            )
+            require(latest < Long.MAX_VALUE) { "Story memory chronology is exhausted." }
+            val now = System.currentTimeMillis()
+            val next = StoryMemoryEntity(
+                chatId = chatId, ownerId = chatId, content = content,
+                claim = StoryMemoryClaim.PROMISE.name,
+                visibility = StoryMemoryVisibility.STORYTELLER_ONLY.name,
+                review = StoryMemoryReview.APPROVED.name,
+                lifecycle = StoryMemoryLifecycle.RESOLVED.name,
+                sourceOrderIndex = latest + 1L,
+                createdAtEpochMillis = now, updatedAtEpochMillis = now,
+                previousStateMemoryId = previous.memoryId,
+                promiseOutcome = outcome.name
+            )
+            dao.insert(next)
+            for ((actor, relation) in listOf(
+                pair.first to "PROMISE_FROM", pair.second to "PROMISE_TO"
+            )) {
+                dao.insertActor(StoryMemoryActorEntity(
+                    memoryId = next.memoryId, actorKind = actor.kind.name,
+                    actorId = actor.stableId, relation = relation
+                ))
+            }
+            dao.update(previous.copy(
+                lifecycle = StoryMemoryLifecycle.SUPERSEDED.name,
+                updatedAtEpochMillis = now
+            ))
+            StoryPromiseEntry(next, pair.first, pair.second)
+        }
+    }
+
+    suspend fun getPromiseHistory(chatId: String): List<StoryPromiseEntry> =
+        database.withTransaction {
+            requireNotNull(database.chatDao().getChatById(chatId)) { "Chat no longer exists." }
+            val actors = dao.actorsForChat(chatId).groupBy { it.memoryId }
+            dao.forChat(chatId)
+                .asSequence()
+                .filter { it.claim == StoryMemoryClaim.PROMISE.name }
+                .mapNotNull { memory ->
+                    promisePair(actors[memory.memoryId].orEmpty())?.let { pair ->
+                        StoryPromiseEntry(memory, pair.first, pair.second)
+                    }
+                }
+                .sortedWith(
+                    compareBy<StoryPromiseEntry> { it.memory.sourceOrderIndex }
+                        .thenBy { it.memory.memoryId }
+                ).toList()
+        }
 
     /** A saved message keeps exact variant/speaker fingerprint and order. */
     suspend fun saveFromMessage(chatId: String, messageId: String): StoryMemoryEntity =
@@ -456,7 +630,10 @@ class StoryMemoryRepository(
         val knownBy = actors.filter { it.relation == "KNOWS" }
             .mapNotNull { actor(it.actorKind, it.actorId) }.toSet()
         val mentioned = actors.filter {
-            it.relation in setOf("MENTIONED", "RELATIONSHIP_FROM", "RELATIONSHIP_TO")
+            it.relation in setOf(
+                "MENTIONED", "RELATIONSHIP_FROM", "RELATIONSHIP_TO",
+                "PROMISE_FROM", "PROMISE_TO"
+            )
         }.mapNotNull { actor(it.actorKind, it.actorId) }.toSet()
         return StoryMemoryRecord(
             memoryId = memory.memoryId,
