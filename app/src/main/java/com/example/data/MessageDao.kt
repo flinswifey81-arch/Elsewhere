@@ -5,6 +5,12 @@ import com.example.data.model.GenerationMetadataEntity
 import com.example.data.model.MessageEntity
 import kotlinx.coroutines.flow.Flow
 
+/** Bounded selected generation context fetched from one consistent Room snapshot. */
+data class SelectedGroupGenerationWindow(
+    val messages: List<MessageEntity>,
+    val latestPersona: MessageEntity?
+)
+
 @Dao
 interface MessageDao {
     // Only fetch primary variants for normal chat view
@@ -44,6 +50,16 @@ interface MessageDao {
         chatId: String,
         resetBoundary: Long?
     ): MessageEntity?
+
+    @Transaction
+    suspend fun getSelectedGroupGenerationWindow(
+        chatId: String,
+        resetBoundary: Long?,
+        limit: Int
+    ): SelectedGroupGenerationWindow = SelectedGroupGenerationWindow(
+        messages = getLatestPrimaryWindow(chatId, limit).asReversed(),
+        latestPersona = getLatestPrimaryPersona(chatId, resetBoundary)
+    )
 
     /**
      * Provenance-only lookup for saved memory sources. Query is bounded by
