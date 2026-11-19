@@ -750,6 +750,7 @@ class BackupRepository internal constructor(
                 perspective.revision > 0L &&
                 perspective.characterId in membersByChat[memory.chatId].orEmpty() &&
                 perspective.stance in setOf("KNOWS", "BELIEVES", "SUSPECTS", "UNAWARE") &&
+                perspective.contentSha256.matches(Regex("[0-9a-f]{64}")) &&
                 (perspective.note == null || perspective.note.length <= 2_000)
         }
         requireRefs(payload.storyMemoryKnowledgeChanges, "story memory knowledge change") { change ->
