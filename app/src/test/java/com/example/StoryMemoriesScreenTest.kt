@@ -112,7 +112,13 @@ class StoryMemoriesScreenTest {
                 .fetchSemanticsNodes().isNotEmpty()
         }
         assertTrue(runBlocking { database.storyMemoryDao().getAllReturns().isEmpty() })
-        composeRule.onNodeWithTag("restore_memory_$firstMemoryId").performClick()
+        // The relationship controls make the top of this LazyColumn taller.
+        // The restore action may be composed but off-screen; a touch click
+        // must not be injected until it is actually visible to the player.
+        composeRule.onNodeWithTag("restore_memory_$firstMemoryId", useUnmergedTree = true)
+            .performScrollTo()
+            .assertIsDisplayed()
+            .performClick()
         composeRule.waitUntil(10_000) {
             composeRule.onAllNodesWithTag("story_memory_restore_dialog", useUnmergedTree = true)
                 .fetchSemanticsNodes().isNotEmpty()
