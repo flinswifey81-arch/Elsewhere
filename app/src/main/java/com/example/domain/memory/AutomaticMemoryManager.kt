@@ -104,7 +104,7 @@ class AutomaticMemoryManager(
         var saved = 0
         var offset = 0
         while (true) {
-            val page = messageRepository.getSelectedHistoryReversePage(
+            val page = messageRepository.getSelectedHistoryForwardPage(
                 chatId, resetBoundary, offset, pageSize = 128
             )
             if (page.isEmpty()) break
