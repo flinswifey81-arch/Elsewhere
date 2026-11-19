@@ -32,6 +32,22 @@ class MessageAttachmentRepository(
     private val storageMutex = Mutex()
     fun observeForChat(chatId: String): Flow<List<MessageAttachmentEntity>> = dao.observeForChat(chatId)
 
+    /**
+     * Display-only subscription. Queries the same newest logical groups as
+     * paginated chat history while keeping drafts visible in the composer.
+     * Never use for exports or reconstructing the complete chat archive.
+     */
+    fun observeVisibleForChat(
+        chatId: String,
+        visibleGroupLimit: Int
+    ): Flow<List<MessageAttachmentEntity>> {
+        require(visibleGroupLimit in 1 until Int.MAX_VALUE) {
+            "Visible group limit must be positive."
+        }
+        return dao.observeVisibleForChat(chatId, visibleGroupLimit)
+    }
+
+
     suspend fun importDraftImage(chatId: String, uri: Uri): MessageAttachmentEntity =
         dataCoordinator.withMutation {
             storageMutex.withLock {
