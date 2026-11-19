@@ -47,7 +47,10 @@ class StoryMemoryRepository(
         database.withTransaction {
             val chat = requireNotNull(database.chatDao().getChatById(chatId)) { "Chat no longer exists." }
             val latest = database.chatDao().getLatestMessageOrderIndex(chatId) ?: -1L
-            val ordinal = maxOf(latest, chat.contextResetOrderIndex ?: -1L) + 1L
+            val latestMemory = dao.maxSourceOrderForChat(chatId) ?: -1L
+            val previousOrder = maxOf(latest, latestMemory, chat.contextResetOrderIndex ?: -1L)
+            require(previousOrder < Long.MAX_VALUE) { "Story memory chronology is exhausted." }
+            val ordinal = previousOrder + 1L
             // STORYTELLER_ONLY never grants a Character omniscient knowledge.
             StoryMemoryEntity(
                 chatId = chatId, ownerId = chatId,
@@ -247,6 +250,15 @@ class StoryMemoryRepository(
             val cleaned = text?.trim()
             if (cleaned != null) require(cleaned.isNotBlank() && cleaned.length <= 12_000) {
                 "A memory must contain 1–12,000 characters."
+            }
+            // Once superseded by a newer relationship state, an older state
+            // must never re-enter live recall via the generic Resolve action.
+            // Resolved records similarly cannot be silently reopened as current.
+            if (lifecycle != null && lifecycle.name != old.lifecycle) {
+                require(old.lifecycle == StoryMemoryLifecycle.ACTIVE.name &&
+                    lifecycle == StoryMemoryLifecycle.RESOLVED) {
+                    "Only an active memory can be resolved; superseded history stays superseded."
+                }
             }
             val now = System.currentTimeMillis()
             old.copy(
