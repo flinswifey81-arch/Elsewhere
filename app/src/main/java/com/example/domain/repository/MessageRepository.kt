@@ -14,6 +14,19 @@ class MessageRepository(
         return messageDao.getMessagesForChat(chatId)
     }
 
+    /**
+     * UI display only. Returns complete variant groups; the extra group is
+     * a has-earlier sentinel. Never use for export, synchronization or
+     * long-term memory maintenance, which require archival queries.
+     */
+    fun observeRecentMessageGroups(
+        chatId: String,
+        visibleGroupLimit: Int
+    ): Flow<List<MessageEntity>> {
+        require(visibleGroupLimit in 1..10_000) { "Visible group limit must be 1..10,000." }
+        return messageDao.observeRecentMessageGroups(chatId, visibleGroupLimit + 1)
+    }
+
     suspend fun getMessagesForChatOnce(chatId: String): List<MessageEntity> =
         messageDao.getMessagesForChatOnce(chatId)
 
