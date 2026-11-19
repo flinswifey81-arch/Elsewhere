@@ -57,6 +57,9 @@ data class StoryMemoryRecord(
     val claim: StoryMemoryClaim,
     val visibility: StoryMemoryVisibility,
     val knownBy: Set<StoryActorRef> = emptySet(),
+    // User-authored, recipient-specific in-fiction perspective. This is NOT
+    // an authorization grant and cannot replace the ordinary knowledge gate.
+    val perspectives: Map<StoryActorRef, StoryCharacterPerspective> = emptyMap(),
     val believedBy: StoryActorRef? = null,
     val actors: Set<StoryActorRef> = emptySet(),
     val review: StoryMemoryReview = StoryMemoryReview.PENDING_REVIEW,
@@ -210,6 +213,12 @@ object StoryMemoryEligibilityPolicy {
         record: StoryMemoryRecord,
         recipient: StoryActorRef
     ): StoryMemoryExclusion {
+        // Explicit UNAWARE is a hard denial, even when an older KNOWS
+        // permission still exists. Notes and other actors' perspectives
+        // are never injected into a recipient's prompt.
+        if (recipient.kind == StoryActorKind.CHARACTER &&
+            record.perspectives[recipient] == StoryCharacterPerspective.UNAWARE
+        ) return StoryMemoryExclusion.NOT_KNOWN_TO_RECIPIENT
         // Source participants or actors mentioned in text are NOT proof of access.
         val visibilityValid = when (record.visibility) {
             StoryMemoryVisibility.PUBLIC -> true
