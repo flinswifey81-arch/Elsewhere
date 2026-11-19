@@ -28,6 +28,25 @@ interface MessageDao {
     @Query("SELECT * FROM messages WHERE chatId = :chatId AND variantGroupId IN (:variantGroupIds)")
     suspend fun getMemorySourceVariants(chatId: String, variantGroupIds: List<String>): List<MessageEntity>
 
+    /**
+     * A source and its selected alternatives must be checked against the SAME
+     * Room snapshot. A regenerate/variant switch between the source and
+     * variant queries must never authorize stale character knowledge.
+     */
+    @Transaction
+    suspend fun readMemoryProvenanceSnapshot(
+        chatId: String,
+        sourceMessageIds: List<String>,
+        explicitVariantGroupIds: List<String>
+    ): List<MessageEntity> {
+        val sources = sourceMessageIds.asSequence().filter(String::isNotBlank)
+            .distinct().toList().chunked(400).flatMap { getMemorySourceMessages(chatId, it) }
+        val groups = (explicitVariantGroupIds.asSequence() + sources.asSequence().map { it.variantGroupId })
+            .filter(String::isNotBlank).distinct().toList()
+        val variants = groups.chunked(400).flatMap { getMemorySourceVariants(chatId, it) }
+        return (sources + variants).distinctBy { it.messageId }
+    }
+
     @Query("SELECT * FROM messages WHERE messageId = :messageId LIMIT 1")
     suspend fun getMessageById(messageId: String): MessageEntity?
 
