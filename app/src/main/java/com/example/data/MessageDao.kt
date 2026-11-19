@@ -58,6 +58,15 @@ interface MessageDao {
         groupLimitPlusOne: Int
     ): Flow<List<MessageEntity>>
 
+    /** Count logical bubbles, not variant rows. Used to retain the reader's
+     * oldest loaded anchor when a new reply arrives during scrollback.
+     */
+    @Query("""
+        SELECT COUNT(DISTINCT COALESCE(variantGroupId, messageId))
+        FROM messages WHERE chatId = :chatId
+    """)
+    suspend fun countLogicalMessageGroups(chatId: String): Int
+
     /**
      * Latest selected turns for a bounded Group generation window. Reversing
      * the result restores the same oldest-to-newest story chronology. ORDER
