@@ -4,6 +4,7 @@ import androidx.room.withTransaction
 import com.example.data.AppDatabase
 import com.example.data.model.StoryMemoryActorEntity
 import com.example.data.model.StoryMemoryKnowledgeChangeEntity
+import com.example.data.model.StoryMemoryPerspectiveEntity
 import com.example.data.model.StoryMemoryEntity
 import com.example.data.model.StoryMemoryReturnEntity
 import com.example.domain.memory.*
@@ -536,6 +537,72 @@ class StoryMemoryRepository(
         }
     }
 
+
+    /**
+     * Player-authored in-fiction perspective, separate from recipient access.
+     * A recorded BELIEVES/SUSPECTS state NEVER grants memory access by itself.
+     * Existing source, branch, review and Wack gates remain authoritative.
+     */
+    suspend fun recordCharacterPerspective(
+        chatId: String,
+        memoryId: String,
+        characterId: String,
+        stance: StoryCharacterPerspective,
+        note: String = ""
+    ): StoryMemoryPerspectiveEntity = dataCoordinator.withMutation {
+        require(note.length <= 2_000) { "Perspective note must be at most 2,000 characters." }
+        val cleanedNote = note.trim().ifEmpty { null }
+        database.withTransaction {
+            requireNotNull(get(chatId, memoryId)) {
+                "Memory does not belong to this chat."
+            }
+            val chat = requireNotNull(database.chatDao().getChatById(chatId)) {
+                "Chat no longer exists."
+            }
+            val members = database.chatDao().getParticipantsForChatOnce(chatId)
+                .map { it.characterId }.toSet()
+            require(characterId in members) {
+                "Only a participating Character can have an in-story perspective."
+            }
+            val prior = dao.currentPerspectivesForMemory(memoryId)
+                .singleOrNull { it.characterId == characterId }
+            if (prior != null && prior.stance == stance.name && prior.note == cleanedNote) {
+                return@withTransaction prior
+            }
+            val previousRevision = dao.latestPerspectiveRevision(memoryId, characterId)
+            require(previousRevision < Long.MAX_VALUE) {
+                "Perspective revision limit reached."
+            }
+            StoryMemoryPerspectiveEntity(
+                memoryId = memoryId,
+                characterId = characterId,
+                revision = previousRevision + 1L,
+                stance = stance.name,
+                note = cleanedNote,
+                latestMessageOrderIndex = database.chatDao().getLatestMessageOrderIndex(chatId),
+                wackBoundaryOrderIndex = chat.contextResetOrderIndex
+            ).also(dao::insertPerspective)
+        }
+    }
+
+    suspend fun getCurrentCharacterPerspectives(
+        chatId: String, memoryId: String
+    ): List<StoryMemoryPerspectiveEntity> = database.withTransaction {
+        requireNotNull(get(chatId, memoryId)) {
+            "Memory does not belong to this chat."
+        }
+        dao.currentPerspectivesForMemory(memoryId)
+    }
+
+    suspend fun getCharacterPerspectiveHistory(
+        chatId: String, memoryId: String, characterId: String
+    ): List<StoryMemoryPerspectiveEntity> = database.withTransaction {
+        requireNotNull(get(chatId, memoryId)) {
+            "Memory does not belong to this chat."
+        }
+        dao.perspectiveHistory(memoryId, characterId)
+    }
+
     /**
      * Player-accessible assignment history. These are manual permission
      * changes, NOT narrator claims or proof a character learned/forgot in RP.
@@ -630,9 +697,25 @@ class StoryMemoryRepository(
         // Corrupt or unknown historical values fail closed; do not project
         // an unrecognizable audience or source into a provider prompt.
         val actorsByMemory = dao.actorsForChat(chatId).groupBy { it.memoryId }
+        // Select ONLY this generation recipient's current perspective.
+        // This cannot transfer another Character's private thoughts or
+        // promote a player's note into a model-readable fact.
+        val perspectivesByMemory = if (recipient.kind == StoryActorKind.CHARACTER) {
+            dao.currentPerspectivesForChat(chatId)
+                .filter { it.characterId == recipient.stableId }
+                .associateBy { it.memoryId }
+        } else emptyMap()
         val candidates = dao.forChat(chatId).mapNotNull { memory ->
             try {
-                recordFor(memory, actorsByMemory[memory.memoryId].orEmpty())
+                val original = recordFor(memory, actorsByMemory[memory.memoryId].orEmpty())
+                val perspective = perspectivesByMemory[memory.memoryId]
+                    ?.let { StoryCharacterPerspective.valueOf(it.stance) }
+                if (perspective == null) original else original.copy(
+                    perspectives = mapOf(recipient to perspective),
+                    content = if (perspective in setOf(
+                        StoryCharacterPerspective.BELIEVES, StoryCharacterPerspective.SUSPECTS
+                    )) perspective.wrapForCharacter(original.content) else original.content
+                )
             } catch (_: IllegalArgumentException) { null }
         }
         val archived = MemoryProvenanceReader(database.messageDao()).read(
