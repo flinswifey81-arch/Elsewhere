@@ -25,6 +25,7 @@ import com.example.domain.repository.StoryPromiseEntry
 import com.example.domain.repository.StoryPromiseOutcome
 import com.example.domain.memory.StoryCharacterPerspective
 import com.example.domain.memory.StoryMemoryClaim
+import com.example.domain.memory.StoryMemoryEligibilityPolicy
 import com.example.domain.memory.StoryMemoryLifecycle
 import com.example.domain.repository.ChatRepository
 import com.example.domain.repository.StoryMemoryRepository
@@ -406,6 +407,9 @@ fun StoryMemoriesScreen(
     }
 
     perspectiveMemory?.let { memory ->
+        val memoryFingerprint = remember(memory.memoryId, memory.content) {
+            StoryMemoryEligibilityPolicy.sha256(memory.content)
+        }
         var choosingCharacter by remember(memory.memoryId) { mutableStateOf(false) }
         var choosingStance by remember(memory.memoryId) { mutableStateOf(false) }
         AlertDialog(
@@ -477,6 +481,19 @@ fun StoryMemoriesScreen(
                                 )
                             }
                         }
+                    }
+                    val currentPerspective = perspectiveCurrent.firstOrNull {
+                        it.characterId == perspectiveCharacterId
+                    }
+                    if (currentPerspective != null &&
+                        currentPerspective.contentSha256 != memoryFingerprint
+                    ) {
+                        Text(
+                            "This memory has been edited since the last perspective was saved. " +
+                                "The old perspective is excluded from recall until you confirm it again.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
                     }
                     OutlinedTextField(
                         value = perspectiveNote,
