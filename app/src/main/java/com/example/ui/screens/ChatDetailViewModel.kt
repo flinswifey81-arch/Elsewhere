@@ -427,6 +427,17 @@ class ChatDetailViewModel(
         }
     }
 
+    /**
+     * The reader returned to the newest messages. Release older UI pages so
+     * a long open chat stays bounded during ordinary conversation. Nothing
+     * is deleted: scrolling up fetches the same archival groups from Room.
+     */
+    fun returnToLatestMessages() {
+        if (visibleHistoryGroupLimit.value > INITIAL_VISIBLE_GROUPS) {
+            visibleHistoryGroupLimit.value = INITIAL_VISIBLE_GROUPS
+        }
+    }
+
     fun onDraftChanged(newDraft: String) {
         currentDraft.value = newDraft
         viewModelScope.launch {
