@@ -17,6 +17,7 @@ import com.example.domain.story.StorySegmentType
 import com.example.domain.story.StoryResponseCodec
 import com.example.domain.story.StorySpeakerIdentity
 import com.example.domain.memory.StoryMemoryRecord
+import com.example.domain.memory.promptClaimLabel
 
 class ContextCompilerV1 {
 
@@ -216,7 +217,7 @@ class ContextCompilerV1 {
                 appendLine("--- RELEVANT CHAT STORY MEMORY (RECIPIENT APPROVED) ---")
                 appendLine("Only the responding Character may treat these approved local memories as known. Do not transfer private knowledge to other Characters, override later events, or promote them to shared World canon.")
                 storyMemories.forEach { memory ->
-                    appendLine("- [${memory.claim.name}] ${memory.content}")
+                    appendLine("- [${memory.promptClaimLabel()}] ${memory.content}")
                 }
                 appendLine()
             }
