@@ -21,6 +21,36 @@ interface MessageDao {
     suspend fun getMessagesForChatOnce(chatId: String): List<MessageEntity>
 
     /**
+     * UI-only window of complete logical message groups (all regeneration
+     * variants included), newest [groupLimitPlusOne] groups. The extra group
+     * lets the ViewModel know if older history exists without a second query.
+     *
+     * SQLite groups rows before limiting, so an older selected variant is
+     * never detached from the message bubble it belongs to. Full-history
+     * repository APIs remain available for export, co-op and maintenance.
+     */
+    @Query("""
+        SELECT * FROM messages
+        WHERE chatId = :chatId
+          AND COALESCE(variantGroupId, messageId) IN (
+              SELECT COALESCE(variantGroupId, messageId) AS groupKey
+              FROM messages
+              WHERE chatId = :chatId
+              GROUP BY groupKey
+              ORDER BY COALESCE(
+                  MAX(CASE WHEN isPrimaryVariant = 1 THEN orderIndex END),
+                  MIN(orderIndex)
+              ) DESC, groupKey DESC
+              LIMIT :groupLimitPlusOne
+          )
+        ORDER BY orderIndex ASC, rowid ASC
+    """)
+    fun observeRecentMessageGroups(
+        chatId: String,
+        groupLimitPlusOne: Int
+    ): Flow<List<MessageEntity>>
+
+    /**
      * Latest selected turns for a bounded Group generation window. Reversing
      * the result restores the same oldest-to-newest story chronology. ORDER
      * BY rowid is the deterministic insertion-order tie break for messages
