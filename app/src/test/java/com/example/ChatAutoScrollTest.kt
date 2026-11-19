@@ -120,14 +120,16 @@ class ChatAutoScrollTest {
 
         // A user who scrolls toward the top either triggers the automatic
         // edge callback or can explicitly press the accessible load control.
-        composeTestRule.onNodeWithText("Load earlier messages")
-            .performScrollTo()
+        // LazyColumn doesn't compose the distant header until its index
+        // enters the viewport. Scroll the list itself to index zero, then
+        // invoke the accessible button if auto-pagination hasn't fired.
+        composeTestRule.onNode(hasScrollAction()).performScrollToIndex(0)
         composeTestRule.waitForIdle()
         if (!loadedEarlier.value) {
             composeTestRule.onNodeWithText("Load earlier messages").performClick()
         }
         composeTestRule.waitForIdle()
-        assert(loadedEarlier.value)
+        org.junit.Assert.assertTrue(loadedEarlier.value)
         composeTestRule.onNodeWithText("Message 179").assertDoesNotExist()
     }
 
