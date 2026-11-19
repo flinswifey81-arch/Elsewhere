@@ -179,12 +179,13 @@ class AppDatabaseMigrationTest {
                 AppDatabase.MIGRATION_16_17,
                 AppDatabase.MIGRATION_17_18,
                 AppDatabase.MIGRATION_18_19,
-                AppDatabase.MIGRATION_19_20
+                AppDatabase.MIGRATION_19_20,
+                AppDatabase.MIGRATION_20_21
             )
             .allowMainThreadQueries()
             .build()
         try {
-            // Opening through Room executes every migration through 20 and validates the resulting schema.
+            // Opening through Room executes every migration through 21 and validates the resulting schema.
             migrated.openHelper.writableDatabase
             assertEquals("Keep Me", migrated.chatDao().getChatById("chat-keep")?.displayName)
             assertEquals("Preserve this", migrated.messageDao().getMessagesForChatOnce("chat-keep").single().content)
@@ -827,6 +828,57 @@ class AppDatabaseMigrationTest {
                 assertEquals("GRANTED", it.getString(2))
             }
             db.query("SELECT name FROM sqlite_master WHERE type='index' AND name='index_story_memory_knowledge_changes_characterId'").use {
+                assertTrue(it.moveToFirst())
+            }
+        } finally {
+            helper.close()
+        }
+    }
+
+    @Test
+    fun migrationFrom20To21PreservesMemoriesAndDoesNotInventCharacterPerspectives() {
+        val helper = FrameworkSQLiteOpenHelperFactory().create(
+            SupportSQLiteOpenHelper.Configuration.builder(context).name(databaseName)
+                .callback(object : SupportSQLiteOpenHelper.Callback(20) {
+                    override fun onCreate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                        db.execSQL("""
+                            CREATE TABLE story_memories (
+                                memoryId TEXT NOT NULL PRIMARY KEY,
+                                chatId TEXT NOT NULL,
+                                content TEXT NOT NULL
+                            )
+                        """.trimIndent())
+                    }
+                    override fun onUpgrade(
+                        db: androidx.sqlite.db.SupportSQLiteDatabase,
+                        oldVersion: Int, newVersion: Int
+                    ) = Unit
+                }).build()
+        )
+        try {
+            val db = helper.writableDatabase
+            db.execSQL("INSERT INTO story_memories VALUES ('old-memory', 'chat-a', 'Original text')")
+            AppDatabase.MIGRATION_20_21.migrate(db)
+            db.query("SELECT content FROM story_memories WHERE memoryId='old-memory'").use {
+                assertTrue(it.moveToFirst())
+                assertEquals("Original text", it.getString(0))
+            }
+            db.query("SELECT COUNT(*) FROM story_memory_perspectives").use {
+                assertTrue(it.moveToFirst())
+                assertEquals(0, it.getInt(0))
+            }
+            db.execSQL("""
+                INSERT INTO story_memory_perspectives
+                (memoryId, characterId, revision, stance, note,
+                    latestMessageOrderIndex, wackBoundaryOrderIndex, recordedAtEpochMillis)
+                VALUES ('old-memory', 'rowan', 1, 'SUSPECTS', NULL, 35, NULL, 1000)
+            """.trimIndent())
+            db.query("SELECT stance, revision FROM story_memory_perspectives WHERE memoryId='old-memory'").use {
+                assertTrue(it.moveToFirst())
+                assertEquals("SUSPECTS", it.getString(0))
+                assertEquals(1L, it.getLong(1))
+            }
+            db.query("SELECT name FROM sqlite_master WHERE type='index' AND name='index_story_memory_perspectives_characterId'").use {
                 assertTrue(it.moveToFirst())
             }
         } finally {
