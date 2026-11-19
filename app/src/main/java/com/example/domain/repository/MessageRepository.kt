@@ -3,6 +3,8 @@ package com.example.domain.repository
 import com.example.data.MessageDao
 import com.example.data.model.GenerationMetadataEntity
 import com.example.data.model.MessageEntity
+import com.example.data.model.SpeakerType
+import com.example.domain.compiler.HistoricalGenerationWindow
 import kotlinx.coroutines.flow.Flow
 
 class MessageRepository(
@@ -82,6 +84,56 @@ class MessageRepository(
         require(offset >= 0) { "History offset cannot be negative." }
         require(pageSize in 1..256) { "History page size must be between 1 and 256." }
         return messageDao.getSelectedHistoryForwardPage(chatId, resetBoundary, pageSize, offset)
+    }
+
+    /**
+     * When the UI only holds a paged history, an older Regenerate/Continue
+     * action must still recover the right preceding Persona and 24 context
+     * turns. The DAO reads the selected branch atomically as of the target,
+     * rather than loading 10k messages just to regenerate an older bubble.
+     */
+    suspend fun selectHistoricalAction(
+        chatId: String,
+        targetMessageId: String,
+        isGroup: Boolean,
+        isContinuation: Boolean,
+        resetBoundary: Long?
+    ): HistoricalGenerationWindow.Selection? {
+        val snapshot = messageDao.getHistoricalActionSnapshot(
+            chatId, targetMessageId, resetBoundary
+        ) ?: return null
+        val target = snapshot.target
+
+        fun withPersonaAnchor(
+            recent: List<MessageEntity>,
+            current: MessageEntity
+        ): List<MessageEntity> {
+            if (current.speakerType == SpeakerType.PERSONA ||
+                recent.any { it.speakerType == SpeakerType.PERSONA }) return recent
+            val persona = snapshot.lastPersonaBeforeTarget ?: return recent
+            return listOf(persona) + recent
+        }
+
+        return if (isContinuation) {
+            if (!target.isPrimaryVariant ||
+                target.speakerType !in setOf(SpeakerType.CHARACTER, SpeakerType.NARRATOR)
+            ) return null
+            val recent = snapshot.beforeTargetNewestFirst.take(24).asReversed()
+            HistoricalGenerationWindow.Selection(
+                target, target, withPersonaAnchor(recent, target)
+            )
+        } else if (isGroup) {
+            val current = snapshot.beforeTargetNewestFirst.firstOrNull() ?: return null
+            val recent = snapshot.beforeTargetNewestFirst.drop(1).take(24).asReversed()
+            HistoricalGenerationWindow.Selection(
+                target, current, withPersonaAnchor(recent, current)
+            )
+        } else {
+            val persona = snapshot.lastPersonaBeforeTarget ?: return null
+            HistoricalGenerationWindow.Selection(
+                target, persona, snapshot.beforePersonaNewestFirst.asReversed()
+            )
+        }
     }
 
     /**
