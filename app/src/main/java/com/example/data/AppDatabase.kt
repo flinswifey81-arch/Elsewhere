@@ -7,7 +7,7 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.example.data.model.*
 
-const val APP_DATABASE_VERSION = 18
+const val APP_DATABASE_VERSION = 19
 
 @Database(
     entities = [
@@ -68,6 +68,18 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun worldDao(): WorldDao
 
     companion object {
+        /** Append-only memory-state metadata. Existing memories keep NULL lineage. */
+        val MIGRATION_18_19 = object : Migration(18, 19) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE story_memories ADD COLUMN previousStateMemoryId TEXT")
+                db.execSQL("ALTER TABLE story_memories ADD COLUMN promiseOutcome TEXT")
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_story_memories_previousStateMemoryId " +
+                        "ON story_memories(previousStateMemoryId)"
+                )
+            }
+        }
+
         /** Additive index for bounded selected-turn chronology; preserves all variants. */
         val MIGRATION_17_18 = object : Migration(17, 18) {
             override fun migrate(db: SupportSQLiteDatabase) {
