@@ -14,6 +14,9 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import com.example.data.model.StoryMemoryEntity
 import com.example.data.model.CharacterEntity
+import com.example.domain.memory.StoryActorKind
+import com.example.domain.memory.StoryActorRef
+import com.example.domain.repository.StoryRelationshipEntry
 import com.example.domain.memory.StoryMemoryClaim
 import com.example.domain.memory.StoryMemoryLifecycle
 import com.example.domain.repository.ChatRepository
@@ -48,16 +51,33 @@ fun StoryMemoriesScreen(
     var selectedKnowers by remember { mutableStateOf<Set<String>>(emptySet()) }
     var characters by remember(chatId) { mutableStateOf<List<CharacterEntity>>(emptyList()) }
     var knowers by remember(chatId) { mutableStateOf<Map<String, Set<String>>>(emptyMap()) }
+    var relationshipEntries by remember(chatId) {
+        mutableStateOf<List<StoryRelationshipEntry>>(emptyList())
+    }
+    var relationshipDialogOpen by remember { mutableStateOf(false) }
+    var continuingRelationship by remember { mutableStateOf<StoryRelationshipEntry?>(null) }
+    var participantChoices by remember(chatId) {
+        mutableStateOf<List<Pair<StoryActorRef, String>>>(emptyList())
+    }
 
     LaunchedEffect(chatId) {
         val summary = chatRepository.getChatSummaryById(chatId)
         boundary = summary?.chat?.contextResetOrderIndex
         characters = summary?.characters.orEmpty()
+        participantChoices =
+            summary?.personas.orEmpty().map {
+                StoryActorRef(StoryActorKind.PERSONA, it.personaId) to
+                    "${it.displayName} (Persona)"
+            } + summary?.characters.orEmpty().map {
+                StoryActorRef(StoryActorKind.CHARACTER, it.characterId) to
+                    "${it.displayName} (Character)"
+            }
     }
     LaunchedEffect(chatId, repository) {
         try {
             repository.observe(chatId).collect { current ->
                 memories = current
+                relationshipEntries = repository.getRelationshipHistory(chatId)
                 knowers = current.associate { it.memoryId to repository.getCharacterKnowers(chatId, it.memoryId) }
                 loading = false
             }
@@ -81,6 +101,10 @@ fun StoryMemoriesScreen(
     }
     var claim by remember(createDialog) { mutableStateOf(StoryMemoryClaim.FACT) }
     var selectingClaim by remember { mutableStateOf(false) }
+    val linkedRelationships = relationshipEntries.associateBy { it.memory.memoryId }
+    fun actorLabel(actor: StoryActorRef): String =
+        participantChoices.firstOrNull { it.first == actor }?.second
+            ?: "${actor.kind.name.lowercase()}: ${actor.stableId}"
 
     if (createDialog || editing != null) AlertDialog(
         onDismissRequest = { if (!working) { createDialog = false; editing = null } },
@@ -102,7 +126,9 @@ fun StoryMemoriesScreen(
                         Text("Type: ${claim.name.lowercase().replace('_', ' ')}")
                     }
                     DropdownMenu(selectingClaim, onDismissRequest = { selectingClaim = false }) {
-                        StoryMemoryClaim.entries.forEach { category ->
+                        StoryMemoryClaim.entries
+                            .filter { it != StoryMemoryClaim.RELATIONSHIP }
+                            .forEach { category ->
                             DropdownMenuItem(
                                 text = { Text(category.name.lowercase().replace('_', ' ')) },
                                 onClick = { claim = category; selectingClaim = false }
@@ -110,6 +136,8 @@ fun StoryMemoriesScreen(
                         }
                     }
                 }
+                Text("For evolving relationships, use Record relationship change to link both people and retain earlier states.",
+                    style = MaterialTheme.typography.bodySmall)
                 Text("Knowledge: Storyteller only by default. Use Who knows this? after saving to grant it.",
                     style = MaterialTheme.typography.bodySmall)
             }
@@ -134,6 +162,120 @@ fun StoryMemoriesScreen(
             }
         }
     )
+
+    if (relationshipDialogOpen) {
+        var relationshipText by remember(relationshipDialogOpen, continuingRelationship?.memory?.memoryId) {
+            mutableStateOf("")
+        }
+        var fromActor by remember(relationshipDialogOpen, continuingRelationship?.memory?.memoryId) {
+            mutableStateOf(continuingRelationship?.from ?: participantChoices.firstOrNull()?.first)
+        }
+        var toActor by remember(relationshipDialogOpen, continuingRelationship?.memory?.memoryId) {
+            mutableStateOf(continuingRelationship?.to ?:
+                participantChoices.firstOrNull { it.first != fromActor }?.first)
+        }
+        var fromExpanded by remember { mutableStateOf(false) }
+        var toExpanded by remember { mutableStateOf(false) }
+        val prior = continuingRelationship
+        AlertDialog(
+            onDismissRequest = {
+                if (!working) { relationshipDialogOpen = false; continuingRelationship = null }
+            },
+            title = { Text(if (prior == null) "Record relationship change"
+                else "Record a new relationship state") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        "Record a player-approved change for these two people. Earlier states remain in history. The new state is storyteller-only until you explicitly assign knowledge.",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Box {
+                        OutlinedButton(
+                            onClick = { fromExpanded = true },
+                            enabled = !working && prior == null
+                        ) { Text("From: " + (fromActor?.let(::actorLabel) ?: "Select person")) }
+                        DropdownMenu(
+                            expanded = fromExpanded,
+                            onDismissRequest = { fromExpanded = false }
+                        ) {
+                            participantChoices.forEach { (actor, label) ->
+                                DropdownMenuItem(
+                                    text = { Text(label) },
+                                    onClick = {
+                                        fromActor = actor
+                                        if (toActor == actor) toActor =
+                                            participantChoices.firstOrNull { it.first != actor }?.first
+                                        fromExpanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                    Box {
+                        OutlinedButton(
+                            onClick = { toExpanded = true },
+                            enabled = !working && prior == null
+                        ) { Text("To: " + (toActor?.let(::actorLabel) ?: "Select person")) }
+                        DropdownMenu(
+                            expanded = toExpanded,
+                            onDismissRequest = { toExpanded = false }
+                        ) {
+                            participantChoices.forEach { (actor, label) ->
+                                DropdownMenuItem(
+                                    text = { Text(label) },
+                                    onClick = { toActor = actor; toExpanded = false }
+                                )
+                            }
+                        }
+                    }
+                    if (prior != null) {
+                        Text("Earlier state (kept in history): ${prior.memory.content}",
+                            style = MaterialTheme.typography.bodySmall)
+                    }
+                    OutlinedTextField(
+                        value = relationshipText,
+                        onValueChange = { relationshipText = it.take(12_000) },
+                        label = { Text("How has this relationship changed?") },
+                        minLines = 3,
+                        supportingText = { Text("${relationshipText.length} / 12,000") },
+                        enabled = !working
+                    )
+                    if (participantChoices.size < 2) Text(
+                        "Add two Character/Persona participants to this chat first.",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = !working && relationshipText.isNotBlank() &&
+                        fromActor != null && toActor != null && fromActor != toActor,
+                    onClick = {
+                        val from = fromActor ?: return@TextButton
+                        val to = toActor ?: return@TextButton
+                        val description = relationshipText
+                        val previousId = prior?.memory?.memoryId
+                        applyChange {
+                            repository.saveRelationshipChange(
+                                chatId, from, to, description, previousId
+                            )
+                            relationshipDialogOpen = false
+                            continuingRelationship = null
+                        }
+                    }
+                ) { Text("Save relationship state") }
+            },
+            dismissButton = {
+                TextButton(
+                    enabled = !working,
+                    onClick = {
+                        relationshipDialogOpen = false
+                        continuingRelationship = null
+                    }
+                ) { Text("Cancel") }
+            }
+        )
+    }
 
     grantingKnowledge?.let { memory ->
         AlertDialog(
@@ -268,13 +410,39 @@ fun StoryMemoriesScreen(
                             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error
                         )
                         if (memories.isEmpty()) Text("No Story Memories saved in this chat yet.")
-                        OutlinedButton(onClick = { createDialog = true }, enabled = !working) { Text("Save new Story Memory") }
+                        OutlinedButton(onClick = { createDialog = true }, enabled = !working) {
+                            Text("Save new Story Memory")
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                continuingRelationship = null
+                                relationshipDialogOpen = true
+                            },
+                            enabled = !working && participantChoices.size >= 2,
+                            modifier = Modifier.testTag("record_relationship_change")
+                        ) { Text("Record relationship change") }
                     }
                 }
                 items(memories, key = { it.memoryId }) { memory ->
                     Card(Modifier.fillMaxWidth().testTag("story_memory_${memory.memoryId}")) {
                         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Text(memory.content, style = MaterialTheme.typography.bodyLarge)
+                            linkedRelationships[memory.memoryId]?.let { entry ->
+                                Text(
+                                    "Relationship: ${actorLabel(entry.from)} → ${actorLabel(entry.to)}",
+                                    style = MaterialTheme.typography.labelMedium
+                                )
+                                if (memory.lifecycle == StoryMemoryLifecycle.ACTIVE.name) {
+                                    OutlinedButton(
+                                        enabled = !working,
+                                        onClick = {
+                                            continuingRelationship = entry
+                                            relationshipDialogOpen = true
+                                        },
+                                        modifier = Modifier.testTag("relationship_change_${memory.memoryId}")
+                                    ) { Text("Record a change") }
+                                }
+                            }
                             Text(
                                 "${memory.claim.lowercase().replace('_', ' ')} • " +
                                     "${memory.lifecycle.lowercase()} • " +
