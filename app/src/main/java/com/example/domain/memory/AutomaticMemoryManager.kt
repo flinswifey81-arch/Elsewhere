@@ -70,18 +70,15 @@ class AutomaticMemoryManager(
             return AutomaticMemoryUpdateResult(savedMemoryCount, rollingSummaryUpdated = false)
         }
 
-        val olderMessages = allPrimaryMessages.take(cutoffIndex)
+        // A view avoids copying the entire older archive. The summary itself
+        // only retains the final 12,000 characters, so formatting 10,000 past
+        // turns and discarding nearly all of them is unnecessary.
+        val olderMessages = allPrimaryMessages.subList(0, cutoffIndex)
         if (olderMessages.isEmpty()) {
             return AutomaticMemoryUpdateResult(savedMemoryCount, rollingSummaryUpdated = false)
         }
 
-        val combined = olderMessages.joinToString("\n") { message ->
-            val compact = StoryResponseCodec.promptTranscript(
-                NpcStructuredOutputParser.finalVisibleStoryText(message.content)
-            ).replace(Regex("\\s+"), " ").trim().take(280)
-            "${message.speakerDisplayNameSnapshot}: $compact"
-        }
-            .takeLast(MAX_SUMMARY_CHARS)
+        val combined = rollingSummaryTail(olderMessages)
 
         repository.upsertSummary(
             ConversationSummaryEntity(
@@ -137,5 +134,28 @@ class AutomaticMemoryManager(
     companion object {
         const val DEFAULT_RECENT_MESSAGE_LIMIT = 24
         private const val MAX_SUMMARY_CHARS = 12_000
+
+        /**
+         * Identical to formatting every archived turn and taking the last
+         * MAX_SUMMARY_CHARS, but visits only as many trailing messages as are
+         * needed to cover the retained suffix. Earlier turns cannot change
+         * the ending once the retained text is long enough.
+         */
+        internal fun rollingSummaryTail(olderMessages: List<MessageEntity>): String {
+            val retained = ArrayDeque<String>()
+            var retainedChars = 0
+            for (index in olderMessages.indices.reversed()) {
+                val message = olderMessages[index]
+                val compact = StoryResponseCodec.promptTranscript(
+                    NpcStructuredOutputParser.finalVisibleStoryText(message.content)
+                ).replace(Regex("\\s+"), " ").trim().take(280)
+                val line = "${message.speakerDisplayNameSnapshot}: $compact"
+                val additionalChars = line.length + if (retained.isEmpty()) 0 else 1
+                retained.addFirst(line)
+                retainedChars += additionalChars
+                if (retainedChars >= MAX_SUMMARY_CHARS) break
+            }
+            return retained.joinToString("\n").takeLast(MAX_SUMMARY_CHARS)
+        }
     }
 }
