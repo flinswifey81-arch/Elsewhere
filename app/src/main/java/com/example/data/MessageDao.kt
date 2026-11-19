@@ -40,7 +40,7 @@ interface MessageDao {
               ORDER BY COALESCE(
                   MAX(CASE WHEN isPrimaryVariant = 1 THEN orderIndex END),
                   MIN(orderIndex)
-              ) DESC, groupKey DESC
+              ) DESC, MIN(rowid) DESC
               LIMIT :groupLimitPlusOne
           )
         ORDER BY orderIndex ASC, rowid ASC
