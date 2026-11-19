@@ -869,9 +869,11 @@ class AppDatabaseMigrationTest {
             }
             db.execSQL("""
                 INSERT INTO story_memory_perspectives
-                (memoryId, characterId, revision, stance, note,
+                (memoryId, characterId, revision, stance, contentSha256, note,
                     latestMessageOrderIndex, wackBoundaryOrderIndex, recordedAtEpochMillis)
-                VALUES ('old-memory', 'rowan', 1, 'SUSPECTS', NULL, 35, NULL, 1000)
+                VALUES ('old-memory', 'rowan', 1, 'SUSPECTS',
+                    '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+                    NULL, 35, NULL, 1000)
             """.trimIndent())
             db.query("SELECT stance, revision FROM story_memory_perspectives WHERE memoryId='old-memory'").use {
                 assertTrue(it.moveToFirst())
