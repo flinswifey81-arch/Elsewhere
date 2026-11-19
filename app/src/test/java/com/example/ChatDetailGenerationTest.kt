@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.net.Uri
 import androidx.room.Room
+import androidx.room.withTransaction
 import androidx.test.core.app.ApplicationProvider
 import com.example.data.AppDatabase
 import com.example.data.model.CharacterEntity
@@ -41,6 +42,7 @@ import com.example.domain.repository.LorebookRepository
 import com.example.domain.repository.MemoryRepository
 import com.example.domain.repository.StoryMemoryRepository
 import com.example.domain.memory.StoryMemoryClaim
+import com.example.domain.memory.AutomaticMemoryManager
 import com.example.domain.repository.MessageRepository
 import com.example.domain.repository.MessageAttachmentRepository
 import com.example.domain.repository.NpcRepository
@@ -251,6 +253,60 @@ class ChatDetailGenerationTest {
             "observedMessageCount=${state?.messages?.size}, requests=$requests, " +
             "historyLoaded=${state?.historyLoaded}, isGenerating=${state?.isGenerating}, " +
             "generationError=${state?.generationError}, partialStopped=${state?.partialStopped}"
+    }
+
+    @Test
+    fun soloRetryWithLongStoredHistoryKeepsMemorySummaryAndBoundsPrompt() = runBlocking {
+        val provider = SequentialResponseProvider(listOf("The compass is still safe."))
+        val harness = createHarness(provider, ResponseLengthProfile.NORMAL)
+        database.withTransaction {
+            for (index in 1..80) {
+                database.messageDao().insertMessage(
+                    MessageEntity(
+                        messageId = "retry-long-$index",
+                        chatId = harness.chatId,
+                        speakerType = if (index == 80 || index % 2 == 0)
+                            SpeakerType.PERSONA else SpeakerType.CHARACTER,
+                        speakerId = if (index == 80 || index % 2 == 0)
+                            "persona-1" else "character-1",
+                        speakerDisplayNameSnapshot = if (index == 80 || index % 2 == 0)
+                            "Mara" else "Rowan",
+                        content = when (index) {
+                            1 -> "VERY_OLD_RETRY_CONTEXT_MARKER"
+                            80 -> "I promise to find the compass."
+                            else -> "A story scene occurred at waypoint $index."
+                        },
+                        orderIndex = index.toLong()
+                    )
+                )
+            }
+        }
+        withTimeout(30_000) {
+            harness.viewModel.uiState.first { state ->
+                state is ChatUiState.Success && state.historyLoaded && state.messages.size == 80
+            }
+        }
+
+        harness.viewModel.retryGeneration()
+        awaitCompletedTurn(harness.viewModel, 81) { provider.requests.size }
+        assertEquals(1, provider.requests.size)
+        val request = provider.requests.single()
+        val prompt = request.joinToString("\n") { it.content }
+        assertFalse("Old transcript must not return to bounded context",
+            prompt.contains("VERY_OLD_RETRY_CONTEXT_MARKER"))
+        assertTrue(prompt.contains("I promise to find the compass."))
+        assertTrue(prompt.contains("waypoint 79"))
+
+        val saved = harness.messageRepository.getMessagesForChatOnce(harness.chatId)
+            .filter { it.isPrimaryVariant }
+        val expected = AutomaticMemoryManager.rollingSummaryTail(saved.dropLast(24))
+        val summary = requireNotNull(harness.memoryRepository.getSummaryOnce(harness.chatId))
+        assertEquals("Retry must preserve the full-history rolling summary semantics",
+            expected, summary.summary)
+        assertEquals(saved.dropLast(24).maxOf { it.orderIndex },
+            summary.summarizedThroughOrderIndex)
+        assertTrue(harness.memoryRepository.getMemoriesOnce(harness.chatId, "character-1")
+            .any { it.content == "to find the compass" })
     }
 
     @Test
