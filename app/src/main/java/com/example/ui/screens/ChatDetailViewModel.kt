@@ -180,7 +180,7 @@ class ChatDetailViewModel(
     private companion object {
         const val HISTORY_GROUP_PAGE_SIZE = 100
         const val INITIAL_VISIBLE_GROUPS = HISTORY_GROUP_PAGE_SIZE
-        const val MAX_VISIBLE_HISTORY_GROUPS = 10_000
+        const val MAX_VISIBLE_HISTORY_GROUPS = Int.MAX_VALUE - 1
     }
 
     private val _uiState = MutableStateFlow<ChatUiState>(ChatUiState.Loading)
