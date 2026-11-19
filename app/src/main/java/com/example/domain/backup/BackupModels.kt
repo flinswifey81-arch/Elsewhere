@@ -82,7 +82,9 @@ data class BackupPayload(
     // v16 addition: defaults preserve loading historical v15 backup payloads.
     val storyMemories: List<StoryMemoryEntity> = emptyList(),
     val storyMemoryActors: List<StoryMemoryActorEntity> = emptyList(),
-    val storyMemoryReturns: List<StoryMemoryReturnEntity> = emptyList()
+    val storyMemoryReturns: List<StoryMemoryReturnEntity> = emptyList(),
+    // v20, backward-compatible with earlier encrypted backup payloads.
+    val storyMemoryKnowledgeChanges: List<StoryMemoryKnowledgeChangeEntity> = emptyList()
 )
 
 data class BackupPreview(
