@@ -551,7 +551,7 @@ class StoryMemoryRepository(
         note: String = ""
     ): StoryMemoryPerspectiveEntity = dataCoordinator.withMutation {
         require(note.length <= 2_000) { "Perspective note must be at most 2,000 characters." }
-        val cleanedNote = note.trim().ifEmpty { null }
+        val cleanedNote = note.trim().takeIf { it.isNotEmpty() }
         database.withTransaction {
             requireNotNull(get(chatId, memoryId)) {
                 "Memory does not belong to this chat."
