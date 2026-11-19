@@ -954,7 +954,10 @@ class ChatDetailViewModel(
             return
         }
         dataCoordinator.withMutation(dataRevision) { Unit }
-        val scopedHistory = history.filter { ContextResetPolicy.includes(it, boundary) }
+        // Most stories have no Wack boundary. Reuse the existing ordered list
+        // instead of allocating a 10k-turn copy for every generation.
+        val scopedHistory = if (boundary == null) history
+            else history.filter { ContextResetPolicy.includes(it, boundary) }
         val prepared = prepareGeneration(
             currentMessage = currentMessage,
             history = scopedHistory,
@@ -1204,7 +1207,9 @@ class ChatDetailViewModel(
             updateSuccessState { it.copy(generationError = "This playthrough's scenario configuration is unavailable.") }
             return null
         }
-        val personaId = (history + current).lastOrNull { it.speakerType == SpeakerType.PERSONA }?.speakerId
+        val latestPersonaMessage = current.takeIf { it.speakerType == SpeakerType.PERSONA }
+            ?: history.lastOrNull { it.speakerType == SpeakerType.PERSONA }
+        val personaId = latestPersonaMessage?.speakerId
             ?: chatSummary?.personas?.firstOrNull()?.personaId ?: return null
         val persona = personaRepository.getPersonaById(personaId) ?: return null
         if (settings.providerRoutingMode == com.example.data.model.ProviderRoutingMode.LOCK && settings.providerEndpoint.isNullOrBlank()) {
@@ -1212,7 +1217,7 @@ class ChatDetailViewModel(
             return null
         }
         val modelId = settings.selectedModelId ?: "openrouter/auto"
-        val source = (history + current).lastOrNull { it.speakerType == SpeakerType.PERSONA }?.takeUnless { continuation }
+        val source = latestPersonaMessage?.takeUnless { continuation }
         val images = source?.let { messageAttachmentRepository?.providerImagesForMessage(it.messageId) }.orEmpty()
         if (images.isNotEmpty() && modelProvider.supportsImageInput(modelId) != true) {
             updateSuccessState { it.copy(generationError = "Choose a model with confirmed image input support, then retry.") }
@@ -1270,8 +1275,8 @@ class ChatDetailViewModel(
         if (summary.chat.chatType == ChatType.SCENARIO) return prepareScenario(currentMessage, history, isContinuation)
         val resolvedCharacterId = characterId ?: summary.characters.firstOrNull()?.characterId ?: return null
         val fullCharacter = characterRepository.getCharacterById(resolvedCharacterId) ?: return null
-        val relevantPersonaMessage = (listOf(currentMessage) + history.asReversed())
-            .firstOrNull { it.speakerType == SpeakerType.PERSONA }
+        val relevantPersonaMessage = currentMessage.takeIf { it.speakerType == SpeakerType.PERSONA }
+            ?: history.lastOrNull { it.speakerType == SpeakerType.PERSONA }
         val relevantPersonaId = relevantPersonaMessage?.speakerId
             ?: summary.personas.firstOrNull()?.personaId
             ?: return null
@@ -1339,7 +1344,13 @@ class ChatDetailViewModel(
                 chatId, afterOrderIndex = summary.chat.contextResetOrderIndex
             ).orEmpty()
         } else emptyList()
-        val sceneCast = NpcSceneCastResolver.resolve(projectedNpcDossiers, history + currentMessage)
+        // Scene-cast resolution looks at only 24 selected turns. Avoid copying
+        // the full archive just to construct its input. An unselected current
+        // variant must not consume one of those 24 selected history slots.
+        val recentScene = com.example.domain.compiler.RecentPrimaryMessageWindow.take(
+            history, if (currentMessage.isPrimaryVariant) 23 else 24
+        ) + currentMessage
+        val sceneCast = NpcSceneCastResolver.resolve(projectedNpcDossiers, recentScene)
         val presentNpcs = sceneCast.filter { it.presence == NpcScenePresence.PRESENT }.map { it.dossier }
         // NPC Bank stores continuity; the active Scene Cast controls whether we need speaker splitting.
         // Without any present NPC, ordinary Solo prose stays untouched.
