@@ -836,11 +836,46 @@ class ChatDetailViewModel(
                 if (coopSessionManager?.requestGeneration(chatId, selectedId, "NORMAL") == true) {
                     return@launch
                 }
-                val primaryMessages = hidePersistedNpcControlRegions(
-                    messageRepository.getMessagesForChatOnce(chatId)
-                )
-                    .filter { it.isPrimaryVariant }
-                val currentMessage = primaryMessages.lastOrNull()
+                // A Group Character responding to another Character cannot
+                // trigger legacy Persona-memory extraction. It only needs
+                // recent context for prompt assembly, not a transcript-sized
+                // read. Co-op keeps the full synchronized-history contract.
+                val inCoopRoom = coopSessionManager?.state?.value?.room?.chatId == chatId
+                val recentPrimary = if (!inCoopRoom) {
+                    messageRepository.getLatestPrimaryWindow(chatId, 25)
+                } else emptyList()
+                val recentCurrent = recentPrimary.lastOrNull()
+                val useBoundedWindow = recentCurrent?.speakerType == SpeakerType.CHARACTER &&
+                    !inCoopRoom
+                val selectedHistory = if (useBoundedWindow) {
+                    val latestPersona = messageRepository.getLatestPrimaryPersona(
+                        chatId, chatSummary?.chat?.contextResetOrderIndex
+                    )
+                    val windowHistory = recentPrimary.dropLast(1)
+                    val hasPersona = windowHistory.any { it.speakerType == SpeakerType.PERSONA }
+                    // Preserve the actual Persona's identity when 24+ AI turns
+                    // have elapsed; otherwise the compiler would fall back to
+                    // the first participant in the chat.
+                    val history = if (!hasPersona && latestPersona != null &&
+                        latestPersona.messageId != recentCurrent.messageId &&
+                        latestPersona.orderIndex <= recentCurrent.orderIndex
+                    ) listOf(latestPersona) + windowHistory else windowHistory
+                    hidePersistedNpcControlRegions(history)
+                } else {
+                    hidePersistedNpcControlRegions(
+                        messageRepository.getMessagesForChatOnce(chatId)
+                    ).filter { it.isPrimaryVariant }
+                        .dropLast(1)
+                }
+                val currentMessage = if (useBoundedWindow) {
+                    hidePersistedNpcControlRegions(listOf(requireNotNull(recentCurrent))).single()
+                } else {
+                    // This fallback is needed for a fresh Persona turn:
+                    // legacy automatic-memory maintenance still rebuilds the
+                    // rolling summary from all selected historical turns.
+                    val latest = messageRepository.getLatestPrimaryWindow(chatId, 1).lastOrNull()
+                    latest?.let { hidePersistedNpcControlRegions(listOf(it)).single() }
+                }
                 if (currentMessage == null) {
                     updateSuccessState {
                         it.copy(generationError = "Send a Persona message before generating a Character reply.")
@@ -849,7 +884,7 @@ class ChatDetailViewModel(
                 }
                 startGenerationInternal(
                     currentMessage = currentMessage,
-                    history = primaryMessages.dropLast(1),
+                    history = selectedHistory,
                     characterId = selectedId
                 )
             } catch (error: Exception) {
