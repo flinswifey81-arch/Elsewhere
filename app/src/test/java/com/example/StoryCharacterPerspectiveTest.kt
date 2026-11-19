@@ -11,6 +11,7 @@ import com.example.data.model.CharacterEntity
 import com.example.domain.memory.StoryActorKind
 import com.example.domain.memory.StoryActorRef
 import com.example.domain.memory.StoryCharacterPerspective
+import com.example.domain.memory.promptClaimLabel
 import com.example.domain.repository.AppDataMaintenanceCoordinator
 import com.example.domain.repository.StoryMemoryRepository
 import kotlinx.coroutines.runBlocking
@@ -70,6 +71,8 @@ class StoryCharacterPerspectiveTest {
         val suspect = story.retrieveForGeneration("story-a", rowan, "silver key tower")
         assertEquals(1, suspect.selected.size)
         assertTrue(suspect.selected.single().content.contains("Character suspicion"))
+        assertEquals("CHARACTER_SUSPICION_UNCONFIRMED",
+            suspect.selected.single().promptClaimLabel())
         assertTrue(suspect.selected.single().content.contains("NOT established fact"))
         assertFalse(suspect.selected.single().content.contains("Only the player sees"))
 
@@ -87,14 +90,16 @@ class StoryCharacterPerspectiveTest {
         )
         val believer = story.retrieveForGeneration("story-a", rowan, "silver key tower")
         assertTrue(believer.selected.single().content.contains("Character belief"))
+        assertEquals("CHARACTER_BELIEF_UNCONFIRMED",
+            believer.selected.single().promptClaimLabel())
         assertTrue(believer.selected.single().content.contains("NOT established fact"))
 
         story.recordCharacterPerspective(
             "story-a", memory.memoryId, "rowan", StoryCharacterPerspective.KNOWS
         )
-        assertEquals(listOf(memory.content),
-            story.retrieveForGeneration("story-a", rowan, "silver key tower")
-                .selected.map { it.content })
+        val confirmed = story.retrieveForGeneration("story-a", rowan, "silver key tower")
+        assertEquals(listOf(memory.content), confirmed.selected.map { it.content })
+        assertEquals("FACT", confirmed.selected.single().promptClaimLabel())
 
         story.recordCharacterPerspective(
             "story-a", memory.memoryId, "rowan", StoryCharacterPerspective.UNAWARE
