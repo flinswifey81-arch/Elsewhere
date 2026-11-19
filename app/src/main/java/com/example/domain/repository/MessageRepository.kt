@@ -17,6 +17,19 @@ class MessageRepository(
     suspend fun getMessagesForChatOnce(chatId: String): List<MessageEntity> =
         messageDao.getMessagesForChatOnce(chatId)
 
+    /**
+     * Legacy-memory read gate: validate only saved memory source messages
+     * and every alternate in their groups. Unattributed memories need no
+     * transcript scan and remain subject to the existing Wack policy.
+     */
+    suspend fun getLegacyMemoryProvenance(
+        chatId: String,
+        memories: List<com.example.data.model.RoleplayMemoryEntity>
+    ): List<MessageEntity> = MemoryProvenanceReader(messageDao).read(
+        chatId,
+        memories.mapNotNull { it.sourceMessageId }
+    )
+
     suspend fun insertMessage(message: MessageEntity) {
         dataCoordinator.withMutation { messageDao.insertMessage(message) }
     }
