@@ -89,6 +89,41 @@ class AutomaticMemoryManager(
         return newestFirst
     }
 
+    /**
+     * Explicit "Update Memory Now" reads the selected transcript in small,
+     * local Room pages. Unlike automatic capture, this operation deliberately
+     * inspects ALL eligible Persona turns for deterministic fact extraction,
+     * but never materializes the full archive in memory or makes model calls.
+     */
+    suspend fun updateFromStoredConversation(
+        chatId: String,
+        characterId: String,
+        messageRepository: MessageRepository,
+        resetBoundary: Long?
+    ): AutomaticMemoryUpdateResult {
+        var saved = 0
+        var offset = 0
+        while (true) {
+            val page = messageRepository.getSelectedHistoryReversePage(
+                chatId, resetBoundary, offset, pageSize = 128
+            )
+            if (page.isEmpty()) break
+            saved += persistPersonaMemories(
+                chatId, characterId,
+                page.filter { it.speakerType == com.example.data.model.SpeakerType.PERSONA }
+            )
+            offset += page.size
+            if (page.size < 128) break
+        }
+        val summarySource = loadSummarySource(
+            chatId, resetBoundary, messageRepository
+        )
+        return AutomaticMemoryUpdateResult(
+            savedMemoryCount = saved,
+            rollingSummaryUpdated = refreshRollingSummary(chatId, summarySource)
+        )
+    }
+
     suspend fun updateFromConversation(
         chatId: String,
         characterId: String,
@@ -106,28 +141,40 @@ class AutomaticMemoryManager(
         personaMessages: List<MessageEntity>,
         allPrimaryMessages: List<MessageEntity>
     ): AutomaticMemoryUpdateResult {
-        var savedMemoryCount = 0
+        val savedMemoryCount = persistPersonaMemories(chatId, characterId, personaMessages)
+        val summaryUpdated = refreshRollingSummary(chatId, allPrimaryMessages)
+        return AutomaticMemoryUpdateResult(savedMemoryCount, summaryUpdated)
+    }
+
+    private suspend fun persistPersonaMemories(
+        chatId: String,
+        characterId: String,
+        personaMessages: Iterable<MessageEntity>
+    ): Int {
+        var saved = 0
         personaMessages.forEach { personaMessage ->
             extractExplicitMemories(personaMessage.content).forEach { (category, content) ->
-                if (
-                    repository.insertIfNew(
-                        RoleplayMemoryEntity(
-                            chatId = chatId,
-                            characterId = characterId,
-                            category = category,
-                            content = content,
-                            sourceMessageId = personaMessage.messageId
-                        )
+                if (repository.insertIfNew(
+                    RoleplayMemoryEntity(
+                        chatId = chatId,
+                        characterId = characterId,
+                        category = category,
+                        content = content,
+                        sourceMessageId = personaMessage.messageId
                     )
-                ) {
-                    savedMemoryCount++
-                }
+                )) saved++
             }
         }
+        return saved
+    }
 
+    private suspend fun refreshRollingSummary(
+        chatId: String,
+        allPrimaryMessages: List<MessageEntity>
+    ): Boolean {
         val cutoffIndex = allPrimaryMessages.size - recentMessageLimit
         if (cutoffIndex <= 0) {
-            return AutomaticMemoryUpdateResult(savedMemoryCount, rollingSummaryUpdated = false)
+            return false
         }
 
         // A view avoids copying the entire older archive. The summary itself
@@ -147,7 +194,7 @@ class AutomaticMemoryManager(
                 summarizedThroughOrderIndex = olderMessages.maxOf { it.orderIndex }
             )
         )
-        return AutomaticMemoryUpdateResult(savedMemoryCount, rollingSummaryUpdated = true)
+        return true
     }
 
     internal fun extractExplicitMemories(text: String): List<Pair<MemoryCategory, String>> {
