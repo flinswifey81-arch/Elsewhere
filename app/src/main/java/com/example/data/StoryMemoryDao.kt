@@ -48,8 +48,10 @@ interface StoryMemoryDao {
     @Query("SELECT * FROM story_memory_perspectives p WHERE p.memoryId = :memoryId AND p.revision = (SELECT MAX(q.revision) FROM story_memory_perspectives q WHERE q.memoryId = p.memoryId AND q.characterId = p.characterId) ORDER BY p.characterId")
     suspend fun currentPerspectivesForMemory(memoryId: String): List<StoryMemoryPerspectiveEntity>
 
-    @Query("SELECT p.* FROM story_memory_perspectives p INNER JOIN story_memories m ON p.memoryId = m.memoryId WHERE m.chatId = :chatId AND p.revision = (SELECT MAX(q.revision) FROM story_memory_perspectives q WHERE q.memoryId = p.memoryId AND q.characterId = p.characterId)")
-    suspend fun currentPerspectivesForChat(chatId: String): List<StoryMemoryPerspectiveEntity>
+    @Query("SELECT p.* FROM story_memory_perspectives p INNER JOIN story_memories m ON p.memoryId = m.memoryId WHERE m.chatId = :chatId AND p.characterId = :characterId AND p.revision = (SELECT MAX(q.revision) FROM story_memory_perspectives q WHERE q.memoryId = p.memoryId AND q.characterId = :characterId)")
+    suspend fun currentPerspectivesForRecipient(
+        chatId: String, characterId: String
+    ): List<StoryMemoryPerspectiveEntity>
 
     @Query("SELECT * FROM story_memory_perspectives ORDER BY memoryId, characterId, revision")
     suspend fun getAllPerspectives(): List<StoryMemoryPerspectiveEntity>
