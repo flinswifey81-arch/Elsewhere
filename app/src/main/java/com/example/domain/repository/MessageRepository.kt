@@ -32,6 +32,15 @@ class MessageRepository(
         resetBoundary: Long?
     ): MessageEntity? = messageDao.getLatestPrimaryPersona(chatId, resetBoundary)
 
+    suspend fun getSelectedGroupGenerationWindow(
+        chatId: String,
+        resetBoundary: Long?,
+        maxTurns: Int = 25
+    ): com.example.data.SelectedGroupGenerationWindow {
+        require(maxTurns in 1..100) { "Bounded Group window must be within 1..100 turns." }
+        return messageDao.getSelectedGroupGenerationWindow(chatId, resetBoundary, maxTurns)
+    }
+
     /**
      * Legacy-memory read gate: validate only saved memory source messages
      * and every alternate in their groups. Unattributed memories need no
