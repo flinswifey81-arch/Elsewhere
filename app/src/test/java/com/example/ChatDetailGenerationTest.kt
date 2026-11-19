@@ -1359,6 +1359,84 @@ class ChatDetailGenerationTest {
     }
 
     @Test
+    fun chatViewModelPagesOlderCompleteMessageGroupsWithoutProviderCalls() = runBlocking {
+        val provider = CountingProvider()
+        val harness = createHarness(provider, ResponseLengthProfile.NORMAL)
+        withTimeout(15_000) {
+            harness.viewModel.uiState.first {
+                it is ChatUiState.Success && it.historyLoaded
+            }
+        }
+        database.withTransaction {
+            for (index in 1..250) {
+                database.messageDao().insertMessage(
+                    MessageEntity(
+                        messageId = "paged-turn-$index",
+                        chatId = harness.chatId,
+                        speakerType = if (index % 2 == 0)
+                            SpeakerType.PERSONA else SpeakerType.CHARACTER,
+                        speakerId = if (index % 2 == 0) "persona-1" else "character-1",
+                        speakerDisplayNameSnapshot = if (index % 2 == 0) "Mara" else "Rowan",
+                        content = "History event $index",
+                        orderIndex = index.toLong()
+                    )
+                )
+            }
+            database.messageDao().insertMessage(
+                MessageEntity(
+                    messageId = "paged-older-alternate",
+                    chatId = harness.chatId,
+                    speakerType = SpeakerType.CHARACTER,
+                    speakerId = "character-1",
+                    speakerDisplayNameSnapshot = "Rowan",
+                    content = "Discarded alternative event 49",
+                    orderIndex = 49L,
+                    variantGroupId = "paged-turn-49",
+                    isPrimaryVariant = false
+                )
+            )
+        }
+
+        val newest = withTimeout(30_000) {
+            harness.viewModel.uiState.first { state ->
+                state is ChatUiState.Success && state.historyLoaded &&
+                    state.groupedMessages.size == 100 && state.hasEarlierHistory &&
+                    !state.isLoadingEarlierHistory &&
+                    state.groupedMessages.last().primaryMessage.messageId == "paged-turn-250"
+            }
+        } as ChatUiState.Success
+        assertEquals("paged-turn-151", newest.groupedMessages.first().primaryMessage.messageId)
+        assertEquals(100, newest.messages.size)
+
+        harness.viewModel.loadEarlierMessages()
+        val second = withTimeout(30_000) {
+            harness.viewModel.uiState.first { state ->
+                state is ChatUiState.Success && state.groupedMessages.size == 200 &&
+                    !state.isLoadingEarlierHistory
+            }
+        } as ChatUiState.Success
+        assertTrue(second.hasEarlierHistory)
+        assertEquals("paged-turn-51", second.groupedMessages.first().primaryMessage.messageId)
+
+        harness.viewModel.loadEarlierMessages()
+        val all = withTimeout(30_000) {
+            harness.viewModel.uiState.first { state ->
+                state is ChatUiState.Success && state.groupedMessages.size == 250 &&
+                    !state.hasEarlierHistory && !state.isLoadingEarlierHistory
+            }
+        } as ChatUiState.Success
+        assertEquals("paged-turn-1", all.groupedMessages.first().primaryMessage.messageId)
+        assertEquals(251, all.messages.size)
+        assertEquals(
+            setOf("paged-turn-49", "paged-older-alternate"),
+            all.groupedMessages.single {
+                it.primaryMessage.messageId == "paged-turn-49"
+            }.variants.map { it.messageId }.toSet()
+        )
+        assertEquals(0, provider.requestCount)
+    }
+
+    @Test
     fun retryAndRegenerateReuseOriginImageWhileContinueDoesNotResendIt() = runBlocking {
         val provider = RequestSequenceProvider(
             listOf(
