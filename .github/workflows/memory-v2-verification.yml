@@ -1,0 +1,59 @@
+name: Memory V2 Verification
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'app/src/**'
+      - '.github/workflows/memory-v2-verification.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-memory-v2:
+    name: Compile and run memory / generation regressions
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out proposed changes
+        uses: actions/checkout@v4
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools
+      - name: Install Android SDK
+        run: sdkmanager "platforms;android-36.1" "build-tools;36.0.0"
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+      - name: Compile and run focused regressions
+        run: |
+          bash ./gradlew :app:testSandboxUnitTest --no-daemon \
+            --tests com.example.domain.PromptPreflightTest \
+            --tests com.example.domain.PromptHistoryTrimmerTest \
+            --tests com.example.domain.StoryMemoryTemporalRetrievalTest \
+            --tests com.example.domain.memory.StoryMemoryEligibilityPolicyTest \
+            --tests com.example.domain.StoryMemoryStorageTest \
+            --tests com.example.AppDatabaseMigrationTest \
+            --tests com.example.ChatDetailGenerationTest \
+            --tests com.example.ScenarioModeTest
+      - name: Show failed test summaries
+        if: failure()
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          from xml.etree import ElementTree as ET
+          for file in Path('app/build/test-results/testSandboxUnitTest').glob('TEST-*.xml'):
+              for case in ET.parse(file).getroot().iter('testcase'):
+                  for failure in list(case.findall('failure')) + list(case.findall('error')):
+                      print('FAIL:', case.get('classname'), case.get('name'))
+                      print(failure.get('message', ''))
+                      print((failure.text or '')[:3000])
+          PY
