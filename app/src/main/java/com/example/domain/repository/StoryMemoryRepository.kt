@@ -643,6 +643,9 @@ class StoryMemoryRepository(
     ): StoryMemoryEntity = dataCoordinator.withMutation {
         database.withTransaction {
             val old = requireNotNull(get(chatId, memoryId)) { "Memory does not belong to this chat." }
+            require(old.review == StoryMemoryReview.APPROVED.name) {
+                "Review and approve the proposal before assigning Character knowledge."
+            }
             val participants = database.chatDao().getParticipantsForChatOnce(chatId)
                 .map { it.characterId }.toSet()
             require(characterIds.all { it in participants }) {
@@ -731,6 +734,9 @@ class StoryMemoryRepository(
         database.withTransaction {
             val memory = requireNotNull(get(chatId, memoryId)) {
                 "Memory does not belong to this chat."
+            }
+            require(memory.review == StoryMemoryReview.APPROVED.name) {
+                "Review and approve the proposal before recording a Character perspective."
             }
             val contentSha256 = StoryMemoryEligibilityPolicy.sha256(memory.content)
             val chat = requireNotNull(database.chatDao().getChatById(chatId)) {
