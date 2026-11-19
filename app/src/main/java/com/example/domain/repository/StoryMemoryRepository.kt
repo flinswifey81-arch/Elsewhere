@@ -225,7 +225,6 @@ class StoryMemoryRepository(
         val chat = requireNotNull(database.chatDao().getChatById(chatId)) {
             "Chat no longer exists."
         }
-        val archived = database.messageDao().getMessagesForChatOnce(chatId)
         val returns = dao.returnsForChat(chatId).map(::toExplicitReturn).toSet()
         // Corrupt or unknown historical values fail closed; do not project
         // an unrecognizable audience or source into a provider prompt.
@@ -235,6 +234,21 @@ class StoryMemoryRepository(
                 recordFor(memory, actorsByMemory[memory.memoryId].orEmpty())
             } catch (_: IllegalArgumentException) { null }
         }
+        // Provenance validation only needs messages referenced by saved memories
+        // and the selected variants in those groups. Avoid loading a 10k-turn
+        // transcript on every generation. Query chunks stay below SQLite's
+        // commonly supported 999-parameter limit.
+        val sourceIds = candidates.mapNotNull {
+            (it.origin as? StoryMemoryOrigin.Message)?.messageId
+        }.distinct()
+        val variantIds = candidates.mapNotNull {
+            (it.origin as? StoryMemoryOrigin.Message)?.variantGroupId
+        }.distinct()
+        val messageDao = database.messageDao()
+        val archived = (
+            sourceIds.chunked(400).flatMap { messageDao.getMemorySourceMessages(chatId, it) } +
+            variantIds.chunked(400).flatMap { messageDao.getMemorySourceVariants(chatId, it) }
+        ).distinctBy { it.messageId }
         StoryMemoryLocalRetriever.search(
             candidates = candidates,
             request = StoryMemorySearchRequest(
