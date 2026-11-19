@@ -1501,6 +1501,18 @@ class ChatDetailGenerationTest {
                 it.primaryMessage.messageId == "paged-turn-49"
             }.variants.map { it.messageId }.toSet()
         )
+        val allImages = withTimeout(30_000) {
+            harness.viewModel.uiState.first { state ->
+                state is ChatUiState.Success &&
+                    state.groupedMessages.size == 251 &&
+                    state.attachments.map { it.attachmentId }.toSet() ==
+                        setOf("visible-image", "older-image", "alternate-image") &&
+                    state.draftAttachments.map { it.attachmentId } ==
+                        listOf("pending-draft-image")
+            }
+        } as ChatUiState.Success
+        assertEquals(3, allImages.attachments.size)
+
         // Returning to the latest reply releases the hydrated older pages,
         // but those groups and variants remain retrievable from Room.
         harness.viewModel.returnToLatestMessages()
@@ -1513,20 +1525,6 @@ class ChatDetailGenerationTest {
             }
         } as ChatUiState.Success
         assertEquals(100, collapsed.messages.size)
-        assertEquals(252,
-            harness.messageRepository.getMessagesForChatOnce(harness.chatId).size)
-        val allImages = withTimeout(30_000) {
-            harness.viewModel.loadEarlierMessages()
-            harness.viewModel.uiState.first { state ->
-                state is ChatUiState.Success &&
-                    state.attachments.map { it.attachmentId }.toSet() ==
-                        setOf("visible-image", "older-image", "alternate-image") &&
-                    state.draftAttachments.map { it.attachmentId } ==
-                        listOf("pending-draft-image")
-            }
-        } as ChatUiState.Success
-        assertEquals(3, allImages.attachments.size)
-        harness.viewModel.returnToLatestMessages()
         val latestImages = withTimeout(30_000) {
             harness.viewModel.uiState.first { state ->
                 state is ChatUiState.Success &&
@@ -1536,8 +1534,10 @@ class ChatDetailGenerationTest {
                         listOf("pending-draft-image")
             }
         } as ChatUiState.Success
-        assertEquals(4, database.messageAttachmentDao().getForChat(harness.chatId).size)
         assertEquals(1, latestImages.attachments.size)
+        assertEquals(4, database.messageAttachmentDao().getForChat(harness.chatId).size)
+        assertEquals(252,
+            harness.messageRepository.getMessagesForChatOnce(harness.chatId).size)
         assertEquals(0, provider.requestCount)
     }
 
