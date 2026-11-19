@@ -172,6 +172,49 @@ class StoryRelationshipStateTest {
         ).selected.isEmpty())
     }
 
+    @Test fun supersededRelationshipCannotBeResolvedBackIntoLiveRecall() = runBlocking {
+        val old = repository.saveRelationshipChange(
+            "story-a", mara, rowan, "Mara distrusts Rowan over the silver compass."
+        )
+        val current = repository.saveRelationshipChange(
+            "story-a", mara, rowan, "Mara forgives Rowan about the silver compass.",
+            supersedeMemoryId = old.memory.memoryId
+        )
+        // Previously the generic Resolve action changed SUPERSEDED to
+        // RESOLVED, which made the old contradictory state eligible again.
+        assertThrows(IllegalArgumentException::class.java) {
+            runBlocking {
+                repository.update("story-a", old.memory.memoryId,
+                    lifecycle = StoryMemoryLifecycle.RESOLVED)
+            }
+        }
+        assertEquals(StoryMemoryLifecycle.SUPERSEDED.name,
+            repository.get("story-a", old.memory.memoryId)?.lifecycle)
+        val result = repository.retrieveForGeneration(
+            chatId = "story-a",
+            recipient = StoryActorRef(StoryActorKind.NARRATOR, "narrator:story-a"),
+            sceneText = "Mara Rowan silver compass"
+        )
+        assertEquals(listOf(current.memory.memoryId),
+            result.selected.map { it.memoryId })
+    }
+
+    @Test fun manualMemoryOrderIsStrictEvenWhenNoNewMessagesExist() = runBlocking {
+        val first = repository.saveManual("story-a", "A silver compass was lost.")
+        val second = repository.saveManual("story-a", "A second search was arranged.")
+        val relationship = repository.saveRelationshipChange(
+            "story-a", mara, rowan, "Mara still trusts Rowan."
+        )
+        val third = repository.saveManual("story-a", "The compass was returned.")
+        assertEquals(listOf(first.sourceOrderIndex, second.sourceOrderIndex,
+            relationship.memory.sourceOrderIndex, third.sourceOrderIndex),
+            listOf(first, second, relationship.memory, third)
+                .map { it.sourceOrderIndex }.sorted())
+        assertTrue(first.sourceOrderIndex < second.sourceOrderIndex)
+        assertTrue(second.sourceOrderIndex < relationship.memory.sourceOrderIndex)
+        assertTrue(relationship.memory.sourceOrderIndex < third.sourceOrderIndex)
+    }
+
     @Test fun wackBlocksPreResetStateAndNewExplicitStateIsAfterBoundary() = runBlocking {
         val old = repository.saveRelationshipChange(
             "story-a", mara, rowan, "Mara distrusts Rowan."
