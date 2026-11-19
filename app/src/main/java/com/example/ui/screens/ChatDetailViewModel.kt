@@ -845,37 +845,31 @@ class ChatDetailViewModel(
                     messageRepository.getLatestPrimaryWindow(chatId, 25)
                 } else emptyList()
                 val recentCurrent = recentPrimary.lastOrNull()
-                val useBoundedWindow = recentCurrent?.speakerType == SpeakerType.CHARACTER &&
-                    !inCoopRoom
-                val selectedHistory = if (useBoundedWindow) {
-                    val latestPersona = messageRepository.getLatestPrimaryPersona(
-                        chatId, chatSummary?.chat?.contextResetOrderIndex
-                    )
-                    val windowHistory = recentPrimary.dropLast(1)
-                    val hasPersona = windowHistory.any { it.speakerType == SpeakerType.PERSONA }
-                    // Preserve the actual Persona's identity when 24+ AI turns
-                    // have elapsed; otherwise the compiler would fall back to
-                    // the first participant in the chat.
-                    val history = if (!hasPersona && latestPersona != null &&
-                        latestPersona.messageId != recentCurrent.messageId &&
-                        latestPersona.orderIndex <= recentCurrent.orderIndex
-                    ) listOf(latestPersona) + windowHistory else windowHistory
-                    hidePersistedNpcControlRegions(history)
-                } else {
-                    hidePersistedNpcControlRegions(
-                        messageRepository.getMessagesForChatOnce(chatId)
-                    ).filter { it.isPrimaryVariant }
-                        .dropLast(1)
-                }
-                val currentMessage = if (useBoundedWindow) {
-                    hidePersistedNpcControlRegions(listOf(requireNotNull(recentCurrent))).single()
-                } else {
-                    // This fallback is needed for a fresh Persona turn:
-                    // legacy automatic-memory maintenance still rebuilds the
-                    // rolling summary from all selected historical turns.
-                    val latest = messageRepository.getLatestPrimaryWindow(chatId, 1).lastOrNull()
-                    latest?.let { hidePersistedNpcControlRegions(listOf(it)).single() }
-                }
+                val (currentMessage, selectedHistory) =
+                    if (recentCurrent?.speakerType == SpeakerType.CHARACTER && !inCoopRoom) {
+                        val boundedCurrent = requireNotNull(recentCurrent)
+                        val latestPersona = messageRepository.getLatestPrimaryPersona(
+                            chatId, chatSummary?.chat?.contextResetOrderIndex
+                        )
+                        val windowHistory = recentPrimary.dropLast(1)
+                        val hasPersona = windowHistory.any { it.speakerType == SpeakerType.PERSONA }
+                        // Preserve the selected Persona after 24+ AI turns
+                        // without allowing pre-Wack Persona history to return.
+                        val history = if (!hasPersona && latestPersona != null &&
+                            latestPersona.messageId != boundedCurrent.messageId &&
+                            latestPersona.orderIndex <= boundedCurrent.orderIndex
+                        ) listOf(latestPersona) + windowHistory else windowHistory
+                        hidePersistedNpcControlRegions(listOf(boundedCurrent)).single() to
+                            hidePersistedNpcControlRegions(history)
+                    } else {
+                        // New Persona turns and co-op must retain full history:
+                        // the legacy automatic-memory updater still rebuilds
+                        // its summary from the complete selected timeline.
+                        val full = hidePersistedNpcControlRegions(
+                            messageRepository.getMessagesForChatOnce(chatId)
+                        ).filter { it.isPrimaryVariant }
+                        full.lastOrNull() to full.dropLast(1)
+                    }
                 if (currentMessage == null) {
                     updateSuccessState {
                         it.copy(generationError = "Send a Persona message before generating a Character reply.")
