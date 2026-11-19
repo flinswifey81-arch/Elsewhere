@@ -166,6 +166,33 @@ class StoryCharacterPerspectiveTest {
         assertTrue(db.storyMemoryDao().getAllPerspectives().isEmpty())
     }
 
+    @Test fun editedMemoryMustBeReapprovedBeforeOldPerspectiveCanApply() = runBlocking {
+        val memory = story.saveManual("story-a", "The old gate is unlocked.")
+        story.setCharacterKnowledge("story-a", memory.memoryId, setOf("rowan"))
+        val prior = story.recordCharacterPerspective(
+            "story-a", memory.memoryId, "rowan",
+            StoryCharacterPerspective.SUSPECTS, "The guard could be mistaken."
+        )
+        assertEquals(1, story.retrieveForGeneration(
+            "story-a", rowan, "old gate unlocked").selected.size)
+        story.update("story-a", memory.memoryId, text = "The old gate has been sealed.")
+        // An old subjective state may not attach itself to a new claim.
+        assertTrue(story.retrieveForGeneration(
+            "story-a", rowan, "old gate sealed").selected.isEmpty())
+        val revision = story.recordCharacterPerspective(
+            "story-a", memory.memoryId, "rowan",
+            StoryCharacterPerspective.SUSPECTS, "The guard could be mistaken."
+        )
+        assertEquals(2L, revision.revision)
+        assertNotEquals(prior.contentSha256, revision.contentSha256)
+        val resumed = story.retrieveForGeneration("story-a", rowan, "old gate sealed")
+        assertEquals(1, resumed.selected.size)
+        assertEquals("CHARACTER_SUSPICION_UNCONFIRMED",
+            resumed.selected.single().promptClaimLabel())
+        assertEquals(2, story.getCharacterPerspectiveHistory(
+            "story-a", memory.memoryId, "rowan").size)
+    }
+
     @Test fun noteLimitAndMissingCharacterFailWithoutSaving() = runBlocking {
         val memory = story.saveManual("story-a", "A map was destroyed.")
         assertThrows(IllegalArgumentException::class.java) {
