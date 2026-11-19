@@ -43,10 +43,14 @@ internal fun selectVisibleChatHistory(
 internal fun retainVisibleScrollbackAfterInsert(
     visibleGroupLimit: Int,
     previousGroupCount: Int?,
-    currentGroupCount: Int
+    currentGroupCount: Int,
+    olderPagesLoaded: Boolean
 ): Int {
     require(visibleGroupLimit > 0)
-    if (previousGroupCount == null || currentGroupCount <= previousGroupCount) {
+    // Without scrollback, ordinary conversation should stay at its fixed
+    // recent-window size instead of growing with every new model response.
+    if (!olderPagesLoaded || previousGroupCount == null ||
+        currentGroupCount <= previousGroupCount) {
         return visibleGroupLimit
     }
     val additionalGroups = (currentGroupCount -
