@@ -11,7 +11,8 @@ enum class SpeakerType { PERSONA, CHARACTER, SYSTEM, DIRECTOR, NARRATOR }
     tableName = "messages",
     indices = [
         Index(value = ["coOpEventId"], unique = true),
-        Index(value = ["chatId", "variantGroupId"])
+        Index(value = ["chatId", "variantGroupId"]),
+        Index(value = ["chatId", "isPrimaryVariant", "orderIndex"])
     ]
 )
 data class MessageEntity(
