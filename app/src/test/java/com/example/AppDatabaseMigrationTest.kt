@@ -132,7 +132,7 @@ class AppDatabaseMigrationTest {
     }
 
     @Test
-    fun migrationFrom3To15ValidatesAgainstRoomAndPreservesExistingChatData() = runBlocking {
+    fun migrationFrom3To17ValidatesAgainstRoomAndPreservesExistingChatData() = runBlocking {
         val helper = FrameworkSQLiteOpenHelperFactory().create(
             SupportSQLiteOpenHelper.Configuration.builder(context)
                 .name(databaseName)
@@ -175,12 +175,13 @@ class AppDatabaseMigrationTest {
                 AppDatabase.MIGRATION_12_13,
                 AppDatabase.MIGRATION_13_14,
                 AppDatabase.MIGRATION_14_15,
-                AppDatabase.MIGRATION_15_16
+                AppDatabase.MIGRATION_15_16,
+                AppDatabase.MIGRATION_16_17
             )
             .allowMainThreadQueries()
             .build()
         try {
-            // Opening through Room executes every migration through 15 and validates the resulting schema.
+            // Opening through Room executes every migration through 17 and validates the resulting schema.
             migrated.openHelper.writableDatabase
             assertEquals("Keep Me", migrated.chatDao().getChatById("chat-keep")?.displayName)
             assertEquals("Preserve this", migrated.messageDao().getMessagesForChatOnce("chat-keep").single().content)
@@ -599,6 +600,76 @@ class AppDatabaseMigrationTest {
             db.query("SELECT COUNT(*) FROM story_memory_returns").use {
                 assertTrue(it.moveToFirst())
                 assertEquals(1, it.getInt(0))
+            }
+        } finally {
+            helper.close()
+        }
+    }
+
+    @Test
+    fun migrationFrom16To17KeepsEveryVariantAndIndexesChatScopedLookups() {
+        val helper = FrameworkSQLiteOpenHelperFactory().create(
+            SupportSQLiteOpenHelper.Configuration.builder(context).name(databaseName)
+                .callback(object : SupportSQLiteOpenHelper.Callback(16) {
+                    override fun onCreate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                        db.execSQL("""
+                            CREATE TABLE messages (
+                                messageId TEXT NOT NULL PRIMARY KEY,
+                                chatId TEXT NOT NULL,
+                                variantGroupId TEXT NOT NULL,
+                                isPrimaryVariant INTEGER NOT NULL,
+                                content TEXT NOT NULL
+                            )
+                        """.trimIndent())
+                        db.execSQL("""
+                            CREATE TABLE roleplay_memories (
+                                memoryId TEXT NOT NULL PRIMARY KEY,
+                                chatId TEXT NOT NULL,
+                                content TEXT NOT NULL
+                            )
+                        """.trimIndent())
+                    }
+                    override fun onUpgrade(
+                        db: androidx.sqlite.db.SupportSQLiteDatabase,
+                        oldVersion: Int,
+                        newVersion: Int
+                    ) = Unit
+                }).build()
+        )
+        try {
+            val db = helper.writableDatabase
+            db.execSQL("INSERT INTO messages VALUES ('m1', 'chat-A', 'v1', 1, 'Primary text')")
+            db.execSQL("INSERT INTO messages VALUES ('m2', 'chat-A', 'v1', 0, 'Alternate text')")
+            db.execSQL("INSERT INTO messages VALUES ('m3', 'chat-B', 'v1', 1, 'Other chat secret')")
+            db.execSQL("INSERT INTO roleplay_memories VALUES ('mem1', 'chat-A', 'Saved canon')")
+
+            AppDatabase.MIGRATION_16_17.migrate(db)
+
+            db.query("SELECT messageId, content, isPrimaryVariant FROM messages WHERE chatId = 'chat-A' ORDER BY messageId").use {
+                assertEquals(2, it.count)
+                assertTrue(it.moveToFirst())
+                assertEquals("m1", it.getString(0))
+                assertEquals("Primary text", it.getString(1))
+                assertEquals(1, it.getInt(2))
+                assertTrue(it.moveToNext())
+                assertEquals("m2", it.getString(0))
+                assertEquals("Alternate text", it.getString(1))
+                assertEquals(0, it.getInt(2))
+            }
+            db.query("SELECT content FROM roleplay_memories WHERE memoryId = 'mem1'").use {
+                assertTrue(it.moveToFirst())
+                assertEquals("Saved canon", it.getString(0))
+            }
+            db.query("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'index_messages_chatId_variantGroupId'").use {
+                assertTrue(it.moveToFirst())
+            }
+            db.query("EXPLAIN QUERY PLAN SELECT * FROM messages WHERE chatId = 'chat-A' AND variantGroupId IN ('v1')").use {
+                assertTrue(it.moveToFirst())
+                val details = buildList {
+                    do { add(it.getString(3)) } while (it.moveToNext())
+                }.joinToString(" ")
+                assertTrue("Expected SQLite to use the variant provenance index: $details",
+                    details.contains("index_messages_chatId_variantGroupId"))
             }
         } finally {
             helper.close()
