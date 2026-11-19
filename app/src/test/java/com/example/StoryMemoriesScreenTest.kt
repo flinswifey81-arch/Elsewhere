@@ -109,6 +109,12 @@ class StoryMemoriesScreenTest {
         }
         assertTrue(runBlocking { database.storyMemoryDao().getAllReturns().isEmpty() })
         composeRule.onAllNodesWithText("Restore after Wack")[0].performClick()
+        // The UI state change that opens this confirmation is asynchronous:
+        // wait for the actual dialog, not just the button click dispatch.
+        composeRule.waitUntil(10_000) {
+            composeRule.onAllNodesWithText("Restore this one memory")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
         composeRule.onNodeWithText("Restore this one memory").assertExists()
         assertTrue(runBlocking { database.storyMemoryDao().getAllReturns().isEmpty() })
         composeRule.onNodeWithText("Restore this one memory").performClick()
