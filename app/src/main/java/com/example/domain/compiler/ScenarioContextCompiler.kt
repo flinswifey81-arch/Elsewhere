@@ -5,6 +5,7 @@ import com.example.domain.provider.Role
 import com.example.domain.provider.RoleplayMessage
 import com.example.domain.lore.ActiveLoreEntry
 import com.example.domain.memory.StoryMemoryRecord
+import com.example.domain.memory.promptClaimLabel
 
 /** Scenario instructions never pass through the Character compiler. */
 class ScenarioContextCompiler {
@@ -56,7 +57,7 @@ class ScenarioContextCompiler {
             if (memories.isNotEmpty()) section("SESSION MEMORY", memories.joinToString("\n") { it.content })
             if (storyMemories.isNotEmpty()) section(
                 "APPROVED LOCAL STORY MEMORY (NARRATOR CONTINUITY, NOT UNIVERSAL NPC KNOWLEDGE)",
-                storyMemories.joinToString(separator = " | ") { "[${it.claim.name}] ${it.content}" }
+                storyMemories.joinToString(separator = " | ") { "[${it.promptClaimLabel()}] ${it.content}" }
             )
             section("EARLIER SESSION SUMMARY", summary)
             section("RESPONSE LENGTH", when (settings.responseLengthProfile) {
