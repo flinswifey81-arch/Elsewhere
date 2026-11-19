@@ -345,9 +345,22 @@ class ChatDetailViewModel(
             // Room returns complete variant groups, never a raw row slice.
             // Querying 101 logical groups keeps the ViewModel from hydrating
             // a 10k-turn archive merely to display the newest 100 bubbles.
+            var observedLogicalGroupCount: Int? = null
             visibleHistoryGroupLimit.collectLatest { groupLimit ->
                 messageRepository.observeRecentMessageGroups(chatId, groupLimit)
                     .collect { rows ->
+                        val totalGroups = messageRepository.countLogicalMessageGroups(chatId)
+                        val retainedLimit = retainVisibleScrollbackAfterInsert(
+                            groupLimit, observedLogicalGroupCount, totalGroups
+                        )
+                        observedLogicalGroupCount = totalGroups
+                        if (retainedLimit > groupLimit) {
+                            // An incoming response must not evict the oldest
+                            // bubble someone is currently reading. Expand the
+                            // window first, then publish the refreshed page.
+                            visibleHistoryGroupLimit.value = retainedLimit
+                            return@collect
+                        }
                         val selected = selectVisibleChatHistory(
                             hidePersistedNpcControlRegions(rows), groupLimit
                         )
@@ -408,7 +421,8 @@ class ChatDetailViewModel(
             state.isLoadingEarlierHistory) return
         updateSuccessState { it.copy(isLoadingEarlierHistory = true) }
         visibleHistoryGroupLimit.update { limit ->
-            (limit + HISTORY_GROUP_PAGE_SIZE).coerceAtMost(MAX_VISIBLE_HISTORY_GROUPS)
+            (limit.toLong() + HISTORY_GROUP_PAGE_SIZE)
+                .coerceAtMost(MAX_VISIBLE_HISTORY_GROUPS.toLong()).toInt()
         }
     }
 
