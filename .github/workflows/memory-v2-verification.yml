@@ -64,6 +64,7 @@ jobs:
             --tests com.example.domain.StoryMemoryStorageTest \
             --tests com.example.StoryRelationshipStateTest \
             --tests com.example.StoryPromiseStateTest \
+            --tests com.example.StoryKnowledgeHistoryTest \
             --tests com.example.StoryMemoriesScreenTest \
             --tests com.example.AppDatabaseMigrationTest \
             --tests com.example.ChatDetailGenerationTest \
