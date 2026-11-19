@@ -177,12 +177,13 @@ class AppDatabaseMigrationTest {
                 AppDatabase.MIGRATION_14_15,
                 AppDatabase.MIGRATION_15_16,
                 AppDatabase.MIGRATION_16_17,
-                AppDatabase.MIGRATION_17_18
+                AppDatabase.MIGRATION_17_18,
+                AppDatabase.MIGRATION_18_19
             )
             .allowMainThreadQueries()
             .build()
         try {
-            // Opening through Room executes every migration through 18 and validates the resulting schema.
+            // Opening through Room executes every migration through 19 and validates the resulting schema.
             migrated.openHelper.writableDatabase
             assertEquals("Keep Me", migrated.chatDao().getChatById("chat-keep")?.displayName)
             assertEquals("Preserve this", migrated.messageDao().getMessagesForChatOnce("chat-keep").single().content)
