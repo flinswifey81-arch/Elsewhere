@@ -80,6 +80,12 @@ class StoryPromiseStateTest {
         val seaMap = repository.savePromise(
             "story-a", mara, rowan, "Mara promises Rowan a map of the coast."
         )
+        assertThrows(IllegalArgumentException::class.java) {
+            runBlocking {
+                repository.update("story-a", silverKey.memory.memoryId,
+                    lifecycle = StoryMemoryLifecycle.RESOLVED)
+            }
+        }
         val outcome = repository.closePromise(
             "story-a", silverKey.memory.memoryId, StoryPromiseOutcome.KEPT,
             "The silver key was delivered."
