@@ -23,10 +23,13 @@ import com.example.domain.memory.StoryActorRef
 import com.example.domain.repository.StoryRelationshipEntry
 import com.example.domain.repository.StoryPromiseEntry
 import com.example.domain.repository.StoryPromiseOutcome
+import com.example.domain.repository.StoryCandidateSourcePreview
 import com.example.domain.memory.StoryCharacterPerspective
 import com.example.domain.memory.StoryMemoryClaim
 import com.example.domain.memory.StoryMemoryEligibilityPolicy
 import com.example.domain.memory.StoryMemoryLifecycle
+import com.example.domain.memory.StoryMemoryReview
+import com.example.domain.memory.StoryMemoryExclusion
 import com.example.domain.repository.ChatRepository
 import com.example.domain.repository.StoryMemoryRepository
 import com.example.ui.components.elsewhereTopAppBarColors
@@ -54,6 +57,9 @@ fun StoryMemoriesScreen(
     var createDialog by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<StoryMemoryEntity?>(null) }
     var removing by remember { mutableStateOf<StoryMemoryEntity?>(null) }
+    var reviewingCandidate by remember { mutableStateOf<StoryMemoryEntity?>(null) }
+    var candidatePreview by remember { mutableStateOf<StoryCandidateSourcePreview?>(null) }
+    var scanFeedback by remember(chatId) { mutableStateOf<String?>(null) }
     var restoring by remember { mutableStateOf<StoryMemoryEntity?>(null) }
     var grantingKnowledge by remember { mutableStateOf<StoryMemoryEntity?>(null) }
     var selectedKnowers by remember { mutableStateOf<Set<String>>(emptySet()) }
@@ -373,6 +379,143 @@ fun StoryMemoriesScreen(
             dismissButton = {
                 TextButton(enabled = !working, onClick = { closingPromise = null }) {
                     Text("Cancel")
+                }
+            }
+        )
+    }
+
+    var reviewDraft by remember(reviewingCandidate?.memoryId) {
+        mutableStateOf(reviewingCandidate?.content.orEmpty())
+    }
+    var reviewClaim by remember(reviewingCandidate?.memoryId) {
+        mutableStateOf(runCatching {
+            StoryMemoryClaim.valueOf(reviewingCandidate?.claim.orEmpty())
+        }.getOrDefault(StoryMemoryClaim.EVENT))
+    }
+    var reviewingClaimOptions by remember { mutableStateOf(false) }
+    LaunchedEffect(chatId, reviewingCandidate?.memoryId) {
+        val memoryId = reviewingCandidate?.memoryId
+        candidatePreview = null
+        if (memoryId != null) {
+            try {
+                candidatePreview = repository.previewCandidateSource(chatId, memoryId)
+            } catch (failure: Exception) {
+                error = failure.message ?: "Could not inspect the candidate source."
+            }
+        }
+    }
+    reviewingCandidate?.let { candidate ->
+        val canApprove = candidatePreview?.status == StoryMemoryExclusion.ELIGIBLE
+        val allowedClaims = listOf(
+            StoryMemoryClaim.FACT, StoryMemoryClaim.EVENT,
+            StoryMemoryClaim.PROMISE, StoryMemoryClaim.DISCOVERY,
+            StoryMemoryClaim.RUMOR, StoryMemoryClaim.SECRET,
+            StoryMemoryClaim.UNRESOLVED_THREAD
+        )
+        AlertDialog(
+            modifier = Modifier.testTag("story_candidate_review_dialog"),
+            onDismissRequest = { if (!working) reviewingCandidate = null },
+            title = { Text("Review proposed memory") },
+            text = {
+                Column(
+                    modifier = Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        "This is a suggestion from a selected chat message, NOT an established " +
+                            "fact. Nothing enters model memory without your approval. " +
+                            "Review the original and correct the wording or category first.",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Text(
+                        "Source: " + (candidatePreview?.speakerName ?: "Checking source…") +
+                            " • turn ${candidate.sourceOrderIndex}",
+                        style = MaterialTheme.typography.labelMedium
+                    )
+                    if (candidatePreview == null) {
+                        CircularProgressIndicator()
+                    } else {
+                        if (!canApprove) Text(
+                            "Source no longer eligible: ${candidatePreview?.status}. " +
+                                "The message may have changed, been deleted, switched variants, " +
+                                "or crossed a Wack boundary. You can reject it, not approve it.",
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        Text(
+                            candidatePreview?.visibleSource ?: "Original source is unavailable.",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                    OutlinedTextField(
+                        value = reviewDraft,
+                        onValueChange = { reviewDraft = it.take(12_000) },
+                        label = { Text("Approved wording") },
+                        modifier = Modifier.fillMaxWidth(),
+                        minLines = 2,
+                        enabled = !working && canApprove
+                    )
+                    Box {
+                        OutlinedButton(
+                            onClick = { reviewingClaimOptions = true },
+                            enabled = !working && canApprove
+                        ) { Text("Category: ${reviewClaim.name.lowercase().replace('_', ' ')}") }
+                        DropdownMenu(
+                            expanded = reviewingClaimOptions,
+                            onDismissRequest = { reviewingClaimOptions = false }
+                        ) {
+                            allowedClaims.forEach { claim ->
+                                DropdownMenuItem(
+                                    text = { Text(claim.name.lowercase().replace('_', ' ')) },
+                                    onClick = {
+                                        reviewClaim = claim
+                                        reviewingClaimOptions = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                    Text(
+                        "Approval is storyteller-only. No Character automatically learns this, " +
+                            "and your existing World or Character cards aren't edited.",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = !working && canApprove && reviewDraft.isNotBlank(),
+                    modifier = Modifier.testTag("approve_story_candidate"),
+                    onClick = {
+                        val content = reviewDraft
+                        val claim = reviewClaim
+                        applyChange {
+                            repository.reviewCandidate(
+                                chatId, candidate.memoryId, approve = true,
+                                editedText = content, category = claim
+                            )
+                            reviewingCandidate = null
+                        }
+                    }
+                ) { Text("Approve memory") }
+            },
+            dismissButton = {
+                Row {
+                    TextButton(
+                        modifier = Modifier.testTag("reject_story_candidate"),
+                        enabled = !working,
+                        onClick = {
+                            applyChange {
+                                repository.reviewCandidate(
+                                    chatId, candidate.memoryId, approve = false
+                                )
+                                reviewingCandidate = null
+                            }
+                        }
+                    ) { Text("Reject") }
+                    TextButton(enabled = !working, onClick = {
+                        reviewingCandidate = null
+                    }) { Text("Later") }
                 }
             }
         )
@@ -703,6 +846,28 @@ fun StoryMemoriesScreen(
                             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error
                         )
                         if (memories.isEmpty()) Text("No Story Memories saved in this chat yet.")
+                        OutlinedButton(
+                            modifier = Modifier.testTag("scan_story_candidates"),
+                            enabled = !working,
+                            onClick = {
+                                applyChange {
+                                    val scan = repository.scanRecentCandidateMessages(chatId)
+                                    scanFeedback = "Checked ${scan.scannedMessages} recent selected " +
+                                        "messages; added ${scan.newCandidates} review candidates. " +
+                                        "No provider call."
+                                }
+                            }
+                        ) { Text("Suggest memories from recent messages") }
+                        scanFeedback?.let {
+                            Text(it, style = MaterialTheme.typography.bodySmall)
+                        }
+                        val pendingCount = memories.count {
+                            it.review == StoryMemoryReview.PENDING_REVIEW.name
+                        }
+                        if (pendingCount > 0) Text(
+                            "$pendingCount proposed memories need your review.",
+                            style = MaterialTheme.typography.bodySmall
+                        )
                         OutlinedButton(onClick = { createDialog = true }, enabled = !working) {
                             Text("Save new Story Memory")
                         }
@@ -725,6 +890,23 @@ fun StoryMemoriesScreen(
                     Card(Modifier.fillMaxWidth().testTag("story_memory_${memory.memoryId}")) {
                         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Text(memory.content, style = MaterialTheme.typography.bodyLarge)
+                            if (memory.review == StoryMemoryReview.PENDING_REVIEW.name) {
+                                Text(
+                                    "Proposed from message #${memory.sourceOrderIndex} " +
+                                        "— NOT approved or used in generation",
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                                OutlinedButton(
+                                    modifier = Modifier.testTag("review_story_candidate_${memory.memoryId}"),
+                                    enabled = !working,
+                                    onClick = { reviewingCandidate = memory }
+                                ) { Text("Review source and approve/reject") }
+                            } else if (memory.review == StoryMemoryReview.REJECTED.name) {
+                                Text(
+                                    "Rejected suggestion — never used for recall",
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            }
                             linkedPromises[memory.memoryId]?.let { entry ->
                                 Text(
                                     "Promise: ${actorLabel(entry.from)} → ${actorLabel(entry.to)}",
@@ -769,7 +951,8 @@ fun StoryMemoriesScreen(
                                     (if (memory.originKind == "MESSAGE") "from selected message" else "manually saved"),
                                 style = MaterialTheme.typography.labelSmall
                             )
-                            if (characters.isNotEmpty()) {
+                            if (characters.isNotEmpty() &&
+                                memory.review == StoryMemoryReview.APPROVED.name) {
                                 OutlinedButton(
                                     modifier = Modifier.testTag("story_memory_perspectives_${memory.memoryId}"),
                                     enabled = !working,
@@ -784,6 +967,9 @@ fun StoryMemoriesScreen(
                             }
                             if (memory.hidden) Text("Hidden from future retrieval", style = MaterialTheme.typography.labelSmall)
                             if (memory.pinned) Text("Pinned for future relevance", style = MaterialTheme.typography.labelSmall)
+                            // Never present unreviewed suggestions as editable canon
+                            // or allow a premature grant, pin or resolution.
+                            if (memory.review == StoryMemoryReview.APPROVED.name) {
                             // Keep all four controls inside the phone viewport.
                             // A single unwrapped Row placed Hide beyond the usable width,
                             // making its semantics node appear clickable without a hit.
@@ -827,6 +1013,11 @@ fun StoryMemoriesScreen(
                                     ) { Text("Restore after Wack") }
                                 }
                                 TextButton(enabled = !working, onClick = { removing = memory }) { Text("Delete") }
+                            }
+                            } else {
+                                TextButton(enabled = !working, onClick = { removing = memory }) {
+                                    Text("Delete suggestion")
+                                }
                             }
                         }
                     }
