@@ -33,3 +33,24 @@ internal fun selectVisibleChatHistory(
         hasEarlierGroups = grouped.size > visibleGroupLimit
     )
 }
+
+/**
+ * Keep an older visible bubble anchored when new logical groups arrive.
+ * Increasing the visible window by only the additional rows that exceed its
+ * current capacity prevents a new reply from evicting a bubble being read.
+ * A regeneration variant does not change the group count and adds no space.
+ */
+internal fun retainVisibleScrollbackAfterInsert(
+    visibleGroupLimit: Int,
+    previousGroupCount: Int?,
+    currentGroupCount: Int
+): Int {
+    require(visibleGroupLimit > 0)
+    if (previousGroupCount == null || currentGroupCount <= previousGroupCount) {
+        return visibleGroupLimit
+    }
+    val additionalGroups = (currentGroupCount -
+        maxOf(visibleGroupLimit, previousGroupCount)).coerceAtLeast(0)
+    return (visibleGroupLimit.toLong() + additionalGroups)
+        .coerceAtMost(Int.MAX_VALUE.toLong() - 1L).toInt()
+}
