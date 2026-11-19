@@ -2285,16 +2285,7 @@ class ChatDetailViewModel(
             }
             return
         }
-        // Includes an unselected requested variant as the target, but only
-        // selected variants in the preceding context. No transcript-sized
-        // filter/takeWhile copies are needed to regenerate an old message.
         val group = state.chatSummary.chat.chatType == ChatType.GROUP
-        val selection = com.example.domain.compiler.HistoricalGenerationWindow.regenerate(
-            messages = state.messages,
-            targetMessageId = messageId,
-            isGroup = group,
-            resetBoundary = boundary
-        ) ?: return
         generationStartInProgress = true
         viewModelScope.launch {
             try {
@@ -2305,12 +2296,40 @@ class ChatDetailViewModel(
                         targetMessage.messageId
                     ) == true
                 ) return@launch
+
+                // Old replies can be visible even when their earlier Persona
+                // is outside the hydrated UI page. Recover the exact selected
+                // context from Room as-of-target, not from a truncated window.
+                val selection = if (state.hasEarlierHistory ||
+                    state.isLoadingEarlierHistory) {
+                    messageRepository.selectHistoricalAction(
+                        chatId, messageId, isGroup = group,
+                        isContinuation = false, resetBoundary = boundary
+                    )
+                } else {
+                    com.example.domain.compiler.HistoricalGenerationWindow.regenerate(
+                        state.messages, messageId, group, boundary
+                    )
+                }
+                if (selection == null) {
+                    updateSuccessState {
+                        it.copy(generationError =
+                            "Regenerate could not find the eligible story context preceding this reply.")
+                    }
+                    return@launch
+                }
                 startGenerationInternal(
                     currentMessage = selection.current,
                     history = selection.history,
-                    variantGroupId = targetMessage.variantGroupId ?: targetMessage.messageId,
-                    characterId = targetMessage.speakerId
+                    variantGroupId = selection.target.variantGroupId ?: selection.target.messageId,
+                    characterId = selection.target.speakerId
                 )
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                updateSuccessState {
+                    it.copy(generationError = "Regenerate could not start: ${error.message ?: "unknown error"}.")
+                }
             } finally {
                 generationStartInProgress = false
             }
@@ -2320,13 +2339,11 @@ class ChatDetailViewModel(
     fun continueMessage(messageId: String) {
         val state = _uiState.value as? ChatUiState.Success ?: return
         if (inChatToolInProgress || generationStartInProgress || state.isGenerating) return
+        val targetMessage = state.messages.lastOrNull {
+            it.messageId == messageId && it.isPrimaryVariant &&
+                (it.speakerType == SpeakerType.CHARACTER || it.speakerType == SpeakerType.NARRATOR)
+        } ?: return
         val boundary = chatSummary?.chat?.contextResetOrderIndex
-        val selection = com.example.domain.compiler.HistoricalGenerationWindow.continueFrom(
-            messages = state.messages,
-            targetMessageId = messageId,
-            resetBoundary = boundary
-        ) ?: return
-        val targetMessage = selection.target
         if (!ContextResetPolicy.includes(targetMessage, boundary)) {
             updateSuccessState {
                 it.copy(generationError = "Continue is unavailable for messages before the Wack context boundary.")
@@ -2345,12 +2362,32 @@ class ChatDetailViewModel(
                         targetMessage.messageId
                     ) == true
                 ) return@launch
+
+                val selection = if (state.hasEarlierHistory ||
+                    state.isLoadingEarlierHistory) {
+                    messageRepository.selectHistoricalAction(
+                        chatId, messageId,
+                        isGroup = state.chatSummary.chat.chatType == ChatType.GROUP,
+                        isContinuation = true, resetBoundary = boundary
+                    )
+                } else {
+                    com.example.domain.compiler.HistoricalGenerationWindow.continueFrom(
+                        state.messages, messageId, boundary
+                    )
+                }
+                if (selection == null) {
+                    updateSuccessState {
+                        it.copy(generationError =
+                            "Continue could not find the selected reply in the current story.")
+                    }
+                    return@launch
+                }
                 startGenerationInternal(
-                    currentMessage = targetMessage,
+                    currentMessage = selection.target,
                     history = selection.history,
                     isContinuation = true,
-                    continuationTarget = targetMessage,
-                    characterId = targetMessage.speakerId
+                    continuationTarget = selection.target,
+                    characterId = selection.target.speakerId
                 )
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                 throw cancelled
