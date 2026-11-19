@@ -302,6 +302,12 @@ class StoryMemoryRepository(
             val pair = requireNotNull(promisePair(dao.actors(previous.memoryId))) {
                 "This promise has no verified Character/Persona participants."
             }
+            // Closing a Character-only secret must never copy its text into a
+            // storyteller memory. The player can explicitly change visibility
+            // first; their old Character grant is not silently inherited.
+            require(previous.visibility == StoryMemoryVisibility.STORYTELLER_ONLY.name) {
+                "Make this promise storyteller-only before recording an outcome."
+            }
             // Wack is a hard boundary. Resolving an old promise must not copy
             // its private pre-Wack content into post-Wack retrieval by accident.
             val boundary = chat.contextResetOrderIndex
