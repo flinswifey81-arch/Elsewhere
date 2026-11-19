@@ -210,6 +210,9 @@ class BackupRepositoryTest {
         val first = story.saveRelationshipChange(
             chatId, from, to, "Mara distrusts Rowan after their argument."
         )
+        story.setCharacterKnowledge(chatId, first.memory.memoryId, setOf("rowan"))
+        story.setCharacterKnowledge(chatId, first.memory.memoryId, emptySet())
+        assertEquals(2, source.database.storyMemoryDao().getAllKnowledgeChanges().size)
         story.saveRelationshipChange(
             chatId, from, to, "Rowan made amends; Mara forgives him.",
             supersedeMemoryId = first.memory.memoryId
@@ -225,6 +228,8 @@ class BackupRepositoryTest {
             target.database.storyMemoryDao().getAll())
         assertEquals(source.database.storyMemoryDao().getAllActors(),
             target.database.storyMemoryDao().getAllActors())
+        assertEquals(source.database.storyMemoryDao().getAllKnowledgeChanges(),
+            target.database.storyMemoryDao().getAllKnowledgeChanges())
         val restored = com.example.domain.repository.StoryMemoryRepository(target.database)
             .getRelationshipHistory(chatId)
         assertEquals(2, restored.size)
