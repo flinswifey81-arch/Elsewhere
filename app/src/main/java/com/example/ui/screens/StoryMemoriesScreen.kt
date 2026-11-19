@@ -312,7 +312,7 @@ fun StoryMemoriesScreen(
                         style = MaterialTheme.typography.bodySmall)
                     Text(entry.memory.content, style = MaterialTheme.typography.bodyMedium)
                     Text(
-                        "This creates a linked final state and preserves the original. The outcome is storyteller-only until knowledge is explicitly assigned.",
+                        "This preserves the original in history and records your new outcome separately. Include enough detail for future recall; knowledge isn't granted automatically.",
                         style = MaterialTheme.typography.bodySmall
                     )
                     Box {
@@ -343,8 +343,7 @@ fun StoryMemoriesScreen(
             },
             confirmButton = {
                 TextButton(
-                    enabled = !working && outcomeDetails.isNotBlank() &&
-                        entry.memory.content.length + outcomeDetails.trim().length + 30 <= 12_000,
+                    enabled = !working && outcomeDetails.isNotBlank(),
                     onClick = {
                         val current = closingPromise ?: return@TextButton
                         val description = outcomeDetails
