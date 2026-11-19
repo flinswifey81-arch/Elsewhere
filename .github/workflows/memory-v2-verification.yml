@@ -44,6 +44,8 @@ jobs:
             --tests com.example.domain.MemoryV2RoomScaleBenchmarkTest \
             --tests com.example.domain.RecentPrimaryMessageWindowTest \
             --tests com.example.domain.RecentGenerationContextScanTest \
+            --tests com.example.domain.RollingSummaryTailTest \
+            --tests com.example.domain.AutomaticMemoryManagerTest \
             --tests com.example.NpcSceneCastResolverTest \
             --tests com.example.domain.Stage0ContextWindowContractTest \
             --tests com.example.domain.Stage0ContextCostAndContinuityBenchmarkTest \
