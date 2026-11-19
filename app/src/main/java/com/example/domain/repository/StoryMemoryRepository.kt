@@ -440,6 +440,13 @@ class StoryMemoryRepository(
                     "Only an active memory can be resolved; superseded history stays superseded."
                 }
             }
+            if (lifecycle == StoryMemoryLifecycle.RESOLVED &&
+                old.claim == StoryMemoryClaim.PROMISE.name &&
+                promisePair(dao.actors(old.memoryId)) != null) {
+                throw IllegalArgumentException(
+                    "Use Record outcome to close a tracked promise."
+                )
+            }
             val now = System.currentTimeMillis()
             old.copy(
                 content = cleaned ?: old.content,
