@@ -137,6 +137,22 @@ class StoryCandidateReviewTest {
         }
     }
 
+    @Test fun longMessageSourcePreviewCentersOnTheActualSuggestedPassage() = runBlocking {
+        val filler = "They walked through another silent corridor. ".repeat(85)
+        add(
+            "long", filler + "I promise to return the ancient crown at sunrise.",
+            8
+        )
+        assertEquals(1, repo.scanRecentCandidateMessages("story-a").newCandidates)
+        val proposal = db.storyMemoryDao().forChat("story-a").single()
+        val preview = repo.previewCandidateSource("story-a", proposal.memoryId)
+        assertEquals(StoryMemoryExclusion.ELIGIBLE, preview.status)
+        assertTrue(preview.visibleSource.orEmpty().contains(
+            "I promise to return the ancient crown at sunrise."
+        ))
+        assertTrue(preview.visibleSource.orEmpty().length <= 2_402)
+    }
+
     @Test fun rejectionRemainsInertAndDoesNotRepeatOnRescan() = runBlocking {
         add("m1", "They discovered the secret library.", 1)
         val pending = repo.scanRecentCandidateMessages("story-a").let {
