@@ -329,7 +329,7 @@ class ChatDetailViewModel(
             }
 
             messageAttachmentRepository?.let { repository ->
-                launch { runCatching { repository.reconcileOrphanFiles() } }
+                launch { runCatching { repository.reconcileOrphanFilesForChatOpenOnce() } }
                 launch {
                     // Image metadata follows the same visible logical-group
                     // window as the transcript, rather than hydrating every
