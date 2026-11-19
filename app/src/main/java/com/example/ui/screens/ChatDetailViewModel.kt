@@ -1707,6 +1707,12 @@ class ChatDetailViewModel(
                 }
                 return false
             }
+            // A completed response must release the pending-partial gate BEFORE
+            // publishing isGenerating=false. Otherwise an immediate Wack/Retry
+            // observes a finished UI but is incorrectly rejected as unresolved.
+            if (syncError == null && completionError == null && !retainPartialOnCoopFailure) {
+                pendingPartialGeneration = null
+            }
             updateSuccessState {
                 it.copy(
                     isGenerating = false,
@@ -1858,6 +1864,11 @@ class ChatDetailViewModel(
                 )
             }
             return false
+        }
+        // Match the continuation path: terminal UI state is observable immediately,
+        // so the pending generation gate must already be clear on full success.
+        if (syncError == null && completionError == null && !retainPartialOnCoopFailure) {
+            pendingPartialGeneration = null
         }
         updateSuccessState {
             it.copy(
