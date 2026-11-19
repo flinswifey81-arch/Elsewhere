@@ -14,6 +14,16 @@ enum class StoryCharacterPerspective {
     UNAWARE
 }
 
+/**
+ * The prompt category is recipient-specific, not the underlying storyteller
+ * fact. Never emit [FACT] for a Character who only suspects something.
+ */
+fun StoryMemoryRecord.promptClaimLabel(): String = when (perspectives.values.singleOrNull()) {
+    StoryCharacterPerspective.BELIEVES -> "CHARACTER_BELIEF_UNCONFIRMED"
+    StoryCharacterPerspective.SUSPECTS -> "CHARACTER_SUSPICION_UNCONFIRMED"
+    else -> claim.name
+}
+
 /** Only eligible Character retrieval receives this label; never World canon. */
 fun StoryCharacterPerspective.wrapForCharacter(content: String): String = when (this) {
     StoryCharacterPerspective.KNOWS -> content
