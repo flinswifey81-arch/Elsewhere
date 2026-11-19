@@ -135,6 +135,7 @@ class StoryCandidateReviewTest {
         assertThrows(IllegalArgumentException::class.java) {
             runBlocking { repo.reviewCandidate("story-a", pending.memoryId, approve = false) }
         }
+        Unit // Keep the JUnit test method's return type void, not Throwable.
     }
 
     @Test fun longMessageSourcePreviewCentersOnTheActualSuggestedPassage() = runBlocking {
@@ -166,6 +167,7 @@ class StoryCandidateReviewTest {
         assertThrows(IllegalArgumentException::class.java) {
             runBlocking { repo.reviewCandidate("story-a", pending.memoryId, approve = true) }
         }
+        Unit
     }
 
     @Test fun sourceEditVariantSwitchAndWackCannotBeApproved() = runBlocking {
