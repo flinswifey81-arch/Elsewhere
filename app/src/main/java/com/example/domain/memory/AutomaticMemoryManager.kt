@@ -181,9 +181,7 @@ class AutomaticMemoryManager(
         // only retains the final 12,000 characters, so formatting 10,000 past
         // turns and discarding nearly all of them is unnecessary.
         val olderMessages = allPrimaryMessages.subList(0, cutoffIndex)
-        if (olderMessages.isEmpty()) {
-            return AutomaticMemoryUpdateResult(savedMemoryCount, rollingSummaryUpdated = false)
-        }
+        if (olderMessages.isEmpty()) return false
 
         val combined = rollingSummaryTail(olderMessages)
 
