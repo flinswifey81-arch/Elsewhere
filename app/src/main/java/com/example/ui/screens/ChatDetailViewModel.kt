@@ -351,7 +351,8 @@ class ChatDetailViewModel(
                     .collect { rows ->
                         val totalGroups = messageRepository.countLogicalMessageGroups(chatId)
                         val retainedLimit = retainVisibleScrollbackAfterInsert(
-                            groupLimit, observedLogicalGroupCount, totalGroups
+                            groupLimit, observedLogicalGroupCount, totalGroups,
+                            olderPagesLoaded = groupLimit > INITIAL_VISIBLE_GROUPS
                         )
                         observedLogicalGroupCount = totalGroups
                         if (retainedLimit > groupLimit) {
