@@ -339,6 +339,7 @@ fun ChatDetailScreen(
                             hasEarlierHistory = state.hasEarlierHistory,
                             isLoadingEarlierHistory = state.isLoadingEarlierHistory,
                             onLoadEarlier = viewModel::loadEarlierMessages,
+                            onReturnedToLatest = viewModel::returnToLatestMessages,
                             streamContentKey = state.streamingContent,
                             modifier = Modifier
                                 .weight(1f)
@@ -911,6 +912,7 @@ internal fun AutoScrollingChatColumn(
     hasEarlierHistory: Boolean = false,
     isLoadingEarlierHistory: Boolean = false,
     onLoadEarlier: (() -> Unit)? = null,
+    onReturnedToLatest: (() -> Unit)? = null,
     listState: LazyListState = rememberLazyListState(),
     content: LazyListScope.() -> Unit
 ) {
@@ -949,6 +951,18 @@ internal fun AutoScrollingChatColumn(
             listState.isScrollInProgress && listState.firstVisibleItemIndex <= 2
         }.distinctUntilChanged().collect { nearTop ->
             if (nearTop) onLoadEarlier?.invoke()
+        }
+    }
+
+    // Once the reader has returned to the live end, older loaded pages can
+    // be released from ViewModel memory. They remain in Room for scrollback.
+    LaunchedEffect(conversationKey, historyLoaded, initialScrollComplete) {
+        if (!historyLoaded || !initialScrollComplete) return@LaunchedEffect
+        snapshotFlow {
+            !listState.isScrollInProgress &&
+                listState.isNearBottom(nearBottomThresholdPx)
+        }.distinctUntilChanged().collect { atLatest ->
+            if (atLatest) onReturnedToLatest?.invoke()
         }
     }
 
