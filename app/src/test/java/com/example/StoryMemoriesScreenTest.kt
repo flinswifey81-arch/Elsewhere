@@ -114,7 +114,7 @@ class StoryMemoriesScreenTest {
         assertTrue(runBlocking { database.storyMemoryDao().getAllReturns().isEmpty() })
         composeRule.onNodeWithTag("restore_memory_$firstMemoryId").performClick()
         composeRule.waitUntil(10_000) {
-            composeRule.onAllNodesWithTag("story_memory_restore_dialog")
+            composeRule.onAllNodesWithTag("story_memory_restore_dialog", useUnmergedTree = true)
                 .fetchSemanticsNodes().isNotEmpty()
         }
         composeRule.onNodeWithText("Restore this one memory").assertExists()
