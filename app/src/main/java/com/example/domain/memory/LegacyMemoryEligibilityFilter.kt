@@ -7,8 +7,10 @@ import com.example.data.model.RoleplayMemoryEntity
  * Compatibility gate for pre-v16 durable memories. A Wack excludes all old
  * sources unless a future explicit per-record restore is provided.
  *
- * This evaluates the complete local archive (including unselected variants),
- * never only the trimmed prompt transcript. No model or provider calls.
+ * Callers must supply every source-linked memory's source and all variants
+ * in each referenced group, including unselected variants. This can be a
+ * targeted indexed database read, not the full archive; the trimmed provider
+ * transcript alone is never sufficient. No model or provider calls.
  */
 object LegacyMemoryEligibilityFilter {
     fun eligible(
