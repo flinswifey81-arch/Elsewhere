@@ -23,7 +23,7 @@ class MessageRepository(
         chatId: String,
         visibleGroupLimit: Int
     ): Flow<List<MessageEntity>> {
-        require(visibleGroupLimit in 1..10_000) { "Visible group limit must be 1..10,000." }
+        require(visibleGroupLimit in 1 until Int.MAX_VALUE) { "Visible group limit must be positive." }
         return messageDao.observeRecentMessageGroups(chatId, visibleGroupLimit + 1)
     }
 
