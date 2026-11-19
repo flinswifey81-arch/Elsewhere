@@ -17,13 +17,10 @@ internal class MemoryProvenanceReader(private val messageDao: MessageDao) {
         sourceMessageIds: Collection<String>,
         variantGroupIds: Collection<String> = emptyList()
     ): List<MessageEntity> {
-        val sources = sourceMessageIds.asSequence().filter(String::isNotBlank).distinct()
-            .toList().chunked(400).flatMap { messageDao.getMemorySourceMessages(chatId, it) }
-        val groups = (variantGroupIds.asSequence() + sources.asSequence().map { it.variantGroupId })
-            .filter(String::isNotBlank).distinct().toList()
-        val variants = groups.chunked(400).flatMap {
-            messageDao.getMemorySourceVariants(chatId, it)
-        }
-        return (sources + variants).distinctBy { it.messageId }
+        return messageDao.readMemoryProvenanceSnapshot(
+            chatId,
+            sourceMessageIds.toList(),
+            variantGroupIds.toList()
+        )
     }
 }
