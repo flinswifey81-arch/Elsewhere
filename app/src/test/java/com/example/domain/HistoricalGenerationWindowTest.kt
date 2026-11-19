@@ -113,7 +113,7 @@ class HistoricalGenerationWindowTest {
                 reads++
                 return msg(
                     "m-${index + 1}", index.toLong(),
-                    if (index % 9 == 0) SpeakerType.PERSONA else SpeakerType.CHARACTER
+                    if (index % 9 == 0 && index != 9_999) SpeakerType.PERSONA else SpeakerType.CHARACTER
                 )
             }
         }
