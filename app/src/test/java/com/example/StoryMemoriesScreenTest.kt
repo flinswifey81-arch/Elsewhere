@@ -75,8 +75,14 @@ class StoryMemoriesScreenTest {
         composeRule.waitUntil(10_000) {
             runBlocking { database.storyMemoryDao().forChat("ui-story").single().pinned }
         }
-        composeRule.waitUntil(10_000) {
-            runCatching { composeRule.onNodeWithText("Hide").assertIsEnabled() }.isSuccess
+        // Verify that Room's update was observed and recomposed, not just
+        // committed. Otherwise an older enabled control can absorb a tap
+        // while the preceding action is still finishing.
+        composeRule.waitUntil(30_000) {
+            runCatching {
+                composeRule.onNodeWithText("Unpin").assertIsEnabled()
+                composeRule.onNodeWithText("Hide").assertIsEnabled()
+            }.isSuccess
         }
         composeRule.onNodeWithText("Hide").performClick()
         composeRule.waitUntil(10_000) {
@@ -175,7 +181,9 @@ class StoryMemoriesScreenTest {
                 StoryMemoriesScreen("ui-story", repository, chats, onNavigateBack = {})
             }
         }
-        composeRule.waitUntil(15_000) {
+        // CI runners also execute Room/Robolectric setup concurrently.
+        // This checks that the actual UI becomes ready, not elapsed time.
+        composeRule.waitUntil(45_000) {
             composeRule.onAllNodesWithTag("record_relationship_change")
                 .fetchSemanticsNodes().isNotEmpty()
         }
