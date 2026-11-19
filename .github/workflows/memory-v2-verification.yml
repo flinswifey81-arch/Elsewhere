@@ -46,6 +46,7 @@ jobs:
             --tests com.example.domain.backup.BackupRepositoryTest \
             --tests com.example.domain.MemoryV2RoomScaleBenchmarkTest \
             --tests com.example.domain.RecentPrimaryMessageWindowTest \
+            --tests com.example.domain.HistoricalGenerationWindowTest \
             --tests com.example.domain.RecentGenerationContextScanTest \
             --tests com.example.domain.RollingSummaryTailTest \
             --tests com.example.domain.GenerationHistoryWithCurrentTest \
