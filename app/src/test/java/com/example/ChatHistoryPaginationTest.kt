@@ -11,6 +11,7 @@ import com.example.data.model.MessageEntity
 import com.example.data.model.SpeakerType
 import com.example.domain.repository.MessageRepository
 import com.example.ui.screens.selectVisibleChatHistory
+import com.example.ui.screens.retainVisibleScrollbackAfterInsert
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -128,6 +129,16 @@ class ChatHistoryPaginationTest {
         assertEquals(9, boundaryGroup.variants.size)
         assertEquals(9, older.messages.count { it.variantGroupId == "m-110" })
         assertTrue(older.hasEarlierGroups) // older groups still exist
+    }
+
+    @Test fun newlyArrivingGroupsPreserveOldestPageWithoutGrowingOnVariants() {
+        assertEquals(100, retainVisibleScrollbackAfterInsert(100, null, 10_000))
+        assertEquals(101, retainVisibleScrollbackAfterInsert(100, 10_000, 10_001))
+        assertEquals(103, retainVisibleScrollbackAfterInsert(100, 10_000, 10_003))
+        assertEquals(100, retainVisibleScrollbackAfterInsert(100, 10_000, 10_000))
+        assertEquals(100, retainVisibleScrollbackAfterInsert(100, 50, 100))
+        assertEquals(110, retainVisibleScrollbackAfterInsert(100, 50, 110))
+        assertEquals(200, retainVisibleScrollbackAfterInsert(200, 251, 250))
     }
 
     @Test fun tinyChatAndUnselectedOnlyGroupRetainLegacyDisplayFallback() = runBlocking {
