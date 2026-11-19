@@ -120,6 +120,79 @@ class StoryMemoriesScreenTest {
     }
 
     @Test
+    fun recordRelationshipChangeShowsHistoryAndSupersedesOnlyByPlayerAction() {
+        runBlocking {
+            database.characterDao().insertCharacter(
+                com.example.data.model.CharacterEntity(
+                    characterId = "rowan", displayName = "Rowan", characterName = "Rowan",
+                    aliases = emptyList(), importSchemaVersion = 1,
+                    identityJson = null, appearanceJson = null, personalityJson = null,
+                    voiceJson = null, behaviorJson = null, backstoryJson = null,
+                    knowledgeJson = null, worldContextJson = null, writingRulesJson = null,
+                    examplesJson = null, authorNotesJson = null, extensionFieldsJson = null
+                )
+            )
+            database.personaDao().insertPersona(
+                com.example.data.model.PersonaEntity(
+                    personaId = "mara", displayName = "Mara", personaName = "Mara",
+                    aliases = emptyList(), importSchemaVersion = 1,
+                    identityJson = null, appearanceJson = null, personalityJson = null,
+                    roleplayProfileJson = null, backgroundJson = null, worldContextJson = null,
+                    privateNotesJson = null, extensionFieldsJson = null
+                )
+            )
+            database.chatDao().insertChatParticipant(
+                com.example.data.model.ChatParticipantEntity(chatId = "ui-story", characterId = "rowan")
+            )
+            database.chatDao().insertChatPersonaParticipant(
+                com.example.data.model.ChatPersonaParticipantEntity(chatId = "ui-story", personaId = "mara")
+            )
+        }
+        composeRule.setContent {
+            MaterialTheme {
+                StoryMemoriesScreen("ui-story", repository, chats, onNavigateBack = {})
+            }
+        }
+        composeRule.waitUntil(15_000) {
+            composeRule.onAllNodesWithTag("record_relationship_change")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithTag("record_relationship_change").performClick()
+        composeRule.onNodeWithText("From: Mara (Persona)").assertExists()
+        composeRule.onNodeWithText("To: Rowan (Character)").assertExists()
+        composeRule.onNodeWithText("How has this relationship changed?")
+            .performTextInput("Mara distrusts Rowan after the betrayal.")
+        composeRule.onNodeWithText("Save relationship state").performClick()
+        composeRule.waitUntil(15_000) {
+            runBlocking {
+                repository.getRelationshipHistory("ui-story").size == 1
+            }
+        }
+        val first = runBlocking { repository.getRelationshipHistory("ui-story").single() }
+        assertEquals("ACTIVE", first.memory.lifecycle)
+        assertEquals("STORYTELLER_ONLY", first.memory.visibility)
+        composeRule.onNodeWithText("Relationship: Mara (Persona) → Rowan (Character)").assertExists()
+        composeRule.onNodeWithText("Record a change").performClick()
+        composeRule.onNodeWithText("How has this relationship changed?")
+            .performTextInput("Rowan apologized, and Mara forgives him.")
+        composeRule.onNodeWithText("Save relationship state").performClick()
+        composeRule.waitUntil(15_000) {
+            runBlocking {
+                repository.getRelationshipHistory("ui-story").let {
+                    it.size == 2 && it.first().memory.lifecycle == "SUPERSEDED" &&
+                        it.last().memory.lifecycle == "ACTIVE"
+                }
+            }
+        }
+        val history = runBlocking { repository.getRelationshipHistory("ui-story") }
+        assertEquals("Mara distrusts Rowan after the betrayal.", history.first().memory.content)
+        assertEquals("Rowan apologized, and Mara forgives him.", history.last().memory.content)
+        assertTrue(runBlocking {
+            repository.getCharacterKnowers("ui-story", history.last().memory.memoryId).isEmpty()
+        })
+    }
+
+    @Test
     fun knowledgeGrantRequiresExplicitCheckboxAndPersistsToSelectedCharacter() {
         runBlocking {
             database.characterDao().insertCharacter(
