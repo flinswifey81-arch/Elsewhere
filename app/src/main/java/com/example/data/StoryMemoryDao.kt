@@ -19,6 +19,9 @@ interface StoryMemoryDao {
     @Query("SELECT * FROM story_memories WHERE chatId = :chatId ORDER BY createdAtEpochMillis, memoryId")
     suspend fun forChat(chatId: String): List<StoryMemoryEntity>
 
+    @Query("SELECT MAX(sourceOrderIndex) FROM story_memories WHERE chatId = :chatId")
+    suspend fun maxSourceOrderForChat(chatId: String): Long?
+
     @Query("SELECT * FROM story_memories WHERE memoryId = :memoryId LIMIT 1")
     suspend fun get(memoryId: String): StoryMemoryEntity?
 
