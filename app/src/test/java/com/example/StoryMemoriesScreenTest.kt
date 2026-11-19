@@ -348,6 +348,61 @@ class StoryMemoriesScreenTest {
     }
 
     @Test
+    fun candidateScanShowsUnapprovedSourceAndRequiresApproveOrReject() {
+        runBlocking {
+            database.messageDao().insertMessage(MessageEntity(
+                messageId = "review-message",
+                chatId = "ui-story",
+                speakerType = SpeakerType.CHARACTER,
+                speakerId = "rowan",
+                speakerDisplayNameSnapshot = "Rowan",
+                content = "I promise to carry the lantern back to the tower.",
+                orderIndex = 2L
+            ))
+        }
+        composeRule.setContent {
+            MaterialTheme {
+                StoryMemoriesScreen("ui-story", repository, chats, onNavigateBack = {})
+            }
+        }
+        composeRule.waitUntil(15_000) {
+            composeRule.onAllNodesWithTag("scan_story_candidates")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithTag("scan_story_candidates")
+            .performScrollTo().assertIsDisplayed().performClick()
+        composeRule.waitUntil(15_000) {
+            runBlocking {
+                database.storyMemoryDao().forChat("ui-story")
+                    .singleOrNull()?.review == "PENDING_REVIEW"
+            }
+        }
+        val proposal = runBlocking { database.storyMemoryDao().forChat("ui-story").single() }
+        composeRule.onNodeWithTag("review_story_candidate_${proposal.memoryId}")
+            .performScrollTo().assertIsDisplayed().performClick()
+        composeRule.onNodeWithTag("story_candidate_review_dialog").assertExists()
+        composeRule.waitUntil(15_000) {
+            runCatching {
+                composeRule.onNodeWithTag("approve_story_candidate").assertIsEnabled()
+            }.isSuccess
+        }
+        composeRule.onNodeWithText(
+            "I promise to carry the lantern back to the tower.",
+            substring = true
+        ).assertExists()
+        composeRule.onNodeWithTag("approve_story_candidate").performClick()
+        composeRule.waitUntil(15_000) {
+            runBlocking {
+                database.storyMemoryDao().forChat("ui-story")
+                    .singleOrNull()?.review == "APPROVED"
+            }
+        }
+        assertEquals("MESSAGE", runBlocking {
+            database.storyMemoryDao().forChat("ui-story").single().originKind
+        })
+    }
+
+    @Test
     fun knowledgeGrantRequiresExplicitCheckboxAndPersistsToSelectedCharacter() {
         runBlocking {
             database.characterDao().insertCharacter(
