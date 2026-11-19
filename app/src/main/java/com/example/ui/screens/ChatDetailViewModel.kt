@@ -331,13 +331,20 @@ class ChatDetailViewModel(
             messageAttachmentRepository?.let { repository ->
                 launch { runCatching { repository.reconcileOrphanFiles() } }
                 launch {
-                    repository.observeForChat(chatId).collect { attachments ->
-                        updateSuccessState {
-                            it.copy(
-                                attachments = attachments.filter { attachment -> attachment.messageId != null },
-                                draftAttachments = attachments.filter { attachment -> attachment.messageId == null }
-                            )
-                        }
+                    // Image metadata follows the same visible logical-group
+                    // window as the transcript, rather than hydrating every
+                    // image in a 10k-message chat. Drafts remain available at
+                    // all times, including when no history has loaded.
+                    visibleHistoryGroupLimit.collectLatest { groupLimit ->
+                        repository.observeVisibleForChat(chatId, groupLimit)
+                            .collect { attachments ->
+                                updateSuccessState {
+                                    it.copy(
+                                        attachments = attachments.filter { attachment -> attachment.messageId != null },
+                                        draftAttachments = attachments.filter { attachment -> attachment.messageId == null }
+                                    )
+                                }
+                            }
                     }
                 }
             }
