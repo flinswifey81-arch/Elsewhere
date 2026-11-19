@@ -7,6 +7,7 @@ import com.example.data.model.StoryMemoryKnowledgeChangeEntity
 import com.example.data.model.StoryMemoryPerspectiveEntity
 import com.example.data.model.StoryMemoryEntity
 import com.example.data.model.StoryMemoryReturnEntity
+import com.example.data.model.SpeakerType
 import com.example.domain.memory.*
 import com.example.domain.story.StoryResponseCodec
 import com.example.domain.npc.NpcStructuredOutputParser
@@ -31,6 +32,20 @@ data class StoryPromiseEntry(
 )
 
 enum class StoryPromiseOutcome { KEPT, BROKEN, RELEASED }
+
+/** One user-triggered, local scan; no background task or paid extraction. */
+data class StoryCandidateScanResult(
+    val scannedMessages: Int,
+    val newCandidates: Int
+)
+
+/** Source is inspected live; missing/edited/discarded variants fail closed. */
+data class StoryCandidateSourcePreview(
+    val speakerName: String?,
+    val visibleSource: String?,
+    val status: StoryMemoryExclusion
+)
+
 
 /**
  * Local user-controlled story memory. Kept out of generation until a separate
@@ -420,6 +435,167 @@ class StoryMemoryRepository(
                 ).also { dao.insert(it) }
             }
         }
+
+    /**
+     * Explicit opt-in offline scan of a bounded recent selected-message window.
+     * A source excerpt is only a proposed candidate, never promoted to fact.
+     * The signal finder does not infer participant knowledge or modify canon.
+     */
+    suspend fun scanRecentCandidateMessages(
+        chatId: String,
+        recentLimit: Int = 80,
+        maxNewCandidates: Int = 12
+    ): StoryCandidateScanResult = dataCoordinator.withMutation {
+        require(recentLimit in 1..100 && maxNewCandidates in 1..20) {
+            "Candidate scan limits are out of bounds."
+        }
+        database.withTransaction {
+            val chat = requireNotNull(database.chatDao().getChatById(chatId)) {
+                "Chat no longer exists."
+            }
+            val selected = database.messageDao().getSelectedHistoryReversePage(
+                chatId, chat.contextResetOrderIndex, recentLimit, 0
+            ).asReversed()
+            val previouslySeen = dao.reviewedOrRecordedMessageIds(chatId).toMutableSet()
+            var count = 0
+            for (message in selected) {
+                if (count >= maxNewCandidates) break
+                if (message.messageId in previouslySeen ||
+                    message.speakerType !in setOf(
+                        SpeakerType.PERSONA, SpeakerType.CHARACTER, SpeakerType.NARRATOR
+                    )
+                ) continue
+                // Imported or co-op histories may contain an inconsistent
+                // selected variant. Don't create proposals from ambiguity.
+                val variants = database.messageDao().getVariantsOnce(message.variantGroupId)
+                if (variants.count { it.isPrimaryVariant && it.chatId == chatId } != 1 ||
+                    !message.isPrimaryVariant
+                ) continue
+                val visible = NpcStructuredOutputParser.finalVisibleStoryText(message.content)
+                val readable = (StoryResponseCodec.decode(visible)
+                    ?.let(StoryResponseCodec::readableTranscript) ?: visible).trim()
+                val proposal = StoryMemoryCandidateExtractor.suggest(readable) ?: continue
+                val memory = StoryMemoryEntity(
+                    chatId = chatId,
+                    ownerId = chatId,
+                    content = proposal.excerpt,
+                    claim = proposal.claim.name,
+                    visibility = StoryMemoryVisibility.STORYTELLER_ONLY.name,
+                    review = StoryMemoryReview.PENDING_REVIEW.name,
+                    originKind = "MESSAGE",
+                    sourceMessageId = message.messageId,
+                    sourceVariantGroupId = message.variantGroupId,
+                    sourceOrderIndex = message.orderIndex,
+                    sourceSpeakerType = message.speakerType.name,
+                    sourceSpeakerId = message.speakerId,
+                    sourceCreatedAtEpochMillis = message.createdAt,
+                    sourceSha256 = StoryMemoryEligibilityPolicy.sha256(message.content)
+                )
+                dao.insert(memory)
+                previouslySeen += message.messageId
+                count++
+            }
+            StoryCandidateScanResult(selected.size, count)
+        }
+    }
+
+    suspend fun previewCandidateSource(
+        chatId: String,
+        memoryId: String
+    ): StoryCandidateSourcePreview = database.withTransaction {
+        val candidate = requireNotNull(get(chatId, memoryId)) {
+            "Candidate does not belong to this chat."
+        }
+        require(candidate.review == StoryMemoryReview.PENDING_REVIEW.name &&
+            candidate.originKind == "MESSAGE") { "This is not a pending source candidate." }
+        val source = candidate.sourceMessageId
+            ?.let { database.messageDao().getMessageById(it) }
+            ?.takeIf { it.chatId == chatId }
+        val chat = requireNotNull(database.chatDao().getChatById(chatId)) {
+            "Chat no longer exists."
+        }
+        val check = eligibility(
+            candidate.copy(review = StoryMemoryReview.APPROVED.name),
+            chatId, chat.contextResetOrderIndex,
+            StoryActorRef(StoryActorKind.NARRATOR, "narrator:$chatId")
+        ).reason
+        val visible = source?.let {
+            val text = NpcStructuredOutputParser.finalVisibleStoryText(it.content)
+            (StoryResponseCodec.decode(text)
+                ?.let(StoryResponseCodec::readableTranscript) ?: text).trim()
+        }
+        StoryCandidateSourcePreview(
+            source?.speakerDisplayNameSnapshot,
+            visible?.let { if (it.length > 2_400) it.take(2_400) + "…" else it },
+            check
+        )
+    }
+
+    /**
+     * The player alone can approve or reject. Approval rechecks exact selected
+     * variant, original source bytes, branch, Wack and current chat ownership
+     * in the same transaction as the state change.
+     *
+     * Rejected proposals remain as inert history and aren't auto-resuggested.
+     */
+    suspend fun reviewCandidate(
+        chatId: String,
+        memoryId: String,
+        approve: Boolean,
+        editedText: String? = null,
+        category: StoryMemoryClaim? = null
+    ): StoryMemoryEntity = dataCoordinator.withMutation {
+        database.withTransaction {
+            val pending = requireNotNull(get(chatId, memoryId)) {
+                "Candidate does not belong to this chat."
+            }
+            require(pending.review == StoryMemoryReview.PENDING_REVIEW.name &&
+                pending.originKind == "MESSAGE") {
+                "Only an unreviewed message candidate can be approved or rejected."
+            }
+            if (!approve) {
+                return@withTransaction pending.copy(
+                    review = StoryMemoryReview.REJECTED.name,
+                    updatedAtEpochMillis = System.currentTimeMillis()
+                ).also { dao.update(it) }
+            }
+            val text = (editedText ?: pending.content).trim()
+            require(text.isNotBlank() && text.length <= 12_000) {
+                "Approved memory must contain 1–12,000 characters."
+            }
+            val allowed = setOf(
+                StoryMemoryClaim.FACT, StoryMemoryClaim.EVENT,
+                StoryMemoryClaim.PROMISE, StoryMemoryClaim.DISCOVERY,
+                StoryMemoryClaim.RUMOR, StoryMemoryClaim.SECRET,
+                StoryMemoryClaim.UNRESOLVED_THREAD
+            )
+            val chosenClaim = category ?: StoryMemoryClaim.valueOf(pending.claim)
+            require(chosenClaim in allowed) {
+                "This category needs a dedicated actor or relationship workflow."
+            }
+            val chat = requireNotNull(database.chatDao().getChatById(chatId)) {
+                "Chat no longer exists."
+            }
+            val updated = pending.copy(
+                content = text,
+                claim = chosenClaim.name,
+                review = StoryMemoryReview.APPROVED.name,
+                updatedAtEpochMillis = System.currentTimeMillis(),
+                userEditedAt = if (text != pending.content) System.currentTimeMillis()
+                    else pending.userEditedAt
+            )
+            val decision = eligibility(
+                updated, chatId, chat.contextResetOrderIndex,
+                StoryActorRef(StoryActorKind.NARRATOR, "narrator:$chatId")
+            )
+            require(decision.eligible) {
+                "Source cannot be approved: ${decision.reason}. It may be edited, " +
+                    "deleted, discarded, or outside the current Wack."
+            }
+            dao.update(updated)
+            updated
+        }
+    }
 
     /** Update only user-managed fields. Provenance stays immutable. */
     suspend fun update(
