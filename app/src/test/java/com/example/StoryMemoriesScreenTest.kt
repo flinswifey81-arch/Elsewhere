@@ -71,7 +71,7 @@ class StoryMemoriesScreenTest {
         composeRule.waitUntil(10_000) {
             runCatching { composeRule.onNodeWithText("Pin").assertIsEnabled() }.isSuccess
         }
-        composeRule.onNodeWithText("Pin").performClick()
+        composeRule.onNodeWithText("Pin").performScrollTo().assertIsDisplayed().performClick()
         composeRule.waitUntil(10_000) {
             runBlocking { database.storyMemoryDao().forChat("ui-story").single().pinned }
         }
@@ -84,7 +84,7 @@ class StoryMemoriesScreenTest {
                 composeRule.onNodeWithText("Hide").assertIsEnabled()
             }.isSuccess
         }
-        composeRule.onNodeWithText("Hide").performClick()
+        composeRule.onNodeWithText("Hide").performScrollTo().assertIsDisplayed().performClick()
         composeRule.waitUntil(10_000) {
             runBlocking { database.storyMemoryDao().forChat("ui-story").single().hidden }
         }
