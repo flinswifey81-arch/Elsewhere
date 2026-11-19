@@ -192,6 +192,7 @@ class BackupRepository internal constructor(
                 storyMemoryActors = database.storyMemoryDao().getAllActors(),
                 storyMemoryReturns = database.storyMemoryDao().getAllReturns(),
                 storyMemoryKnowledgeChanges = database.storyMemoryDao().getAllKnowledgeChanges(),
+                storyMemoryPerspectives = database.storyMemoryDao().getAllPerspectives(),
                 conversationSummaries = backupDao.getConversationSummaries(),
                 lorebooks = backupDao.getLorebooks(),
                 lorebookEntries = backupDao.getLorebookEntries(),
@@ -522,6 +523,9 @@ class BackupRepository internal constructor(
         if (payload.storyMemoryKnowledgeChanges.isNotEmpty()) {
             database.storyMemoryDao().insertKnowledgeChanges(payload.storyMemoryKnowledgeChanges)
         }
+        if (payload.storyMemoryPerspectives.isNotEmpty()) {
+            database.storyMemoryDao().insertPerspectives(payload.storyMemoryPerspectives)
+        }
         if (payload.conversationSummaries.isNotEmpty()) {
             backupDao.insertConversationSummaries(payload.conversationSummaries)
         }
@@ -610,6 +614,7 @@ class BackupRepository internal constructor(
             payload.storyMemoryActors.size,
             payload.storyMemoryReturns.size,
             payload.storyMemoryKnowledgeChanges.size,
+            payload.storyMemoryPerspectives.size,
             payload.conversationSummaries.size,
             payload.lorebooks.size,
             payload.lorebookEntries.size,
@@ -683,6 +688,9 @@ class BackupRepository internal constructor(
         uniqueComposite("story memory knowledge change", payload.storyMemoryKnowledgeChanges.map {
             "${it.memoryId}\u0000${it.revision}\u0000${it.characterId}"
         })
+        uniqueComposite("story memory perspective", payload.storyMemoryPerspectives.map {
+            "${it.memoryId}\u0000${it.characterId}\u0000${it.revision}"
+        })
         unique("co-op event", payload.coopEvents.map { it.eventId })
         unique("NPC update", payload.npcDossierUpdates.map { it.updateId })
         unique("chat settings", payload.chatSettings.map { it.chatId })
@@ -733,6 +741,16 @@ class BackupRepository internal constructor(
                         memory.lifecycle == "RESOLVED" &&
                         memory.promiseOutcome in setOf("KEPT", "BROKEN", "RELEASED") &&
                         priorId != null))
+        }
+        val membersByChat = payload.chatParticipants.groupBy { it.chatId }
+            .mapValues { (_, participants) -> participants.map { it.characterId }.toSet() }
+        requireRefs(payload.storyMemoryPerspectives, "story memory perspective") { perspective ->
+            val memory = storyMemoriesById[perspective.memoryId]
+            memory != null &&
+                perspective.revision > 0L &&
+                perspective.characterId in membersByChat[memory.chatId].orEmpty() &&
+                perspective.stance in setOf("KNOWS", "BELIEVES", "SUSPECTS", "UNAWARE") &&
+                (perspective.note == null || perspective.note.length <= 2_000)
         }
         requireRefs(payload.storyMemoryKnowledgeChanges, "story memory knowledge change") { change ->
             change.memoryId in storyMemoryIds &&
