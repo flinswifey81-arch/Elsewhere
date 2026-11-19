@@ -58,6 +58,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -2364,16 +2365,27 @@ class ChatDetailViewModel(
     }
 
     private fun updateSuccessState(update: (ChatUiState.Success) -> ChatUiState.Success) {
-        val current = _uiState.value
-        if (current is ChatUiState.Success) {
-            _uiState.value = update(current)
-        } else if (current is ChatUiState.Loading) {
-            _uiState.value = update(ChatUiState.Success(
-                chatSummary = chatSummary!!,
-                messages = emptyList(),
-                chatSettings = currentChatSettings!!,
-                selectedGroupCharacterId = selectedGroupCharacterId
-            ))
+        // Room history, settings, generation and attachment collectors can emit
+        // on different threads (notably in Robolectric with Unconfined Main).
+        // An ordinary read-then-write loses concurrent updates, potentially
+        // resetting historyLoaded or isGenerating and leaving the UI stuck.
+        // StateFlow.update performs an atomic compare-and-set retry.
+        _uiState.update { current ->
+            when (current) {
+                is ChatUiState.Success -> update(current)
+                is ChatUiState.Loading -> {
+                    val summary = chatSummary
+                    val settings = currentChatSettings
+                    if (summary == null || settings == null) current
+                    else update(ChatUiState.Success(
+                        chatSummary = summary,
+                        messages = emptyList(),
+                        chatSettings = settings,
+                        selectedGroupCharacterId = selectedGroupCharacterId
+                    ))
+                }
+                else -> current
+            }
         }
     }
 
