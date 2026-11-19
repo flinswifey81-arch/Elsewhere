@@ -347,6 +347,7 @@ fun StoryMemoriesScreen(
     }
     restoring?.let { memory ->
         AlertDialog(
+            modifier = Modifier.testTag("story_memory_restore_dialog"),
             onDismissRequest = { restoring = null },
             title = { Text("Restore this memory after Wack?") },
             text = {
@@ -473,7 +474,11 @@ fun StoryMemoriesScreen(
                                     applyChange { repository.update(chatId, memory.memoryId, lifecycle = StoryMemoryLifecycle.RESOLVED) }
                                 }) { Text("Resolve") }
                                 if (boundary != null && memory.sourceOrderIndex <= boundary!!) {
-                                    OutlinedButton(enabled = !working, onClick = { restoring = memory }) { Text("Restore after Wack") }
+                                    OutlinedButton(
+                                        enabled = !working,
+                                        modifier = Modifier.testTag("restore_memory_${memory.memoryId}"),
+                                        onClick = { restoring = memory }
+                                    ) { Text("Restore after Wack") }
                                 }
                                 TextButton(enabled = !working, onClick = { removing = memory }) { Text("Delete") }
                             }
