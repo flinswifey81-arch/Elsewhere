@@ -117,6 +117,57 @@ class BackupRepositoryTest {
     }
 
     @Test
+    fun encryptedBackupPreservesPendingAndRejectedMessageCandidatesWithoutApprovingThem() = runBlocking {
+        val source = environment()
+        val chatId = "review-backup"
+        source.database.chatDao().insertChat(
+            ChatEntity(chatId = chatId, displayName = "Review archive", chatType = ChatType.SOLO)
+        )
+        source.database.messageDao().insertMessage(MessageEntity(
+            messageId = "discovery-source", chatId = chatId,
+            speakerType = SpeakerType.CHARACTER, speakerId = "rowan",
+            speakerDisplayNameSnapshot = "Rowan",
+            content = "We discovered the ancient map behind the portrait.",
+            orderIndex = 1L
+        ))
+        source.database.messageDao().insertMessage(MessageEntity(
+            messageId = "promise-source", chatId = chatId,
+            speakerType = SpeakerType.PERSONA, speakerId = "mara",
+            speakerDisplayNameSnapshot = "Mara",
+            content = "I promise to return the sapphire pendant.",
+            orderIndex = 2L
+        ))
+        val memory = com.example.domain.repository.StoryMemoryRepository(source.database)
+        assertEquals(2, memory.scanRecentCandidateMessages(chatId).newCandidates)
+        val proposal = source.database.storyMemoryDao().forChat(chatId).first {
+            it.sourceMessageId == "promise-source"
+        }
+        memory.reviewCandidate(chatId, proposal.memoryId, approve = false)
+        val originals = source.database.storyMemoryDao().forChat(chatId)
+        assertEquals(setOf("PENDING_REVIEW", "REJECTED"), originals.map { it.review }.toSet())
+
+        val encrypted = ByteArrayOutputStream()
+        source.repository.exportEncrypted(encrypted, PASSPHRASE.toCharArray())
+        val target = environment()
+        target.repository.restoreEncrypted(
+            ByteArrayInputStream(encrypted.toByteArray()), PASSPHRASE.toCharArray()
+        )
+        assertEquals(source.database.storyMemoryDao().getAll(),
+            target.database.storyMemoryDao().getAll())
+        assertEquals(setOf("PENDING_REVIEW", "REJECTED"),
+            target.database.storyMemoryDao().forChat(chatId).map { it.review }.toSet())
+        val targetStory = com.example.domain.repository.StoryMemoryRepository(target.database)
+        assertEquals(0, targetStory.scanRecentCandidateMessages(chatId).newCandidates)
+        assertTrue(targetStory.retrieveForGeneration(
+            chatId,
+            com.example.domain.memory.StoryActorRef(
+                com.example.domain.memory.StoryActorKind.NARRATOR, "narrator:$chatId"
+            ),
+            sceneText = "ancient map sapphire pendant"
+        ).selected.isEmpty())
+    }
+
+    @Test
     fun encryptedBackupPreservesLinkedPromiseOutcomeAndNoImplicitKnowledge() = runBlocking {
         val source = environment()
         val chatId = "promise-backup"
