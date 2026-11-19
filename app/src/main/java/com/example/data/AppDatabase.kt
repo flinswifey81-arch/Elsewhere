@@ -7,7 +7,7 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.example.data.model.*
 
-const val APP_DATABASE_VERSION = 17
+const val APP_DATABASE_VERSION = 18
 
 @Database(
     entities = [
@@ -68,6 +68,16 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun worldDao(): WorldDao
 
     companion object {
+        /** Additive index for bounded selected-turn chronology; preserves all variants. */
+        val MIGRATION_17_18 = object : Migration(17, 18) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_messages_chatId_isPrimaryVariant_orderIndex " +
+                        "ON messages(chatId, isPrimaryVariant, orderIndex)"
+                )
+            }
+        }
+
         /** Additive performance-only index. No table rebuilds or record rewrites. */
         val MIGRATION_16_17 = object : Migration(16, 17) {
             override fun migrate(db: SupportSQLiteDatabase) {
