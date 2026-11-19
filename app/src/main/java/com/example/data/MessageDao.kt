@@ -81,6 +81,24 @@ interface MessageDao {
     ): List<MessageEntity>
 
     /**
+     * Manual deterministic memory extraction must preserve original
+     * oldest-first provenance and duplicate winner behavior.
+     */
+    @Query("""
+        SELECT * FROM messages
+        WHERE chatId = :chatId AND isPrimaryVariant = 1
+          AND (:resetBoundary IS NULL OR orderIndex > :resetBoundary)
+        ORDER BY orderIndex ASC, rowid ASC
+        LIMIT :pageSize OFFSET :offset
+    """)
+    suspend fun getSelectedHistoryForwardPage(
+        chatId: String,
+        resetBoundary: Long?,
+        pageSize: Int,
+        offset: Int
+    ): List<MessageEntity>
+
+    /**
      * Provenance-only lookup for saved memory sources. Query is bounded by
      * referenced message IDs, not by total transcript length.
      */
