@@ -80,9 +80,6 @@ class StoryPromiseStateTest {
         val seaMap = repository.savePromise(
             "story-a", mara, rowan, "Mara promises Rowan a map of the coast."
         )
-        repository.setCharacterKnowledge(
-            "story-a", silverKey.memory.memoryId, setOf("rowan")
-        )
         val outcome = repository.closePromise(
             "story-a", silverKey.memory.memoryId, StoryPromiseOutcome.KEPT,
             "The silver key was delivered."
@@ -99,8 +96,9 @@ class StoryPromiseStateTest {
         assertTrue(outcome.memory.content.contains("The silver key was delivered."))
         // No automatic transfer of private access to the new outcome.
         assertTrue(repository.getCharacterKnowers("story-a", outcome.memory.memoryId).isEmpty())
-        assertEquals(setOf("rowan"),
-            repository.getCharacterKnowers("story-a", silverKey.memory.memoryId))
+        assertTrue(repository.getCharacterKnowers(
+            "story-a", silverKey.memory.memoryId
+        ).isEmpty())
         val narrator = repository.retrieveForGeneration(
             "story-a",
             StoryActorRef(StoryActorKind.NARRATOR, "narrator:story-a"),
@@ -111,6 +109,30 @@ class StoryPromiseStateTest {
         val character = repository.retrieveForGeneration("story-a", rowan, "Mara silver key")
         assertTrue(character.selected.isEmpty())
         assertTrue(repository.getPromiseHistory("story-b").isEmpty())
+    }
+
+    @Test fun privatePromiseCannotBeCopiedIntoNarratorMemoryByClosing() = runBlocking {
+        val old = repository.savePromise(
+            "story-a", mara, rowan, "Rowan alone knows the hidden oath."
+        )
+        repository.setCharacterKnowledge("story-a", old.memory.memoryId, setOf("rowan"))
+        assertThrows(IllegalArgumentException::class.java) {
+            runBlocking {
+                repository.closePromise(
+                    "story-a", old.memory.memoryId, StoryPromiseOutcome.KEPT,
+                    "The hidden oath was honored."
+                )
+            }
+        }
+        assertEquals("ACTIVE", repository.get("story-a", old.memory.memoryId)?.lifecycle)
+        assertEquals(1, repository.getPromiseHistory("story-a").size)
+        // Deliberate owner action changes the audience before writing outcome.
+        repository.setCharacterKnowledge("story-a", old.memory.memoryId, emptySet())
+        val next = repository.closePromise(
+            "story-a", old.memory.memoryId, StoryPromiseOutcome.KEPT,
+            "The oath was honored."
+        )
+        assertEquals("STORYTELLER_ONLY", next.memory.visibility)
     }
 
     @Test fun brokenAndReleasedAreDistinctExplicitFinalStates() = runBlocking {
