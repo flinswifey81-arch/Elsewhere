@@ -62,6 +62,8 @@ jobs:
             --tests com.example.domain.Stage0ContextCostAndContinuityBenchmarkTest \
             --tests com.example.domain.memory.StoryMemoryEligibilityPolicyTest \
             --tests com.example.domain.StoryMemoryStorageTest \
+            --tests com.example.StoryRelationshipStateTest \
+            --tests com.example.StoryMemoriesScreenTest \
             --tests com.example.AppDatabaseMigrationTest \
             --tests com.example.ChatDetailGenerationTest \
             --tests com.example.ScenarioModeTest
