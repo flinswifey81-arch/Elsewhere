@@ -376,8 +376,16 @@ class StoryMemoriesScreenTest {
         assertTrue(runBlocking {
             database.storyMemoryDao().forChat("ui-story").single().visibility == "STORYTELLER_ONLY"
         })
-        composeRule.onNodeWithText("Who knows this?").performClick()
-        composeRule.onNodeWithTag("memory_knowledge_rowan").performClick()
+        composeRule.onNodeWithText("Who knows this?").performScrollTo()
+            .assertIsDisplayed().performClick()
+        // The Character list is loaded in a separate LaunchedEffect. Wait
+        // for the dialog's actual checkbox instead of racing its UI state.
+        composeRule.waitUntil(15_000) {
+            composeRule.onAllNodesWithTag("memory_knowledge_rowan")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithTag("memory_knowledge_rowan")
+            .assertIsDisplayed().performClick()
         composeRule.onNodeWithText("Save knowledge").performClick()
         composeRule.waitUntil(10_000) {
             runBlocking { database.storyMemoryDao().forChat("ui-story").single().visibility == "CHARACTER_ONLY" }
