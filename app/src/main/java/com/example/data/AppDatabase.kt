@@ -82,6 +82,7 @@ abstract class AppDatabase : RoomDatabase() {
                         characterId TEXT NOT NULL,
                         revision INTEGER NOT NULL,
                         stance TEXT NOT NULL,
+                        contentSha256 TEXT NOT NULL,
                         note TEXT,
                         latestMessageOrderIndex INTEGER,
                         wackBoundaryOrderIndex INTEGER,
