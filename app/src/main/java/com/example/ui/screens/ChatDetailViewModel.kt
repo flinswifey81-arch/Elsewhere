@@ -651,7 +651,7 @@ class ChatDetailViewModel(
             updateSuccessState { it.copy(generationError = null, generationWarning = null) }
             if (summary.chat.chatType == ChatType.GROUP) {
                 dataCoordinator.withMutation(dataRevision) {
-                    chatRepository.updateChat(summary.chat.copy(updatedAt = System.currentTimeMillis()))
+                    chatRepository.touchChatTimestamp(chatId)
                 }
                 return@launch
             }
@@ -1928,10 +1928,10 @@ class ChatDetailViewModel(
 
     private suspend fun refreshChatTimestamp(dataRevision: AppDataRevision) {
         try {
-            chatRepository.getChatSummaryById(chatId)?.let { summary ->
-                dataCoordinator.withMutation(dataRevision) {
-                    chatRepository.updateChat(summary.chat.copy(updatedAt = System.currentTimeMillis()))
-                }
+            // Never read an old ChatEntity and write it back after a Wack.
+            // A concurrent reset must not be erased just to update the list timestamp.
+            dataCoordinator.withMutation(dataRevision) {
+                chatRepository.touchChatTimestamp(chatId)
             }
         } catch (cancellation: kotlinx.coroutines.CancellationException) {
             throw cancellation
