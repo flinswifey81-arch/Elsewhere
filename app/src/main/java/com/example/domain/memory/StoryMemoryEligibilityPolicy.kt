@@ -57,16 +57,16 @@ data class StoryMemoryRecord(
     val claim: StoryMemoryClaim,
     val visibility: StoryMemoryVisibility,
     val knownBy: Set<StoryActorRef> = emptySet(),
-    // User-authored, recipient-specific in-fiction perspective. This is NOT
-    // an authorization grant and cannot replace the ordinary knowledge gate.
-    val perspectives: Map<StoryActorRef, StoryCharacterPerspective> = emptyMap(),
     val believedBy: StoryActorRef? = null,
     val actors: Set<StoryActorRef> = emptySet(),
     val review: StoryMemoryReview = StoryMemoryReview.PENDING_REVIEW,
     val lifecycle: StoryMemoryLifecycle = StoryMemoryLifecycle.ACTIVE,
     val hidden: Boolean = false,
     val pinned: Boolean = false,
-    val userEditedAt: Long? = null
+    val userEditedAt: Long? = null,
+    // User-authored, recipient-specific in-fiction perspective. This is NOT
+    // an authorization grant and cannot replace the ordinary knowledge gate.
+    val perspectives: Map<StoryActorRef, StoryCharacterPerspective> = emptyMap()
 )
 
 /**
