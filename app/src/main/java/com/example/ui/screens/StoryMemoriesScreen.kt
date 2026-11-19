@@ -614,12 +614,20 @@ fun StoryMemoriesScreen(
                                     }) { Text("Who knows this?") }
                                 }
                                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    TextButton(enabled = !working, onClick = {
-                                        applyChange { repository.update(chatId, memory.memoryId, pinned = !memory.pinned) }
-                                    }) { Text(if (memory.pinned) "Unpin" else "Pin") }
-                                    TextButton(enabled = !working, onClick = {
-                                        applyChange { repository.update(chatId, memory.memoryId, hidden = !memory.hidden) }
-                                    }) { Text(if (memory.hidden) "Show" else "Hide") }
+                                    TextButton(
+                                        modifier = Modifier.testTag("story_memory_pin_${memory.memoryId}"),
+                                        enabled = !working,
+                                        onClick = {
+                                            applyChange { repository.update(chatId, memory.memoryId, pinned = !memory.pinned) }
+                                        }
+                                    ) { Text(if (memory.pinned) "Unpin" else "Pin") }
+                                    TextButton(
+                                        modifier = Modifier.testTag("story_memory_visibility_${memory.memoryId}"),
+                                        enabled = !working,
+                                        onClick = {
+                                            applyChange { repository.update(chatId, memory.memoryId, hidden = !memory.hidden) }
+                                        }
+                                    ) { Text(if (memory.hidden) "Show" else "Hide") }
                                 }
                             }
                             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
