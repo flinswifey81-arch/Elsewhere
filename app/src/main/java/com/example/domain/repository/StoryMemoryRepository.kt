@@ -110,7 +110,7 @@ class StoryMemoryRepository(
                     "Only an active relationship state can be superseded."
                 }
                 val previousPair = relationshipPair(dao.actors(id))
-                require(previousPair == (from to to)) {
+                require(previousPair == Pair(from, to)) {
                     "The earlier relationship has different participants or direction."
                 }
                 old
@@ -195,7 +195,7 @@ class StoryMemoryRepository(
         }
         val from = unique("RELATIONSHIP_FROM") ?: return null
         val to = unique("RELATIONSHIP_TO") ?: return null
-        return if (from == to) null else from to to
+        return if (from == to) null else Pair(from, to)
     }
 
     /** A saved message keeps exact variant/speaker fingerprint and order. */
