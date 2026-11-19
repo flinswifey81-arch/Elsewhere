@@ -190,7 +190,12 @@ class StoryMemoriesScreenTest {
             composeRule.onAllNodesWithTag("record_relationship_change")
                 .fetchSemanticsNodes().isNotEmpty()
         }
-        composeRule.onNodeWithTag("record_relationship_change").performClick()
+        composeRule.onNodeWithTag("record_relationship_change")
+            .performScrollTo().assertIsDisplayed().performClick()
+        composeRule.waitUntil(15_000) {
+            composeRule.onAllNodesWithText("How has this relationship changed?")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
         composeRule.onNodeWithText("From: Mara (Persona)").assertExists()
         composeRule.onNodeWithText("To: Rowan (Character)").assertExists()
         composeRule.onNodeWithText("How has this relationship changed?")
@@ -205,7 +210,12 @@ class StoryMemoriesScreenTest {
         assertEquals("ACTIVE", first.memory.lifecycle)
         assertEquals("STORYTELLER_ONLY", first.memory.visibility)
         composeRule.onNodeWithText("Relationship: Mara (Persona) → Rowan (Character)").assertExists()
-        composeRule.onNodeWithText("Record a change").performClick()
+        composeRule.onNodeWithTag("relationship_change_${first.memory.memoryId}")
+            .performScrollTo().assertIsDisplayed().performClick()
+        composeRule.waitUntil(15_000) {
+            composeRule.onAllNodesWithText("How has this relationship changed?")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
         composeRule.onNodeWithText("How has this relationship changed?")
             .performTextInput("Rowan apologized, and Mara forgives him.")
         composeRule.onNodeWithText("Save relationship state").performClick()
@@ -378,6 +388,18 @@ class StoryMemoriesScreenTest {
             }
         }
         val proposal = runBlocking { database.storyMemoryDao().forChat("ui-story").single() }
+        // Committing to Room does not mean the LazyColumn has collected or
+        // composed its newly inserted child. Wait for UI observation, then
+        // scroll to index 1 before requesting the child's semantics.
+        composeRule.waitUntil(15_000) {
+            composeRule.onAllNodesWithText("1 proposed memories need your review.")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithTag("story_memories_list").performScrollToIndex(1)
+        composeRule.waitUntil(15_000) {
+            composeRule.onAllNodesWithTag("review_story_candidate_${proposal.memoryId}")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
         composeRule.onNodeWithTag("review_story_candidate_${proposal.memoryId}")
             .performScrollTo().assertIsDisplayed().performClick()
         composeRule.onNodeWithTag("story_candidate_review_dialog").assertExists()
