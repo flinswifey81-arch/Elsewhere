@@ -27,7 +27,8 @@ object StoryMemoryCandidateExtractor {
     fun suggest(visibleText: String): Suggestion? {
         // Scan only bounded input, and never return a cut-off excerpt.
         // Full original source bytes remain hashed in the stored provenance.
-        for (fragment in visibleText.take(12_000).split(fragments)) {
+        if (visibleText.length > 12_000) return null
+        for (fragment in visibleText.split(fragments)) {
             val excerpt = fragment.trim()
             if (excerpt.length !in 12..1_200) continue
             val claim = when {
