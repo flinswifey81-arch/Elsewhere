@@ -298,6 +298,56 @@ class StoryMemoriesScreenTest {
     }
 
     @Test
+    fun characterPerspectiveDialogRecordsPlayerOnlySubjectiveState() {
+        runBlocking {
+            database.characterDao().insertCharacter(
+                com.example.data.model.CharacterEntity(
+                    characterId = "rowan", displayName = "Rowan", characterName = "Rowan",
+                    aliases = emptyList(), importSchemaVersion = 1,
+                    identityJson = null, appearanceJson = null, personalityJson = null,
+                    voiceJson = null, behaviorJson = null, backstoryJson = null,
+                    knowledgeJson = null, worldContextJson = null, writingRulesJson = null,
+                    examplesJson = null, authorNotesJson = null, extensionFieldsJson = null
+                )
+            )
+            database.chatDao().insertChatParticipant(
+                com.example.data.model.ChatParticipantEntity(
+                    chatId = "ui-story", characterId = "rowan"
+                )
+            )
+        }
+        val memory = runBlocking {
+            repository.saveManual("ui-story", "The silver key is in the old watch.")
+        }
+        composeRule.setContent {
+            MaterialTheme {
+                StoryMemoriesScreen("ui-story", repository, chats, onNavigateBack = {})
+            }
+        }
+        composeRule.waitUntil(15_000) {
+            composeRule.onAllNodesWithTag("story_memory_perspectives_${memory.memoryId}")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithTag("story_memory_perspectives_${memory.memoryId}")
+            .performScrollTo().assertIsDisplayed().performClick()
+        composeRule.onNodeWithTag("story_memory_perspective_dialog").assertExists()
+        composeRule.onNodeWithText("Character: Rowan").assertExists()
+        composeRule.onNodeWithText("State: knows").performClick()
+        composeRule.onNodeWithText("suspects").performClick()
+        composeRule.onNodeWithText("Save perspective").performClick()
+        composeRule.waitUntil(15_000) {
+            runBlocking {
+                repository.getCurrentCharacterPerspectives("ui-story", memory.memoryId)
+                    .singleOrNull()?.stance == "SUSPECTS"
+            }
+        }
+        // Recording a perspective must not grant character access by itself.
+        assertTrue(runBlocking {
+            repository.getCharacterKnowers("ui-story", memory.memoryId).isEmpty()
+        })
+    }
+
+    @Test
     fun knowledgeGrantRequiresExplicitCheckboxAndPersistsToSelectedCharacter() {
         runBlocking {
             database.characterDao().insertCharacter(
