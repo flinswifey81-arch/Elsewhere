@@ -2,6 +2,8 @@ package com.example.ui.screens
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -13,6 +15,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import com.example.data.model.StoryMemoryEntity
+import com.example.data.model.StoryMemoryKnowledgeChangeEntity
 import com.example.data.model.CharacterEntity
 import com.example.domain.memory.StoryActorKind
 import com.example.domain.memory.StoryActorRef
@@ -51,6 +54,9 @@ fun StoryMemoriesScreen(
     var restoring by remember { mutableStateOf<StoryMemoryEntity?>(null) }
     var grantingKnowledge by remember { mutableStateOf<StoryMemoryEntity?>(null) }
     var selectedKnowers by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var knowledgeHistory by remember(chatId) {
+        mutableStateOf<List<StoryMemoryKnowledgeChangeEntity>>(emptyList())
+    }
     var characters by remember(chatId) { mutableStateOf<List<CharacterEntity>>(emptyList()) }
     var knowers by remember(chatId) { mutableStateOf<Map<String, Set<String>>>(emptyMap()) }
     var relationshipEntries by remember(chatId) {
@@ -363,12 +369,23 @@ fun StoryMemoriesScreen(
         )
     }
 
+    LaunchedEffect(chatId, grantingKnowledge?.memoryId) {
+        val id = grantingKnowledge?.memoryId
+        knowledgeHistory = if (id == null) emptyList() else try {
+            repository.getCharacterKnowledgeHistory(chatId, id)
+        } catch (_: IllegalArgumentException) {
+            emptyList()
+        }
+    }
     grantingKnowledge?.let { memory ->
         AlertDialog(
             onDismissRequest = { if (!working) grantingKnowledge = null },
             title = { Text("Who knows this?") },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(
+                    modifier = Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
                     Text("Only explicitly selected Characters may recall this as their own knowledge. Leave everyone unchecked for storyteller-only continuity.",
                         style = MaterialTheme.typography.bodySmall)
                     if (characters.isEmpty()) Text("There are no Character participants in this chat.")
@@ -392,6 +409,24 @@ fun StoryMemoriesScreen(
                         "Contradictions must remain storyteller-only.",
                         style = MaterialTheme.typography.bodySmall
                     )
+                    if (knowledgeHistory.isNotEmpty()) {
+                        HorizontalDivider()
+                        Text(
+                            "Previous player assignments (not proof that a character learned or forgot something in the story):",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        knowledgeHistory.takeLast(6).forEach { entry ->
+                            val character = characters.firstOrNull {
+                                it.characterId == entry.characterId
+                            }?.displayName ?: entry.characterId
+                            Text(
+                                "$character: " +
+                                    (if (entry.change == "GRANTED") "access granted" else "access revoked") +
+                                    " • revision ${entry.revision}",
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                        }
+                    }
                 }
             },
             confirmButton = {
