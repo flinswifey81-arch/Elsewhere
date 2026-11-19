@@ -207,6 +207,78 @@ class StoryMemoriesScreenTest {
     }
 
     @Test
+    fun playerRecordsAndClosesSpecificPromiseFromStoryMemoriesScreen() {
+        runBlocking {
+            database.characterDao().insertCharacter(
+                com.example.data.model.CharacterEntity(
+                    characterId = "rowan", displayName = "Rowan", characterName = "Rowan",
+                    aliases = emptyList(), importSchemaVersion = 1,
+                    identityJson = null, appearanceJson = null, personalityJson = null,
+                    voiceJson = null, behaviorJson = null, backstoryJson = null,
+                    knowledgeJson = null, worldContextJson = null, writingRulesJson = null,
+                    examplesJson = null, authorNotesJson = null, extensionFieldsJson = null
+                )
+            )
+            database.personaDao().insertPersona(
+                com.example.data.model.PersonaEntity(
+                    personaId = "mara", displayName = "Mara", personaName = "Mara",
+                    aliases = emptyList(), importSchemaVersion = 1,
+                    identityJson = null, appearanceJson = null, personalityJson = null,
+                    roleplayProfileJson = null, backgroundJson = null,
+                    worldContextJson = null, privateNotesJson = null, extensionFieldsJson = null
+                )
+            )
+            database.chatDao().insertChatParticipant(
+                com.example.data.model.ChatParticipantEntity(
+                    chatId = "ui-story", characterId = "rowan"
+                )
+            )
+            database.chatDao().insertChatPersonaParticipant(
+                com.example.data.model.ChatPersonaParticipantEntity(
+                    chatId = "ui-story", personaId = "mara"
+                )
+            )
+        }
+        composeRule.setContent {
+            MaterialTheme {
+                StoryMemoriesScreen("ui-story", repository, chats, onNavigateBack = {})
+            }
+        }
+        composeRule.waitUntil(15_000) {
+            composeRule.onAllNodesWithTag("record_story_promise")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithTag("record_story_promise").performClick()
+        composeRule.onNodeWithText("From: Mara (Persona)").assertExists()
+        composeRule.onNodeWithText("To: Rowan (Character)").assertExists()
+        composeRule.onNodeWithText("What was promised?")
+            .performTextInput("Mara promises Rowan the silver key.")
+        composeRule.onNodeWithText("Save promise").performClick()
+        composeRule.waitUntil(15_000) {
+            runBlocking { repository.getPromiseHistory("ui-story").size == 1 }
+        }
+        val first = runBlocking { repository.getPromiseHistory("ui-story").single() }
+        assertEquals("ACTIVE", first.memory.lifecycle)
+        composeRule.onNodeWithTag("close_promise_${first.memory.memoryId}", useUnmergedTree = true)
+            .performScrollTo().performClick()
+        composeRule.onNodeWithTag("record_promise_outcome_dialog", useUnmergedTree = true)
+            .assertExists()
+        composeRule.onNodeWithText("What happened?").performTextInput(
+            "Mara gave Rowan the silver key."
+        )
+        composeRule.onNodeWithText("Save outcome").performClick()
+        composeRule.waitUntil(15_000) {
+            runBlocking { repository.getPromiseHistory("ui-story").size == 2 }
+        }
+        val history = runBlocking { repository.getPromiseHistory("ui-story") }
+        assertEquals("SUPERSEDED", history.first().memory.lifecycle)
+        assertEquals("RESOLVED", history.last().memory.lifecycle)
+        assertEquals("KEPT", history.last().memory.promiseOutcome)
+        assertEquals(first.memory.memoryId, history.last().memory.previousStateMemoryId)
+        assertEquals("STORYTELLER_ONLY", history.last().memory.visibility)
+    }
+
+    @Test
     fun knowledgeGrantRequiresExplicitCheckboxAndPersistsToSelectedCharacter() {
         runBlocking {
             database.characterDao().insertCharacter(
