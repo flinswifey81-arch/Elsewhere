@@ -212,6 +212,47 @@ class ChatDetailGenerationTest {
         assertEquals(listOf(persisted.last().messageId, persisted.last().messageId), savedReplyIds)
     }
 
+    /**
+     * Generation regressions should report whether the provider was reached,
+     * instead of surfacing an opaque coroutine timeout. No prompt or RP text
+     * is printed: only synthetic test state, counts and the UI error.
+     */
+    private suspend fun awaitCompletedTurn(
+        viewModel: ChatDetailViewModel,
+        expectedMessageCount: Int,
+        requests: () -> Int
+    ) {
+        try {
+            withTimeout(15_000) {
+                viewModel.uiState.first { state ->
+                    state is ChatUiState.Success &&
+                        ((!state.isGenerating && state.messages.size == expectedMessageCount) ||
+                            state.generationError != null)
+                }
+            }
+        } catch (timeout: kotlinx.coroutines.TimeoutCancellationException) {
+            throw AssertionError(generationDiagnostics(viewModel, expectedMessageCount, requests()), timeout)
+        }
+        val state = viewModel.uiState.value as? ChatUiState.Success
+        assertTrue(
+            generationDiagnostics(viewModel, expectedMessageCount, requests()),
+            state != null && !state.isGenerating && state.messages.size == expectedMessageCount &&
+                state.generationError == null
+        )
+    }
+
+    private fun generationDiagnostics(
+        viewModel: ChatDetailViewModel,
+        expectedMessageCount: Int,
+        requests: Int
+    ): String {
+        val state = viewModel.uiState.value as? ChatUiState.Success
+        return "Generation did not complete: expectedMessageCount=$expectedMessageCount, " +
+            "observedMessageCount=${state?.messages?.size}, requests=$requests, " +
+            "historyLoaded=${state?.historyLoaded}, isGenerating=${state?.isGenerating}, " +
+            "generationError=${state?.generationError}, partialStopped=${state?.partialStopped}"
+    }
+
     @Test
     fun storyMemoryRecallsInNextPromptButWackBlocksUntilUserRestoresIt() = runBlocking {
         // Full ViewModel -> Room -> recipient retrieval -> compiler -> provider path.
@@ -231,11 +272,7 @@ class ChatDetailGenerationTest {
 
         harness.viewModel.onDraftChanged("Where is our silver compass?")
         harness.viewModel.sendMessage()
-        withTimeout(15_000) {
-            harness.viewModel.uiState.first {
-                it is ChatUiState.Success && !it.isGenerating && it.messages.size == 2
-            }
-        }
+        awaitCompletedTurn(harness.viewModel, 2) { provider.requests.size }
         assertEquals(1, provider.requests.size)
         assertTrue(provider.requests.single().first().content.contains("silver compass is buried"))
 
@@ -248,22 +285,14 @@ class ChatDetailGenerationTest {
         }
         harness.viewModel.onDraftChanged("Where did we put the compass in this new story?")
         harness.viewModel.sendMessage()
-        withTimeout(15_000) {
-            harness.viewModel.uiState.first {
-                it is ChatUiState.Success && !it.isGenerating && it.messages.size == 4
-            }
-        }
+        awaitCompletedTurn(harness.viewModel, 4) { provider.requests.size }
         assertEquals(2, provider.requests.size)
         assertFalse(provider.requests[1].first().content.contains("silver compass is buried"))
 
         stories.restoreAcrossWack(harness.chatId, memory.memoryId)
         harness.viewModel.onDraftChanged("Do you remember the silver compass?")
         harness.viewModel.sendMessage()
-        withTimeout(15_000) {
-            harness.viewModel.uiState.first {
-                it is ChatUiState.Success && !it.isGenerating && it.messages.size == 6
-            }
-        }
+        awaitCompletedTurn(harness.viewModel, 6) { provider.requests.size }
         assertEquals(3, provider.requests.size)
         assertTrue(provider.requests[2].first().content.contains("silver compass is buried"))
     }
