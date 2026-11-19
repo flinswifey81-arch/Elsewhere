@@ -298,6 +298,72 @@ fun StoryMemoriesScreen(
         )
     }
 
+    closingPromise?.let { entry ->
+        var outcome by remember(entry.memory.memoryId) { mutableStateOf(StoryPromiseOutcome.KEPT) }
+        var outcomeExpanded by remember(entry.memory.memoryId) { mutableStateOf(false) }
+        var outcomeDetails by remember(entry.memory.memoryId) { mutableStateOf("") }
+        AlertDialog(
+            modifier = Modifier.testTag("record_promise_outcome_dialog"),
+            onDismissRequest = { if (!working) closingPromise = null },
+            title = { Text("Record promise outcome") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("Promise by ${actorLabel(entry.from)} to ${actorLabel(entry.to)}:",
+                        style = MaterialTheme.typography.bodySmall)
+                    Text(entry.memory.content, style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        "This creates a linked final state and preserves the original. The outcome is storyteller-only until knowledge is explicitly assigned.",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Box {
+                        OutlinedButton(onClick = { outcomeExpanded = true }, enabled = !working) {
+                            Text("Outcome: ${outcome.name.lowercase()}")
+                        }
+                        DropdownMenu(
+                            expanded = outcomeExpanded,
+                            onDismissRequest = { outcomeExpanded = false }
+                        ) {
+                            StoryPromiseOutcome.entries.forEach { choice ->
+                                DropdownMenuItem(
+                                    text = { Text(choice.name.lowercase()) },
+                                    onClick = { outcome = choice; outcomeExpanded = false }
+                                )
+                            }
+                        }
+                    }
+                    OutlinedTextField(
+                        value = outcomeDetails,
+                        onValueChange = { outcomeDetails = it.take(4_000) },
+                        label = { Text("What happened?") },
+                        minLines = 3,
+                        supportingText = { Text("${outcomeDetails.length} / 4,000") },
+                        enabled = !working
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = !working && outcomeDetails.isNotBlank() &&
+                        entry.memory.content.length + outcomeDetails.trim().length + 30 <= 12_000,
+                    onClick = {
+                        val current = closingPromise ?: return@TextButton
+                        val description = outcomeDetails
+                        val decision = outcome
+                        applyChange {
+                            repository.closePromise(chatId, current.memory.memoryId, decision, description)
+                            closingPromise = null
+                        }
+                    }
+                ) { Text("Save outcome") }
+            },
+            dismissButton = {
+                TextButton(enabled = !working, onClick = { closingPromise = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
     grantingKnowledge?.let { memory ->
         AlertDialog(
             onDismissRequest = { if (!working) grantingKnowledge = null },
