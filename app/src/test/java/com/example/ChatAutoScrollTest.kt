@@ -52,6 +52,29 @@ class ChatAutoScrollTest {
     }
 
     @Test
+    fun latestMessagePositionSignalsThatOldPagesMayBeReleased() {
+        val callbackCount = java.util.concurrent.atomic.AtomicInteger(0)
+        composeTestRule.setContent {
+            MaterialTheme {
+                AutoScrollingChatColumn(
+                    conversationKey = "return-to-latest",
+                    historyLoaded = true,
+                    itemCount = MESSAGE_COUNT,
+                    isStreaming = false,
+                    streamContentKey = null,
+                    onReturnedToLatest = { callbackCount.incrementAndGet() },
+                    modifier = Modifier.fillMaxWidth().height(LIST_HEIGHT)
+                ) {
+                    items(MESSAGE_COUNT) { index -> messageRow(index) }
+                }
+            }
+        }
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithText("Message 79").assertIsDisplayed()
+        org.junit.Assert.assertTrue(callbackCount.get() > 0)
+    }
+
+    @Test
     fun streamingGrowthFollowsWhenReaderRemainsNearBottom() {
         val streamContent = mutableStateOf<String?>(null)
         setChatList(streamContent)
