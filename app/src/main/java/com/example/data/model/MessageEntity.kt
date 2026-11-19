@@ -9,7 +9,10 @@ enum class SpeakerType { PERSONA, CHARACTER, SYSTEM, DIRECTOR, NARRATOR }
 
 @Entity(
     tableName = "messages",
-    indices = [Index(value = ["coOpEventId"], unique = true)]
+    indices = [
+        Index(value = ["coOpEventId"], unique = true),
+        Index(value = ["chatId", "variantGroupId"])
+    ]
 )
 data class MessageEntity(
     @PrimaryKey val messageId: String = UUID.randomUUID().toString(),
