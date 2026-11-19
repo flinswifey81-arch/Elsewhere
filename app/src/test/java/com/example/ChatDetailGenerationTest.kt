@@ -1418,15 +1418,40 @@ class ChatDetailGenerationTest {
         assertTrue(second.hasEarlierHistory)
         assertEquals("paged-turn-51", second.groupedMessages.first().primaryMessage.messageId)
 
+        // A new Character reply while reading older turns must not evict
+        // the oldest loaded group or pull the reader back to the bottom.
+        harness.messageRepository.insertMessage(
+            MessageEntity(
+                messageId = "paged-turn-251",
+                chatId = harness.chatId,
+                speakerType = SpeakerType.CHARACTER,
+                speakerId = "character-1",
+                speakerDisplayNameSnapshot = "Rowan",
+                content = "An incoming scene while scrolling",
+                orderIndex = 251L
+            )
+        )
+        val preserved = withTimeout(30_000) {
+            harness.viewModel.uiState.first { state ->
+                state is ChatUiState.Success &&
+                    state.groupedMessages.size == 201 &&
+                    state.groupedMessages.first().primaryMessage.messageId == "paged-turn-51" &&
+                    state.groupedMessages.last().primaryMessage.messageId == "paged-turn-251" &&
+                    !state.isLoadingEarlierHistory
+            }
+        } as ChatUiState.Success
+        assertTrue(preserved.hasEarlierHistory)
+
         harness.viewModel.loadEarlierMessages()
         val all = withTimeout(30_000) {
             harness.viewModel.uiState.first { state ->
-                state is ChatUiState.Success && state.groupedMessages.size == 250 &&
+                state is ChatUiState.Success && state.groupedMessages.size == 251 &&
                     !state.hasEarlierHistory && !state.isLoadingEarlierHistory
             }
         } as ChatUiState.Success
         assertEquals("paged-turn-1", all.groupedMessages.first().primaryMessage.messageId)
-        assertEquals(251, all.messages.size)
+        assertEquals("paged-turn-251", all.groupedMessages.last().primaryMessage.messageId)
+        assertEquals(252, all.messages.size)
         assertEquals(
             setOf("paged-turn-49", "paged-older-alternate"),
             all.groupedMessages.single {
