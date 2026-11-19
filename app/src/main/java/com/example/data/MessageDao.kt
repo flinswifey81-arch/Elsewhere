@@ -62,6 +62,25 @@ interface MessageDao {
     )
 
     /**
+     * Read selected story messages newest first, optionally scoped after Wack.
+     * Fetching older pages on demand supports exact rolling-summary suffixes
+     * without allocating the entire local archive.
+     */
+    @Query("""
+        SELECT * FROM messages
+        WHERE chatId = :chatId AND isPrimaryVariant = 1
+          AND (:resetBoundary IS NULL OR orderIndex > :resetBoundary)
+        ORDER BY orderIndex DESC, rowid DESC
+        LIMIT :pageSize OFFSET :offset
+    """)
+    suspend fun getSelectedHistoryReversePage(
+        chatId: String,
+        resetBoundary: Long?,
+        pageSize: Int,
+        offset: Int
+    ): List<MessageEntity>
+
+    /**
      * Provenance-only lookup for saved memory sources. Query is bounded by
      * referenced message IDs, not by total transcript length.
      */
