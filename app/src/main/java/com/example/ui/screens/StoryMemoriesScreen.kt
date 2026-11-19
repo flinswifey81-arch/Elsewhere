@@ -17,6 +17,8 @@ import com.example.data.model.CharacterEntity
 import com.example.domain.memory.StoryActorKind
 import com.example.domain.memory.StoryActorRef
 import com.example.domain.repository.StoryRelationshipEntry
+import com.example.domain.repository.StoryPromiseEntry
+import com.example.domain.repository.StoryPromiseOutcome
 import com.example.domain.memory.StoryMemoryClaim
 import com.example.domain.memory.StoryMemoryLifecycle
 import com.example.domain.repository.ChatRepository
@@ -55,7 +57,10 @@ fun StoryMemoriesScreen(
         mutableStateOf<List<StoryRelationshipEntry>>(emptyList())
     }
     var relationshipDialogOpen by remember { mutableStateOf(false) }
+    var promiseDialogOpen by remember { mutableStateOf(false) }
     var continuingRelationship by remember { mutableStateOf<StoryRelationshipEntry?>(null) }
+    var closingPromise by remember { mutableStateOf<StoryPromiseEntry?>(null) }
+    var promiseEntries by remember(chatId) { mutableStateOf<List<StoryPromiseEntry>>(emptyList()) }
     var participantChoices by remember(chatId) {
         mutableStateOf<List<Pair<StoryActorRef, String>>>(emptyList())
     }
@@ -78,6 +83,7 @@ fun StoryMemoriesScreen(
             repository.observe(chatId).collect { current ->
                 memories = current
                 relationshipEntries = repository.getRelationshipHistory(chatId)
+                promiseEntries = repository.getPromiseHistory(chatId)
                 knowers = current.associate { it.memoryId to repository.getCharacterKnowers(chatId, it.memoryId) }
                 loading = false
             }
@@ -102,6 +108,7 @@ fun StoryMemoriesScreen(
     var claim by remember(createDialog) { mutableStateOf(StoryMemoryClaim.FACT) }
     var selectingClaim by remember { mutableStateOf(false) }
     val linkedRelationships = relationshipEntries.associateBy { it.memory.memoryId }
+    val linkedPromises = promiseEntries.associateBy { it.memory.memoryId }
     fun actorLabel(actor: StoryActorRef): String =
         participantChoices.firstOrNull { it.first == actor }?.second
             ?: "${actor.kind.name.lowercase()}: ${actor.stableId}"
@@ -163,14 +170,15 @@ fun StoryMemoriesScreen(
         }
     )
 
-    if (relationshipDialogOpen) {
-        var relationshipText by remember(relationshipDialogOpen, continuingRelationship?.memory?.memoryId) {
+    if (relationshipDialogOpen || promiseDialogOpen) {
+        val creatingPromise = promiseDialogOpen
+        var relationshipText by remember(relationshipDialogOpen, promiseDialogOpen, continuingRelationship?.memory?.memoryId) {
             mutableStateOf("")
         }
-        var fromActor by remember(relationshipDialogOpen, continuingRelationship?.memory?.memoryId) {
+        var fromActor by remember(relationshipDialogOpen, promiseDialogOpen, continuingRelationship?.memory?.memoryId) {
             mutableStateOf(continuingRelationship?.from ?: participantChoices.firstOrNull()?.first)
         }
-        var toActor by remember(relationshipDialogOpen, continuingRelationship?.memory?.memoryId) {
+        var toActor by remember(relationshipDialogOpen, promiseDialogOpen, continuingRelationship?.memory?.memoryId) {
             mutableStateOf(continuingRelationship?.to ?:
                 participantChoices.firstOrNull { it.first != fromActor }?.first)
         }
@@ -179,14 +187,24 @@ fun StoryMemoriesScreen(
         val prior = continuingRelationship
         AlertDialog(
             onDismissRequest = {
-                if (!working) { relationshipDialogOpen = false; continuingRelationship = null }
+                if (!working) {
+                    relationshipDialogOpen = false
+                    promiseDialogOpen = false
+                    continuingRelationship = null
+                }
             },
-            title = { Text(if (prior == null) "Record relationship change"
-                else "Record a new relationship state") },
+            title = { Text(when {
+                creatingPromise -> "Record a promise"
+                prior == null -> "Record relationship change"
+                else -> "Record a new relationship state"
+            }) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text(
-                        "Record a player-approved change for these two people. Earlier states remain in history. The new state is storyteller-only until you explicitly assign knowledge.",
+                        if (creatingPromise)
+                            "Record who made this promise and to whom. An outcome can be added later; only the storyteller knows it unless you explicitly grant knowledge."
+                        else
+                            "Record a player-approved change for these two people. Earlier states remain in history. The new state is storyteller-only until you explicitly assign knowledge.",
                         style = MaterialTheme.typography.bodySmall
                     )
                     Box {
@@ -235,7 +253,7 @@ fun StoryMemoriesScreen(
                     OutlinedTextField(
                         value = relationshipText,
                         onValueChange = { relationshipText = it.take(12_000) },
-                        label = { Text("How has this relationship changed?") },
+                        label = { Text(if (creatingPromise) "What was promised?" else "How has this relationship changed?") },
                         minLines = 3,
                         supportingText = { Text("${relationshipText.length} / 12,000") },
                         enabled = !working
@@ -256,20 +274,23 @@ fun StoryMemoriesScreen(
                         val description = relationshipText
                         val previousId = prior?.memory?.memoryId
                         applyChange {
-                            repository.saveRelationshipChange(
+                            if (creatingPromise) repository.savePromise(chatId, from, to, description)
+                            else repository.saveRelationshipChange(
                                 chatId, from, to, description, previousId
                             )
                             relationshipDialogOpen = false
+                            promiseDialogOpen = false
                             continuingRelationship = null
                         }
                     }
-                ) { Text("Save relationship state") }
+                ) { Text(if (creatingPromise) "Save promise" else "Save relationship state") }
             },
             dismissButton = {
                 TextButton(
                     enabled = !working,
                     onClick = {
                         relationshipDialogOpen = false
+                        promiseDialogOpen = false
                         continuingRelationship = null
                     }
                 ) { Text("Cancel") }
@@ -422,12 +443,35 @@ fun StoryMemoriesScreen(
                             enabled = !working && participantChoices.size >= 2,
                             modifier = Modifier.testTag("record_relationship_change")
                         ) { Text("Record relationship change") }
+                        OutlinedButton(
+                            onClick = { promiseDialogOpen = true },
+                            enabled = !working && participantChoices.size >= 2,
+                            modifier = Modifier.testTag("record_story_promise")
+                        ) { Text("Record promise") }
                     }
                 }
                 items(memories, key = { it.memoryId }) { memory ->
                     Card(Modifier.fillMaxWidth().testTag("story_memory_${memory.memoryId}")) {
                         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Text(memory.content, style = MaterialTheme.typography.bodyLarge)
+                            linkedPromises[memory.memoryId]?.let { entry ->
+                                Text(
+                                    "Promise: ${actorLabel(entry.from)} → ${actorLabel(entry.to)}",
+                                    style = MaterialTheme.typography.labelMedium
+                                )
+                                if (memory.lifecycle == StoryMemoryLifecycle.ACTIVE.name) {
+                                    OutlinedButton(
+                                        enabled = !working,
+                                        onClick = { closingPromise = entry },
+                                        modifier = Modifier.testTag("close_promise_${memory.memoryId}")
+                                    ) { Text("Record outcome") }
+                                } else if (memory.promiseOutcome != null) {
+                                    Text(
+                                        "Outcome: ${memory.promiseOutcome.lowercase()}",
+                                        style = MaterialTheme.typography.labelMedium
+                                    )
+                                }
+                            }
                             linkedRelationships[memory.memoryId]?.let { entry ->
                                 Text(
                                     "Relationship: ${actorLabel(entry.from)} → ${actorLabel(entry.to)}",
