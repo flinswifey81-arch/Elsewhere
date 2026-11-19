@@ -139,6 +139,39 @@ class StoryRelationshipStateTest {
         assertEquals(1, db.storyMemoryDao().forChat("story-a").size)
     }
 
+    @Test fun narratorRetrievesOnlyActiveChangeAndCharactersRequireKnowledge() = runBlocking {
+        val first = repository.saveRelationshipChange(
+            "story-a", mara, rowan, "Mara distrusts Rowan over the silver compass."
+        )
+        repository.setCharacterKnowledge("story-a", first.memory.memoryId, setOf("rowan"))
+        val next = repository.saveRelationshipChange(
+            "story-a", mara, rowan, "Mara forgives Rowan for the silver compass.",
+            supersedeMemoryId = first.memory.memoryId
+        )
+        val narrator = repository.retrieveForGeneration(
+            chatId = "story-a",
+            recipient = StoryActorRef(StoryActorKind.NARRATOR, "narrator:story-a"),
+            sceneText = "Mara speaks to Rowan again"
+        )
+        assertEquals(listOf(next.memory.memoryId),
+            narrator.selected.map { it.memoryId })
+        assertFalse(narrator.selected.any { it.memoryId == first.memory.memoryId })
+
+        // Rowan knew the earlier relationship state but the user did not
+        // grant knowledge of the newer one. Neither an actor tag nor an
+        // earlier grant may silently promote the newer fact into his mind.
+        val character = repository.retrieveForGeneration(
+            chatId = "story-a", recipient = rowan,
+            sceneText = "Mara Rowan silver compass"
+        )
+        assertTrue(character.selected.isEmpty())
+        assertTrue(repository.retrieveForGeneration(
+            chatId = "story-b",
+            recipient = StoryActorRef(StoryActorKind.NARRATOR, "narrator:story-b"),
+            sceneText = "Mara Rowan silver compass"
+        ).selected.isEmpty())
+    }
+
     @Test fun wackBlocksPreResetStateAndNewExplicitStateIsAfterBoundary() = runBlocking {
         val old = repository.saveRelationshipChange(
             "story-a", mara, rowan, "Mara distrusts Rowan."
