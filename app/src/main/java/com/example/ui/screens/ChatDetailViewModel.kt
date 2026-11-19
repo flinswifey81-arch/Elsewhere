@@ -1225,12 +1225,13 @@ class ChatDetailViewModel(
             recipient = StoryActorRef(StoryActorKind.NARRATOR, "narrator:$chatId"),
             sceneText = searchScene(history, current)
         )?.selected.orEmpty()
+        val scenarioLegacyCandidates = memoryRepository.getMemoriesOnce(chatId, "narrator:$chatId")
         val legacyMemories = LegacyMemoryEligibilityFilter.eligible(
-            memories = memoryRepository.getMemoriesOnce(chatId, "narrator:$chatId"),
+            memories = scenarioLegacyCandidates,
             chatId = chatId,
             recipient = StoryActorRef(StoryActorKind.NARRATOR, "narrator:$chatId"),
             boundary = chatSummary?.chat?.contextResetOrderIndex,
-            archivedMessages = messageRepository.getMessagesForChatOnce(chatId)
+            archivedMessages = messageRepository.getLegacyMemoryProvenance(chatId, scenarioLegacyCandidates)
         )
         val activeLore = lorebookRepository?.resolveActiveLore(
             chatId, history, current, AutomaticMemoryManager.DEFAULT_RECENT_MESSAGE_LIMIT
@@ -1299,12 +1300,13 @@ class ChatDetailViewModel(
             }
             return null
         }
+        val legacyCandidates = memoryRepository.getMemoriesOnce(chatId, fullCharacter.characterId)
         val durableMemories = LegacyMemoryEligibilityFilter.eligible(
-            memories = memoryRepository.getMemoriesOnce(chatId, fullCharacter.characterId),
+            memories = legacyCandidates,
             chatId = chatId,
             recipient = StoryActorRef(StoryActorKind.CHARACTER, fullCharacter.characterId),
             boundary = summary.chat.contextResetOrderIndex,
-            archivedMessages = messageRepository.getMessagesForChatOnce(chatId)
+            archivedMessages = messageRepository.getLegacyMemoryProvenance(chatId, legacyCandidates)
         )
         val rollingSummary = ContextResetPolicy.eligibleSummary(
             memoryRepository.getSummaryOnce(chatId),
