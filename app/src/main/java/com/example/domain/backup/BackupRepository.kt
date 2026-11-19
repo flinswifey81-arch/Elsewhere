@@ -191,6 +191,7 @@ class BackupRepository internal constructor(
                 storyMemories = database.storyMemoryDao().getAll(),
                 storyMemoryActors = database.storyMemoryDao().getAllActors(),
                 storyMemoryReturns = database.storyMemoryDao().getAllReturns(),
+                storyMemoryKnowledgeChanges = database.storyMemoryDao().getAllKnowledgeChanges(),
                 conversationSummaries = backupDao.getConversationSummaries(),
                 lorebooks = backupDao.getLorebooks(),
                 lorebookEntries = backupDao.getLorebookEntries(),
@@ -518,6 +519,9 @@ class BackupRepository internal constructor(
         if (payload.storyMemories.isNotEmpty()) database.storyMemoryDao().insertAll(payload.storyMemories)
         if (payload.storyMemoryActors.isNotEmpty()) database.storyMemoryDao().insertActors(payload.storyMemoryActors)
         if (payload.storyMemoryReturns.isNotEmpty()) database.storyMemoryDao().insertReturns(payload.storyMemoryReturns)
+        if (payload.storyMemoryKnowledgeChanges.isNotEmpty()) {
+            database.storyMemoryDao().insertKnowledgeChanges(payload.storyMemoryKnowledgeChanges)
+        }
         if (payload.conversationSummaries.isNotEmpty()) {
             backupDao.insertConversationSummaries(payload.conversationSummaries)
         }
@@ -605,6 +609,7 @@ class BackupRepository internal constructor(
             payload.storyMemories.size,
             payload.storyMemoryActors.size,
             payload.storyMemoryReturns.size,
+            payload.storyMemoryKnowledgeChanges.size,
             payload.conversationSummaries.size,
             payload.lorebooks.size,
             payload.lorebookEntries.size,
@@ -675,6 +680,9 @@ class BackupRepository internal constructor(
         uniqueComposite("story memory Wack grant", payload.storyMemoryReturns.map {
             "${it.memoryId}\u0000${it.resetBoundaryOrderIndex}"
         })
+        uniqueComposite("story memory knowledge change", payload.storyMemoryKnowledgeChanges.map {
+            "${it.memoryId}\u0000${it.revision}\u0000${it.characterId}"
+        })
         unique("co-op event", payload.coopEvents.map { it.eventId })
         unique("NPC update", payload.npcDossierUpdates.map { it.updateId })
         unique("chat settings", payload.chatSettings.map { it.chatId })
@@ -725,6 +733,14 @@ class BackupRepository internal constructor(
                         memory.lifecycle == "RESOLVED" &&
                         memory.promiseOutcome in setOf("KEPT", "BROKEN", "RELEASED") &&
                         priorId != null))
+        }
+        requireRefs(payload.storyMemoryKnowledgeChanges, "story memory knowledge change") { change ->
+            change.memoryId in storyMemoryIds &&
+                change.characterId in characterIds &&
+                change.revision > 0L &&
+                change.change in setOf("GRANTED", "REVOKED") &&
+                // Knowledge revisions refer only to an existing chat-local memory.
+                storyMemoriesById[change.memoryId]?.scope == "CHAT"
         }
         requireRefs(payload.storyMemoryActors, "story memory actor") { actor ->
             actor.memoryId in storyMemoryIds &&
