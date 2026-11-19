@@ -524,9 +524,22 @@ class StoryMemoryRepository(
             (StoryResponseCodec.decode(text)
                 ?.let(StoryResponseCodec::readableTranscript) ?: text).trim()
         }
+        val localExcerpt = visible?.let { text ->
+            if (text.length <= 2_400) text else {
+                // Center the excerpt on the actual proposed text. A long
+                // generated reply must not hide its evidence below the
+                // preview truncation boundary.
+                val match = text.indexOf(candidate.content)
+                val start = if (match >= 0) (match - 700).coerceAtLeast(0) else 0
+                val end = minOf(text.length, start + 2_400)
+                (if (start > 0) "…" else "") +
+                    text.substring(start, end) +
+                    (if (end < text.length) "…" else "")
+            }
+        }
         StoryCandidateSourcePreview(
             source?.speakerDisplayNameSnapshot,
-            visible?.let { if (it.length > 2_400) it.take(2_400) + "…" else it },
+            localExcerpt,
             check
         )
     }
