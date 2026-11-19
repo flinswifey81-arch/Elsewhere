@@ -18,6 +18,21 @@ class MessageRepository(
         messageDao.getMessagesForChatOnce(chatId)
 
     /**
+     * Returns at most [maxTurns] selected messages in chronological order.
+     * This is a prompt-preparation window, not a replacement for the complete
+     * history required by legacy automatic-memory summarization or export.
+     */
+    suspend fun getLatestPrimaryWindow(chatId: String, maxTurns: Int = 25): List<MessageEntity> {
+        require(maxTurns in 1..100) { "Bounded history window must be within 1..100 turns." }
+        return messageDao.getLatestPrimaryWindow(chatId, maxTurns).asReversed()
+    }
+
+    suspend fun getLatestPrimaryPersona(
+        chatId: String,
+        resetBoundary: Long?
+    ): MessageEntity? = messageDao.getLatestPrimaryPersona(chatId, resetBoundary)
+
+    /**
      * Legacy-memory read gate: validate only saved memory source messages
      * and every alternate in their groups. Unattributed memories need no
      * transcript scan and remain subject to the existing Wack policy.
