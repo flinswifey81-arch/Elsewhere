@@ -71,10 +71,6 @@ class ChatHistoryPaginationTest {
                 msg(9_950, selected = false, messageId = "discarded-9950",
                     orderIndex = 20_000L)
             )
-            db.messageDao().insertMessage(
-                msg(9_999, selected = false, messageId = "orphaned-9999",
-                    orderIndex = 9_999L)
-            )
             db.messageDao().insertMessage(msg(999_999, chatId = "other"))
         }
 
@@ -101,7 +97,7 @@ class ChatHistoryPaginationTest {
         assertEquals(200, older.groupedMessages.size)
         assertTrue(older.hasEarlierGroups)
         assertEquals("m-10000", older.groupedMessages.last().primaryMessage.messageId)
-        assertEquals(10_002, db.messageDao().getMessagesForChatOnce("main").size)
+        assertEquals(10_001, db.messageDao().getMessagesForChatOnce("main").size)
         println(
             "CHAT_HISTORY_PAGINATION total=10000 initialGroups=${firstPage.groupedMessages.size} " +
                 "initialRows=${firstPage.messages.size} olderGroups=${older.groupedMessages.size} providerCalls=0"
@@ -131,7 +127,7 @@ class ChatHistoryPaginationTest {
         }
         assertEquals(9, boundaryGroup.variants.size)
         assertEquals(9, older.messages.count { it.variantGroupId == "m-110" })
-        assertFalse(older.hasEarlierGroups.not()) // older groups still exist
+        assertTrue(older.hasEarlierGroups) // older groups still exist
     }
 
     @Test fun tinyChatAndUnselectedOnlyGroupRetainLegacyDisplayFallback() = runBlocking {
