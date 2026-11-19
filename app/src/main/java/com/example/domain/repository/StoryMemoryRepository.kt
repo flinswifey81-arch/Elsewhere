@@ -11,6 +11,17 @@ import com.example.domain.npc.NpcStructuredOutputParser
 import kotlinx.coroutines.flow.Flow
 
 /**
+ * A directed, chat-local relationship statement between two verified actors.
+ * Participants are stable typed IDs, not inferred from display names.
+ * Mentioning someone does not imply that they know the relationship fact.
+ */
+data class StoryRelationshipEntry(
+    val memory: StoryMemoryEntity,
+    val from: StoryActorRef,
+    val to: StoryActorRef
+)
+
+/**
  * Local user-controlled story memory. Kept out of generation until a separate
  * retrieval/assembler gate is reviewed. All edits take the shared maintenance
  * lock used by backup/restore; Room changes are atomic.
@@ -46,6 +57,145 @@ class StoryMemoryRepository(
                 originKind = "MANUAL", sourceOrderIndex = ordinal
             ).also { dao.insert(it) }
         }
+    }
+
+    /**
+     * Player-authored relationship change. Existing relationship facts stay
+     * in the same story-memory archive; superseding an earlier active entry
+     * is an explicit action and never discards its old text or provenance.
+     *
+     * No inference, paid extraction, shared-World write or automatic knowledge
+     * grant is performed. Two typed actor links distinguish directed dynamics
+     * from ordinary memories that happen to mention a Character's name.
+     */
+    suspend fun saveRelationshipChange(
+        chatId: String,
+        from: StoryActorRef,
+        to: StoryActorRef,
+        text: String,
+        supersedeMemoryId: String? = null
+    ): StoryRelationshipEntry = dataCoordinator.withMutation {
+        val cleaned = text.trim()
+        require(cleaned.isNotEmpty() && cleaned.length <= 12_000) {
+            "Relationship state must contain 1–12,000 characters."
+        }
+        require(from != to) { "A relationship needs two different people." }
+        require(from.kind in setOf(StoryActorKind.CHARACTER, StoryActorKind.PERSONA) &&
+            to.kind in setOf(StoryActorKind.CHARACTER, StoryActorKind.PERSONA)) {
+            "Use a Character or Persona participant from this chat."
+        }
+        database.withTransaction {
+            val summary = requireNotNull(database.chatDao().getChatSummaryById(chatId)) {
+                "Chat no longer exists."
+            }
+            val validCharacters = summary.characters.map { it.characterId }.toSet()
+            val validPersonas = summary.personas.map { it.personaId }.toSet()
+            fun validateParticipant(actor: StoryActorRef) {
+                val exists = when (actor.kind) {
+                    StoryActorKind.CHARACTER -> actor.stableId in validCharacters
+                    StoryActorKind.PERSONA -> actor.stableId in validPersonas
+                    else -> false
+                }
+                require(exists) { "A relationship participant does not belong to this chat." }
+            }
+            validateParticipant(from)
+            validateParticipant(to)
+
+            val prior = supersedeMemoryId?.let { id ->
+                val old = requireNotNull(get(chatId, id)) {
+                    "The earlier relationship state no longer exists in this chat."
+                }
+                require(old.claim == StoryMemoryClaim.RELATIONSHIP.name &&
+                    old.lifecycle == StoryMemoryLifecycle.ACTIVE.name) {
+                    "Only an active relationship state can be superseded."
+                }
+                val previousPair = relationshipPair(dao.actors(id))
+                require(previousPair == (from to to)) {
+                    "The earlier relationship has different participants or direction."
+                }
+                old
+            }
+
+            val latestMessage = database.chatDao().getLatestMessageOrderIndex(chatId) ?: -1L
+            val latestMemory = dao.forChat(chatId).maxOfOrNull { it.sourceOrderIndex } ?: -1L
+            val ordinal = maxOf(
+                latestMessage, latestMemory,
+                summary.chat.contextResetOrderIndex ?: -1L
+            )
+            require(ordinal < Long.MAX_VALUE) { "Relationship chronology is exhausted." }
+            val now = System.currentTimeMillis()
+            val entry = StoryMemoryEntity(
+                chatId = chatId,
+                ownerId = chatId,
+                content = cleaned,
+                claim = StoryMemoryClaim.RELATIONSHIP.name,
+                review = StoryMemoryReview.APPROVED.name,
+                visibility = StoryMemoryVisibility.STORYTELLER_ONLY.name,
+                originKind = "MANUAL",
+                sourceOrderIndex = ordinal + 1L,
+                createdAtEpochMillis = now,
+                updatedAtEpochMillis = now
+            )
+            dao.insert(entry)
+            dao.insertActor(StoryMemoryActorEntity(
+                memoryId = entry.memoryId,
+                actorKind = from.kind.name,
+                actorId = from.stableId,
+                relation = "RELATIONSHIP_FROM"
+            ))
+            dao.insertActor(StoryMemoryActorEntity(
+                memoryId = entry.memoryId,
+                actorKind = to.kind.name,
+                actorId = to.stableId,
+                relation = "RELATIONSHIP_TO"
+            ))
+            // An old memory's narrative history remains available, but its
+            // superseded content must not compete with the new active state
+            // for retrieval—even if it used to be pinned or Character-known.
+            prior?.let {
+                dao.update(it.copy(
+                    lifecycle = StoryMemoryLifecycle.SUPERSEDED.name,
+                    updatedAtEpochMillis = now
+                ))
+            }
+            StoryRelationshipEntry(entry, from, to)
+        }
+    }
+
+    /** Inspect chronological relationship history in this chat only. */
+    suspend fun getRelationshipHistory(chatId: String): List<StoryRelationshipEntry> =
+        database.withTransaction {
+            requireNotNull(database.chatDao().getChatById(chatId)) {
+                "Chat no longer exists."
+            }
+            val entries = dao.forChat(chatId)
+                .filter { it.claim == StoryMemoryClaim.RELATIONSHIP.name }
+            val actors = dao.actorsForChat(chatId).groupBy { it.memoryId }
+            entries.mapNotNull { memory ->
+                val pair = relationshipPair(actors[memory.memoryId].orEmpty())
+                pair?.let { StoryRelationshipEntry(memory, it.first, it.second) }
+            }.sortedWith(
+                compareBy<StoryRelationshipEntry> { it.memory.sourceOrderIndex }
+                    .thenBy { it.memory.createdAtEpochMillis }
+                    .thenBy { it.memory.memoryId }
+            )
+        }
+
+    private fun relationshipPair(
+        actors: List<StoryMemoryActorEntity>
+    ): Pair<StoryActorRef, StoryActorRef>? {
+        fun unique(relation: String): StoryActorRef? {
+            val matches = actors.filter { it.relation == relation }
+            if (matches.size != 1) return null
+            val row = matches.single()
+            val kind = runCatching { StoryActorKind.valueOf(row.actorKind) }.getOrNull()
+                ?: return null
+            if (kind !in setOf(StoryActorKind.CHARACTER, StoryActorKind.PERSONA)) return null
+            return StoryActorRef(kind, row.actorId)
+        }
+        val from = unique("RELATIONSHIP_FROM") ?: return null
+        val to = unique("RELATIONSHIP_TO") ?: return null
+        return if (from == to) null else from to to
     }
 
     /** A saved message keeps exact variant/speaker fingerprint and order. */
@@ -293,8 +443,9 @@ class StoryMemoryRepository(
         }.getOrNull()
         val knownBy = actors.filter { it.relation == "KNOWS" }
             .mapNotNull { actor(it.actorKind, it.actorId) }.toSet()
-        val mentioned = actors.filter { it.relation == "MENTIONED" }
-            .mapNotNull { actor(it.actorKind, it.actorId) }.toSet()
+        val mentioned = actors.filter {
+            it.relation in setOf("MENTIONED", "RELATIONSHIP_FROM", "RELATIONSHIP_TO")
+        }.mapNotNull { actor(it.actorKind, it.actorId) }.toSet()
         return StoryMemoryRecord(
             memoryId = memory.memoryId,
             content = memory.content,
