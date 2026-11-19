@@ -709,17 +709,36 @@ class BackupRepository internal constructor(
         requireRefs(payload.generationMetadata, "generation metadata") { it.messageId in messageIds }
         requireRefs(payload.roleplayMemories, "memory") { it.chatId in chatIds && (it.characterId in characterIds || (it.chatId in scenarioChatIds && it.characterId == "narrator:${it.chatId}")) }
         requireRefs(payload.storyMemories, "story memory") { it.chatId in chatIds && it.ownerId == it.chatId && it.scope == "CHAT" && it.content.isNotBlank() && it.content.length <= 12_000 && it.review in setOf("APPROVED", "PENDING_REVIEW", "REJECTED") && it.lifecycle in setOf("ACTIVE", "RESOLVED", "SUPERSEDED") && it.claim in com.example.domain.memory.StoryMemoryClaim.entries.map { claim -> claim.name } && it.visibility in com.example.domain.memory.StoryMemoryVisibility.entries.map { v -> v.name } && (it.originKind == "MANUAL" || (it.originKind == "MESSAGE" && it.sourceMessageId != null && it.sourceVariantGroupId != null && it.sourceSpeakerType != null && it.sourceSpeakerId != null && it.sourceCreatedAtEpochMillis != null)) }
+        // A missing predecessor may have been deliberately deleted by the
+        // player; a surviving predecessor must belong to the SAME story and
+        // claim type. Never accept cross-chat continuity links in backups.
+        val storyMemoriesById = payload.storyMemories.associateBy { it.memoryId }
+        requireRefs(payload.storyMemories, "story memory transition") { memory ->
+            val priorId = memory.previousStateMemoryId
+            val prior = priorId?.let { storyMemoriesById[it] }
+            (priorId == null || (priorId != memory.memoryId &&
+                (prior == null || (prior.chatId == memory.chatId &&
+                    prior.claim == memory.claim &&
+                    prior.sourceOrderIndex < memory.sourceOrderIndex)))) &&
+                (memory.promiseOutcome == null ||
+                    (memory.claim == "PROMISE" &&
+                        memory.lifecycle == "RESOLVED" &&
+                        memory.promiseOutcome in setOf("KEPT", "BROKEN", "RELEASED") &&
+                        priorId != null))
+        }
         requireRefs(payload.storyMemoryActors, "story memory actor") { actor ->
             actor.memoryId in storyMemoryIds &&
                 actor.actorId.isNotBlank() &&
                 actor.actorKind in com.example.domain.memory.StoryActorKind.entries.map { it.name } &&
                 when (actor.relation) {
                     "KNOWS", "MENTIONED" -> true
-                    "RELATIONSHIP_FROM", "RELATIONSHIP_TO" ->
+                    "RELATIONSHIP_FROM", "RELATIONSHIP_TO",
+                    "PROMISE_FROM", "PROMISE_TO" ->
                         actor.actorKind in setOf("CHARACTER", "PERSONA") &&
                             payload.storyMemories.any { memory ->
                                 memory.memoryId == actor.memoryId &&
-                                    memory.claim == "RELATIONSHIP" &&
+                                    memory.claim == (if (actor.relation.startsWith("PROMISE_"))
+                                        "PROMISE" else "RELATIONSHIP") &&
                                     memory.scope == "CHAT"
                             }
                     else -> false
