@@ -2241,21 +2241,28 @@ class ChatDetailViewModel(
     fun regenerateMessage(messageId: String) {
         val state = _uiState.value as? ChatUiState.Success ?: return
         if (inChatToolInProgress || generationStartInProgress || state.isGenerating) return
-        val primaryMessages = state.messages.filter { it.isPrimaryVariant || it.messageId == messageId }
-        val targetMessage = primaryMessages.find { it.messageId == messageId } ?: return
-        if (!ContextResetPolicy.includes(targetMessage, chatSummary?.chat?.contextResetOrderIndex)) {
+        val targetMessage = state.messages.lastOrNull { it.messageId == messageId } ?: return
+        val boundary = chatSummary?.chat?.contextResetOrderIndex
+        if (!ContextResetPolicy.includes(targetMessage, boundary)) {
             updateSuccessState {
                 it.copy(generationError = "Regenerate is unavailable for messages before the Wack context boundary.")
             }
             return
         }
-        val history = primaryMessages.takeWhile { it.messageId != messageId }
-        if (state.chatSummary.chat.chatType == ChatType.GROUP) {
-            val currentMessage = history.lastOrNull() ?: return
-            generationStartInProgress = true
-            viewModelScope.launch {
-                try {
-                if (coopSessionManager?.requestGeneration(
+        // Includes an unselected requested variant as the target, but only
+        // selected variants in the preceding context. No transcript-sized
+        // filter/takeWhile copies are needed to regenerate an old message.
+        val group = state.chatSummary.chat.chatType == ChatType.GROUP
+        val selection = com.example.domain.compiler.HistoricalGenerationWindow.regenerate(
+            messages = state.messages,
+            targetMessageId = messageId,
+            isGroup = group,
+            resetBoundary = boundary
+        ) ?: return
+        generationStartInProgress = true
+        viewModelScope.launch {
+            try {
+                if (group && coopSessionManager?.requestGeneration(
                         chatId,
                         targetMessage.speakerId,
                         "REGENERATE",
@@ -2263,32 +2270,13 @@ class ChatDetailViewModel(
                     ) == true
                 ) return@launch
                 startGenerationInternal(
-                    currentMessage = currentMessage,
-                    history = history.dropLast(1),
+                    currentMessage = selection.current,
+                    history = selection.history,
                     variantGroupId = targetMessage.variantGroupId ?: targetMessage.messageId,
                     characterId = targetMessage.speakerId
                 )
-                } finally {
-                    generationStartInProgress = false
-                }
-            }
-            return
-        }
-        val lastUserMessage = history.lastOrNull { it.speakerType == SpeakerType.PERSONA }
-        if (lastUserMessage != null) {
-            generationStartInProgress = true
-            viewModelScope.launch {
-                try {
-                val newHistory = history.takeWhile { it.messageId != lastUserMessage.messageId }
-                startGenerationInternal(
-                    currentMessage = lastUserMessage,
-                    history = newHistory,
-                    variantGroupId = targetMessage.variantGroupId ?: targetMessage.messageId,
-                    characterId = targetMessage.speakerId
-                )
-                } finally {
-                    generationStartInProgress = false
-                }
+            } finally {
+                generationStartInProgress = false
             }
         }
     }
@@ -2296,34 +2284,38 @@ class ChatDetailViewModel(
     fun continueMessage(messageId: String) {
         val state = _uiState.value as? ChatUiState.Success ?: return
         if (inChatToolInProgress || generationStartInProgress || state.isGenerating) return
-        val primaryMessages = state.messages.filter { it.isPrimaryVariant }
-        val targetMessage = primaryMessages.find { it.messageId == messageId && it.speakerType in listOf(SpeakerType.CHARACTER, SpeakerType.NARRATOR) } ?: return
-        if (!ContextResetPolicy.includes(targetMessage, chatSummary?.chat?.contextResetOrderIndex)) {
+        val boundary = chatSummary?.chat?.contextResetOrderIndex
+        val selection = com.example.domain.compiler.HistoricalGenerationWindow.continueFrom(
+            messages = state.messages,
+            targetMessageId = messageId,
+            resetBoundary = boundary
+        ) ?: return
+        val targetMessage = selection.target
+        if (!ContextResetPolicy.includes(targetMessage, boundary)) {
             updateSuccessState {
                 it.copy(generationError = "Continue is unavailable for messages before the Wack context boundary.")
             }
             return
         }
-        val history = primaryMessages.takeWhile { it.messageId != messageId }
         generationStartInProgress = true
         viewModelScope.launch {
             try {
-            if (
-                state.chatSummary.chat.chatType == ChatType.GROUP &&
-                coopSessionManager?.requestGeneration(
-                    chatId,
-                    targetMessage.speakerId,
-                    "CONTINUE",
-                    targetMessage.messageId
-                ) == true
-            ) return@launch
-            startGenerationInternal(
-                currentMessage = targetMessage,
-                history = history,
-                isContinuation = true,
-                continuationTarget = targetMessage,
-                characterId = targetMessage.speakerId
-            )
+                if (
+                    state.chatSummary.chat.chatType == ChatType.GROUP &&
+                    coopSessionManager?.requestGeneration(
+                        chatId,
+                        targetMessage.speakerId,
+                        "CONTINUE",
+                        targetMessage.messageId
+                    ) == true
+                ) return@launch
+                startGenerationInternal(
+                    currentMessage = targetMessage,
+                    history = selection.history,
+                    isContinuation = true,
+                    continuationTarget = targetMessage,
+                    characterId = targetMessage.speakerId
+                )
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
