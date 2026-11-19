@@ -117,7 +117,7 @@ class StoryMemoryRepository(
             }
 
             val latestMessage = database.chatDao().getLatestMessageOrderIndex(chatId) ?: -1L
-            val latestMemory = dao.forChat(chatId).maxOfOrNull { it.sourceOrderIndex } ?: -1L
+            val latestMemory = dao.maxSourceOrderForChat(chatId) ?: -1L
             val ordinal = maxOf(
                 latestMessage, latestMemory,
                 summary.chat.contextResetOrderIndex ?: -1L
