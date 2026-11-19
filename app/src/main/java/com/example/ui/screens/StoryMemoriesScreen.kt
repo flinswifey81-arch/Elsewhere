@@ -579,7 +579,8 @@ fun StoryMemoriesScreen(
                                 }) { Text(if (memory.hidden) "Show" else "Hide") }
                             }
                             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                if (memory.lifecycle == StoryMemoryLifecycle.ACTIVE.name) TextButton(enabled = !working, onClick = {
+                                if (memory.lifecycle == StoryMemoryLifecycle.ACTIVE.name &&
+                                    memory.memoryId !in linkedPromises) TextButton(enabled = !working, onClick = {
                                     applyChange { repository.update(chatId, memory.memoryId, lifecycle = StoryMemoryLifecycle.RESOLVED) }
                                 }) { Text("Resolve") }
                                 if (boundary != null && memory.sourceOrderIndex <= boundary!!) {
