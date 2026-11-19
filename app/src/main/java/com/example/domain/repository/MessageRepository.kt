@@ -29,6 +29,10 @@ class MessageRepository(
         return messageDao.observeRecentMessageGroups(chatId, visibleGroupLimit + 1)
     }
 
+    /** Scalar count only, never hydrates the archive in the ViewModel. */
+    suspend fun countLogicalMessageGroups(chatId: String): Int =
+        messageDao.countLogicalMessageGroups(chatId)
+
     suspend fun getMessagesForChatOnce(chatId: String): List<MessageEntity> =
         messageDao.getMessagesForChatOnce(chatId)
 
