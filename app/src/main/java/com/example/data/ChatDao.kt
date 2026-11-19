@@ -60,6 +60,10 @@ interface ChatDao {
     @Query("DELETE FROM conversation_summaries WHERE chatId = :chatId")
     suspend fun deleteSummaryForChat(chatId: String)
 
+    /** Touching a chat must not write a stale ChatEntity over a newer Wack. */
+    @Query("UPDATE chats SET updatedAt = :updatedAt WHERE chatId = :chatId")
+    suspend fun updateChatTimestamp(chatId: String, updatedAt: Long): Int
+
     @Query("UPDATE chats SET contextResetOrderIndex = :boundary, updatedAt = :updatedAt WHERE chatId = :chatId")
     suspend fun setContextResetBoundary(chatId: String, boundary: Long, updatedAt: Long)
 
