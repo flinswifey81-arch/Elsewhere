@@ -117,6 +117,68 @@ class BackupRepositoryTest {
     }
 
     @Test
+    fun encryptedBackupPreservesTypedRelationshipHistoryAndSupersededState() = runBlocking {
+        val source = environment()
+        val chatId = "relationship-backup"
+        source.database.characterDao().insertCharacter(character("rowan", "Rowan"))
+        source.database.personaDao().insertPersona(
+            PersonaEntity(
+                personaId = "mara", displayName = "Mara", personaName = "Mara",
+                aliases = emptyList(), importSchemaVersion = 1,
+                identityJson = null, appearanceJson = null, personalityJson = null,
+                roleplayProfileJson = null, backgroundJson = null,
+                worldContextJson = null, privateNotesJson = null,
+                extensionFieldsJson = null
+            )
+        )
+        source.database.chatDao().insertChat(
+            ChatEntity(chatId = chatId, displayName = "Relationship history", chatType = ChatType.SOLO)
+        )
+        source.database.chatDao().insertChatParticipant(
+            ChatParticipantEntity(chatId = chatId, characterId = "rowan")
+        )
+        source.database.chatDao().insertChatPersonaParticipant(
+            ChatPersonaParticipantEntity(chatId = chatId, personaId = "mara")
+        )
+        val story = com.example.domain.repository.StoryMemoryRepository(source.database)
+        val from = com.example.domain.memory.StoryActorRef(
+            com.example.domain.memory.StoryActorKind.PERSONA, "mara"
+        )
+        val to = com.example.domain.memory.StoryActorRef(
+            com.example.domain.memory.StoryActorKind.CHARACTER, "rowan"
+        )
+        val first = story.saveRelationshipChange(
+            chatId, from, to, "Mara distrusts Rowan after their argument."
+        )
+        story.saveRelationshipChange(
+            chatId, from, to, "Rowan made amends; Mara forgives him.",
+            supersedeMemoryId = first.memory.memoryId
+        )
+
+        val encrypted = ByteArrayOutputStream()
+        source.repository.exportEncrypted(encrypted, PASSPHRASE.toCharArray())
+        val target = environment()
+        target.repository.restoreEncrypted(
+            ByteArrayInputStream(encrypted.toByteArray()), PASSPHRASE.toCharArray()
+        )
+        assertEquals(source.database.storyMemoryDao().getAll(),
+            target.database.storyMemoryDao().getAll())
+        assertEquals(source.database.storyMemoryDao().getAllActors(),
+            target.database.storyMemoryDao().getAllActors())
+        val restored = com.example.domain.repository.StoryMemoryRepository(target.database)
+            .getRelationshipHistory(chatId)
+        assertEquals(2, restored.size)
+        assertEquals(listOf("SUPERSEDED", "ACTIVE"),
+            restored.map { it.memory.lifecycle })
+        assertEquals(listOf(from, from), restored.map { it.from })
+        assertEquals(listOf(to, to), restored.map { it.to })
+        assertEquals("Mara distrusts Rowan after their argument.",
+            restored.first().memory.content)
+        assertEquals("Rowan made amends; Mara forgives him.",
+            restored.last().memory.content)
+    }
+
+    @Test
     fun historicalPayloadWithoutV16MemoryListsDecodesToEmptyCollections() {
         val json = BackupArchiveIO(moshi, BuildConfig.APPLICATION_ID).payloadToJson(completePayload())
         val historical = listOf("storyMemories", "storyMemoryActors", "storyMemoryReturns")
