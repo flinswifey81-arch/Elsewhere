@@ -1428,13 +1428,18 @@ class ChatDetailViewModel(
             }
         } else null
         val activeNpcDossiers = if (npcBankEnabled) {
+            // The NPC selector uses a List, but does not need a new copy of
+            // the entire transcript merely to append the current turn.
+            val npcContext = com.example.domain.compiler.GenerationHistoryWithCurrent(
+                history, currentMessage
+            )
             npcRepository?.relevantContext(
                 chatId = chatId,
-                recentMessages = history + currentMessage,
+                recentMessages = npcContext,
                 observerCharacterId = fullCharacter.characterId,
                 activePersonaId = fullPersona.personaId,
                 isGroup = summary.chat.chatType == ChatType.GROUP,
-                asOfOrderIndex = (history + currentMessage).maxOfOrNull { it.orderIndex },
+                asOfOrderIndex = npcContext.maxOfOrNull { it.orderIndex },
                 afterOrderIndex = summary.chat.contextResetOrderIndex,
                 limit = if (ensembleNarrationEnabled) {
                     NpcRepository.SOLO_ENSEMBLE_NPC_CONTEXT_LIMIT
