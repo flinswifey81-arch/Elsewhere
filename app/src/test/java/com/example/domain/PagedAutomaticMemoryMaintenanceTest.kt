@@ -144,6 +144,45 @@ class PagedAutomaticMemoryMaintenanceTest {
             memory.getMemoriesOnce("completion", "character").single().content)
     }
 
+    @Test fun manualPagedMemoryMatchesLegacyAndNeverExtractsPreWackFacts() = runBlocking {
+        val chatId = "manual-memory"
+        val original = insertChat(chatId, 300, long = true)
+        val edits = mapOf(
+            40 to "I prefer forbidden mint tea.",
+            150 to "I prefer jasmine tea.",
+            200 to "Remember that the silver compass rests beneath the bridge."
+        )
+        val expected = original.map { message ->
+            val updatedText = edits[message.orderIndex.toInt()]
+            if (updatedText == null) message else message.copy(content = updatedText).also {
+                db.messageDao().updateMessage(it)
+            }
+        }
+        val eligible = ContextResetPolicy.eligiblePrimaryMessages(expected, 100L)
+        val legacy = manager.updateFromConversation(
+            chatId, "legacy-character", eligible
+        )
+        val legacySummary = requireNotNull(memory.getSummaryOnce(chatId))
+        val legacyFacts = memory.getMemoriesOnce(chatId, "legacy-character")
+            .map { Triple(it.category, it.content, it.sourceMessageId) }.toSet()
+
+        val paged = manager.updateFromStoredConversation(
+            chatId, "paged-character", messages, resetBoundary = 100L
+        )
+        val pagedSummary = requireNotNull(memory.getSummaryOnce(chatId))
+        val pagedFacts = memory.getMemoriesOnce(chatId, "paged-character")
+            .map { Triple(it.category, it.content, it.sourceMessageId) }.toSet()
+
+        assertEquals(2, legacy.savedMemoryCount)
+        assertEquals(legacy.savedMemoryCount, paged.savedMemoryCount)
+        assertEquals(legacyFacts, pagedFacts)
+        assertEquals(legacySummary.summary, pagedSummary.summary)
+        assertEquals(legacySummary.summarizedThroughOrderIndex,
+            pagedSummary.summarizedThroughOrderIndex)
+        assertFalse(pagedFacts.any { it.second.contains("forbidden mint tea") })
+        assertTrue(pagedFacts.any { it.second == "jasmine tea" })
+    }
+
     @Test fun fewerThanRecentLimitMessagesProduceNoSummary() = runBlocking {
         val history = insertChat("tiny", 12, long = true)
         val selected = manager.loadSummarySource("tiny", null, messages)
