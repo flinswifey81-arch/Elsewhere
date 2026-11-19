@@ -16,12 +16,14 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import com.example.data.model.StoryMemoryEntity
 import com.example.data.model.StoryMemoryKnowledgeChangeEntity
+import com.example.data.model.StoryMemoryPerspectiveEntity
 import com.example.data.model.CharacterEntity
 import com.example.domain.memory.StoryActorKind
 import com.example.domain.memory.StoryActorRef
 import com.example.domain.repository.StoryRelationshipEntry
 import com.example.domain.repository.StoryPromiseEntry
 import com.example.domain.repository.StoryPromiseOutcome
+import com.example.domain.memory.StoryCharacterPerspective
 import com.example.domain.memory.StoryMemoryClaim
 import com.example.domain.memory.StoryMemoryLifecycle
 import com.example.domain.repository.ChatRepository
@@ -54,6 +56,12 @@ fun StoryMemoriesScreen(
     var restoring by remember { mutableStateOf<StoryMemoryEntity?>(null) }
     var grantingKnowledge by remember { mutableStateOf<StoryMemoryEntity?>(null) }
     var selectedKnowers by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var perspectiveMemory by remember { mutableStateOf<StoryMemoryEntity?>(null) }
+    var perspectiveCharacterId by remember { mutableStateOf<String?>(null) }
+    var perspectiveStance by remember { mutableStateOf(StoryCharacterPerspective.KNOWS) }
+    var perspectiveNote by remember { mutableStateOf("") }
+    var perspectiveCurrent by remember { mutableStateOf<List<StoryMemoryPerspectiveEntity>>(emptyList()) }
+    var perspectiveHistory by remember { mutableStateOf<List<StoryMemoryPerspectiveEntity>>(emptyList()) }
     var knowledgeHistory by remember(chatId) {
         mutableStateOf<List<StoryMemoryKnowledgeChangeEntity>>(emptyList())
     }
@@ -369,6 +377,152 @@ fun StoryMemoriesScreen(
         )
     }
 
+    LaunchedEffect(chatId, perspectiveMemory?.memoryId) {
+        val memoryId = perspectiveMemory?.memoryId
+        perspectiveCurrent = if (memoryId == null) emptyList() else try {
+            repository.getCurrentCharacterPerspectives(chatId, memoryId)
+        } catch (failure: Exception) {
+            error = failure.message ?: "Unable to load character perspectives."
+            emptyList()
+        }
+        val current = perspectiveCurrent.firstOrNull {
+            it.characterId == perspectiveCharacterId
+        }
+        perspectiveStance = current?.stance?.let {
+            runCatching { StoryCharacterPerspective.valueOf(it) }.getOrNull()
+        } ?: StoryCharacterPerspective.KNOWS
+        perspectiveNote = current?.note.orEmpty()
+    }
+
+    LaunchedEffect(chatId, perspectiveMemory?.memoryId, perspectiveCharacterId) {
+        val id = perspectiveMemory?.memoryId
+        val characterId = perspectiveCharacterId
+        perspectiveHistory = if (id == null || characterId == null) emptyList() else try {
+            repository.getCharacterPerspectiveHistory(chatId, id, characterId)
+        } catch (failure: Exception) {
+            error = failure.message ?: "Unable to load perspective history."
+            emptyList()
+        }
+    }
+
+    perspectiveMemory?.let { memory ->
+        var choosingCharacter by remember(memory.memoryId) { mutableStateOf(false) }
+        var choosingStance by remember(memory.memoryId) { mutableStateOf(false) }
+        AlertDialog(
+            modifier = Modifier.testTag("story_memory_perspective_dialog"),
+            onDismissRequest = { if (!working) perspectiveMemory = null },
+            title = { Text("Character perspectives") },
+            text = {
+                Column(
+                    modifier = Modifier.heightIn(max = 390.dp).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(memory.content, style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        "What does this Character currently think about this memory? " +
+                            "A belief or suspicion is not established truth. Recording a perspective " +
+                            "does not grant access: use Who knows this? separately. " +
+                            "Unaware blocks recall even if an old grant remains. " +
+                            "No model call is made here.",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Box {
+                        OutlinedButton(
+                            onClick = { choosingCharacter = true },
+                            enabled = !working && characters.isNotEmpty()
+                        ) {
+                            val chosen = characters.firstOrNull {
+                                it.characterId == perspectiveCharacterId
+                            }
+                            Text("Character: ${chosen?.displayName ?: "Select"}")
+                        }
+                        DropdownMenu(
+                            expanded = choosingCharacter,
+                            onDismissRequest = { choosingCharacter = false }
+                        ) {
+                            characters.forEach { character ->
+                                DropdownMenuItem(
+                                    text = { Text(character.displayName) },
+                                    onClick = {
+                                        perspectiveCharacterId = character.characterId
+                                        val current = perspectiveCurrent.firstOrNull {
+                                            it.characterId == character.characterId
+                                        }
+                                        perspectiveStance = current?.stance?.let {
+                                            runCatching { StoryCharacterPerspective.valueOf(it) }.getOrNull()
+                                        } ?: StoryCharacterPerspective.KNOWS
+                                        perspectiveNote = current?.note.orEmpty()
+                                        choosingCharacter = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                    Box {
+                        OutlinedButton(
+                            onClick = { choosingStance = true },
+                            enabled = !working && perspectiveCharacterId != null
+                        ) { Text("State: ${perspectiveStance.name.lowercase()}") }
+                        DropdownMenu(
+                            expanded = choosingStance,
+                            onDismissRequest = { choosingStance = false }
+                        ) {
+                            StoryCharacterPerspective.entries.forEach { choice ->
+                                DropdownMenuItem(
+                                    text = { Text(choice.name.lowercase()) },
+                                    onClick = {
+                                        perspectiveStance = choice
+                                        choosingStance = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                    OutlinedTextField(
+                        value = perspectiveNote,
+                        onValueChange = { perspectiveNote = it.take(2_000) },
+                        label = { Text("Player note (optional, never sent to model)") },
+                        enabled = !working && perspectiveCharacterId != null,
+                        minLines = 2,
+                        supportingText = { Text("${perspectiveNote.length} / 2,000") }
+                    )
+                    if (perspectiveHistory.isNotEmpty()) {
+                        HorizontalDivider()
+                        Text("Recorded history for this Character:", style = MaterialTheme.typography.labelMedium)
+                        perspectiveHistory.takeLast(6).forEach { event ->
+                            Text(
+                                "Revision ${event.revision}: ${event.stance.lowercase()}" +
+                                    (event.note?.takeIf { it.isNotBlank() }?.let { " — $it" } ?: ""),
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = !working && perspectiveCharacterId != null,
+                    onClick = {
+                        val characterId = perspectiveCharacterId ?: return@TextButton
+                        val note = perspectiveNote
+                        val stance = perspectiveStance
+                        applyChange {
+                            repository.recordCharacterPerspective(
+                                chatId, memory.memoryId, characterId, stance, note
+                            )
+                            perspectiveMemory = null
+                        }
+                    }
+                ) { Text("Save perspective") }
+            },
+            dismissButton = {
+                TextButton(enabled = !working, onClick = { perspectiveMemory = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
     LaunchedEffect(chatId, grantingKnowledge?.memoryId) {
         val id = grantingKnowledge?.memoryId
         knowledgeHistory = if (id == null) emptyList() else try {
@@ -598,6 +752,19 @@ fun StoryMemoriesScreen(
                                     (if (memory.originKind == "MESSAGE") "from selected message" else "manually saved"),
                                 style = MaterialTheme.typography.labelSmall
                             )
+                            if (characters.isNotEmpty()) {
+                                OutlinedButton(
+                                    modifier = Modifier.testTag("story_memory_perspectives_${memory.memoryId}"),
+                                    enabled = !working,
+                                    onClick = {
+                                        perspectiveCharacterId = characters.firstOrNull()?.characterId
+                                        perspectiveCurrent = emptyList()
+                                        perspectiveStance = StoryCharacterPerspective.KNOWS
+                                        perspectiveNote = ""
+                                        perspectiveMemory = memory
+                                    }
+                                ) { Text("Character perspectives") }
+                            }
                             if (memory.hidden) Text("Hidden from future retrieval", style = MaterialTheme.typography.labelSmall)
                             if (memory.pinned) Text("Pinned for future relevance", style = MaterialTheme.typography.labelSmall)
                             // Keep all four controls inside the phone viewport.
