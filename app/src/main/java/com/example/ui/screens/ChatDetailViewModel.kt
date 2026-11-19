@@ -453,15 +453,17 @@ class ChatDetailViewModel(
                         }
                     } ?: throw IllegalStateException("Select an active Character before updating memory.")
                 }
-                val messages = ContextResetPolicy.eligiblePrimaryMessages(
-                    hidePersistedNpcControlRegions(messageRepository.getMessagesForChatOnce(chatId)),
-                    summary.chat.contextResetOrderIndex
-                )
-                val result = memoryManager.updateFromConversation(
-                    chatId = chatId,
-                    characterId = characterId,
-                    allPrimaryMessages = messages
-                )
+                // Stream selected Persona turns from Room instead of copying a
+                // full transcript into the UI tool. The coordinator keeps
+                // Wack, restore and variant changes from interleaving pages.
+                val result = dataCoordinator.withMutation {
+                    memoryManager.updateFromStoredConversation(
+                        chatId = chatId,
+                        characterId = characterId,
+                        messageRepository = messageRepository,
+                        resetBoundary = summary.chat.contextResetOrderIndex
+                    )
+                }
                 val characterName = summary.characters
                     .firstOrNull { it.characterId == characterId }
                     ?.displayName
