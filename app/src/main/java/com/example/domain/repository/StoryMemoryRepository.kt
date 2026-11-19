@@ -3,6 +3,7 @@ package com.example.domain.repository
 import androidx.room.withTransaction
 import com.example.data.AppDatabase
 import com.example.data.model.StoryMemoryActorEntity
+import com.example.data.model.StoryMemoryKnowledgeChangeEntity
 import com.example.data.model.StoryMemoryEntity
 import com.example.data.model.StoryMemoryReturnEntity
 import com.example.domain.memory.*
@@ -476,6 +477,43 @@ class StoryMemoryRepository(
             if (old.claim == StoryMemoryClaim.BELIEF.name) {
                 require(characterIds.size <= 1) { "A belief may belong to at most one Character." }
             }
+            val currentlyKnown = dao.actors(memoryId).filter {
+                it.relation == "KNOWS" && it.actorKind == StoryActorKind.CHARACTER.name
+            }.map { it.actorId }.toSet()
+            val added = characterIds - currentlyKnown
+            val revoked = currentlyKnown - characterIds
+            if (added.isNotEmpty() || revoked.isNotEmpty()) {
+                val lastRevision = dao.latestKnowledgeRevision(memoryId)
+                require(lastRevision < Long.MAX_VALUE) {
+                    "Knowledge assignment revision limit reached."
+                }
+                val revision = lastRevision + 1L
+                val messageOrder = database.chatDao().getLatestMessageOrderIndex(chatId)
+                val boundary = database.chatDao().getChatById(chatId)?.contextResetOrderIndex
+                val now = System.currentTimeMillis()
+                // One atomic revision for the whole player action. Previous
+                // grants and revocations remain inspectable but never imply
+                // access during generation; only the current KNOWS rows do.
+                dao.insertKnowledgeChanges(
+                    (added.sorted().map { characterId ->
+                        StoryMemoryKnowledgeChangeEntity(
+                            memoryId = memoryId, revision = revision,
+                            characterId = characterId, change = "GRANTED",
+                            latestMessageOrderIndex = messageOrder,
+                            wackBoundaryOrderIndex = boundary,
+                            recordedAtEpochMillis = now
+                        )
+                    } + revoked.sorted().map { characterId ->
+                        StoryMemoryKnowledgeChangeEntity(
+                            memoryId = memoryId, revision = revision,
+                            characterId = characterId, change = "REVOKED",
+                            latestMessageOrderIndex = messageOrder,
+                            wackBoundaryOrderIndex = boundary,
+                            recordedAtEpochMillis = now
+                        )
+                    })
+                )
+            }
             dao.clearKnowledgeForMemory(memoryId)
             characterIds.sorted().forEach { characterId ->
                 dao.insertActor(StoryMemoryActorEntity(
@@ -496,6 +534,20 @@ class StoryMemoryRepository(
                 updatedAtEpochMillis = System.currentTimeMillis()
             ).also { dao.update(it) }
         }
+    }
+
+    /**
+     * Player-accessible assignment history. These are manual permission
+     * changes, NOT narrator claims or proof a character learned/forgot in RP.
+     * The log is never supplied to StoryMemoryLocalRetriever.
+     */
+    suspend fun getCharacterKnowledgeHistory(
+        chatId: String, memoryId: String
+    ): List<StoryMemoryKnowledgeChangeEntity> = database.withTransaction {
+        requireNotNull(get(chatId, memoryId)) {
+            "Memory does not belong to this chat."
+        }
+        dao.knowledgeChangesForMemory(memoryId)
     }
 
     suspend fun getCharacterKnowers(chatId: String, memoryId: String): Set<String> {
