@@ -386,10 +386,7 @@ class StoryMemoriesScreenTest {
                 composeRule.onNodeWithTag("approve_story_candidate").assertIsEnabled()
             }.isSuccess
         }
-        composeRule.onNodeWithText(
-            "I promise to carry the lantern back to the tower.",
-            substring = true
-        ).assertExists()
+        composeRule.onNodeWithText("Source: Rowan", substring = true).assertExists()
         composeRule.onNodeWithTag("approve_story_candidate").performClick()
         composeRule.waitUntil(15_000) {
             runBlocking {
