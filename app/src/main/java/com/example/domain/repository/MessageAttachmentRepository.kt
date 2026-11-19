@@ -30,6 +30,9 @@ class MessageAttachmentRepository(
 ) {
     private val dao: MessageAttachmentDao get() = database.messageAttachmentDao()
     private val storageMutex = Mutex()
+    // Guarded by storageMutex. Repeated chat openings must not scan the whole
+    // app's image archive after the initial reconciliation has completed.
+    private var sessionReconciliationCompleted = false
     fun observeForChat(chatId: String): Flow<List<MessageAttachmentEntity>> = dao.observeForChat(chatId)
 
     /**
@@ -246,9 +249,30 @@ class MessageAttachmentRepository(
             }
         }
 
+    /**
+     * Chat-screen startup calls this once per repository lifetime. All open
+     * chats share the same repository instance, so scrolling or switching
+     * between chats does not rehydrate every archived image record.
+     *
+     * Explicit reconciliation remains available after import/restore and
+     * whenever callers need to revalidate files changed since startup.
+     */
+    suspend fun reconcileOrphanFilesForChatOpenOnce() =
+        dataCoordinator.withMutation {
+            storageMutex.withLock {
+                if (!sessionReconciliationCompleted) {
+                    withContext(Dispatchers.IO) { reconcileOrphanFilesLocked() }
+                    sessionReconciliationCompleted = true
+                }
+            }
+        }
+
     suspend fun reconcileOrphanFiles() =
         dataCoordinator.withMutation {
-            storageMutex.withLock { withContext(Dispatchers.IO) { reconcileOrphanFilesLocked() } }
+            storageMutex.withLock {
+                withContext(Dispatchers.IO) { reconcileOrphanFilesLocked() }
+                sessionReconciliationCompleted = true
+            }
         }
 
     private fun deleteFilesLocked(attachments: List<MessageAttachmentEntity>) {
