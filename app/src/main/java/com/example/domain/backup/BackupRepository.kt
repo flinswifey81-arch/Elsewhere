@@ -709,7 +709,22 @@ class BackupRepository internal constructor(
         requireRefs(payload.generationMetadata, "generation metadata") { it.messageId in messageIds }
         requireRefs(payload.roleplayMemories, "memory") { it.chatId in chatIds && (it.characterId in characterIds || (it.chatId in scenarioChatIds && it.characterId == "narrator:${it.chatId}")) }
         requireRefs(payload.storyMemories, "story memory") { it.chatId in chatIds && it.ownerId == it.chatId && it.scope == "CHAT" && it.content.isNotBlank() && it.content.length <= 12_000 && it.review in setOf("APPROVED", "PENDING_REVIEW", "REJECTED") && it.lifecycle in setOf("ACTIVE", "RESOLVED", "SUPERSEDED") && it.claim in com.example.domain.memory.StoryMemoryClaim.entries.map { claim -> claim.name } && it.visibility in com.example.domain.memory.StoryMemoryVisibility.entries.map { v -> v.name } && (it.originKind == "MANUAL" || (it.originKind == "MESSAGE" && it.sourceMessageId != null && it.sourceVariantGroupId != null && it.sourceSpeakerType != null && it.sourceSpeakerId != null && it.sourceCreatedAtEpochMillis != null)) }
-        requireRefs(payload.storyMemoryActors, "story memory actor") { it.memoryId in storyMemoryIds && it.actorId.isNotBlank() && it.actorKind in com.example.domain.memory.StoryActorKind.entries.map { k -> k.name } && it.relation in setOf("KNOWS", "MENTIONED") }
+        requireRefs(payload.storyMemoryActors, "story memory actor") { actor ->
+            actor.memoryId in storyMemoryIds &&
+                actor.actorId.isNotBlank() &&
+                actor.actorKind in com.example.domain.memory.StoryActorKind.entries.map { it.name } &&
+                when (actor.relation) {
+                    "KNOWS", "MENTIONED" -> true
+                    "RELATIONSHIP_FROM", "RELATIONSHIP_TO" ->
+                        actor.actorKind in setOf("CHARACTER", "PERSONA") &&
+                            payload.storyMemories.any { memory ->
+                                memory.memoryId == actor.memoryId &&
+                                    memory.claim == "RELATIONSHIP" &&
+                                    memory.scope == "CHAT"
+                            }
+                    else -> false
+                }
+        }
         requireRefs(payload.storyMemoryReturns, "story memory restoration") { it.memoryId in storyMemoryIds && it.chatId in chatIds && payload.storyMemories.any { m -> m.memoryId == it.memoryId && m.chatId == it.chatId && m.branchId == it.branchId && m.sourceOrderIndex <= it.resetBoundaryOrderIndex } && it.initiatedByUser && it.approvedAtOrderIndex > it.resetBoundaryOrderIndex }
         requireRefs(payload.conversationSummaries, "conversation summary") { it.chatId in chatIds }
         requireRefs(payload.lorebookEntries, "Lorebook entry") { it.lorebookId in lorebookIds }
