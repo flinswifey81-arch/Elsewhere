@@ -841,16 +841,17 @@ class ChatDetailViewModel(
                 // recent context for prompt assembly, not a transcript-sized
                 // read. Co-op keeps the full synchronized-history contract.
                 val inCoopRoom = coopSessionManager?.state?.value?.room?.chatId == chatId
-                val recentPrimary = if (!inCoopRoom) {
-                    messageRepository.getLatestPrimaryWindow(chatId, 25)
-                } else emptyList()
+                val boundedSnapshot = if (!inCoopRoom) {
+                    messageRepository.getSelectedGroupGenerationWindow(
+                        chatId, chatSummary?.chat?.contextResetOrderIndex, 25
+                    )
+                } else null
+                val recentPrimary = boundedSnapshot?.messages.orEmpty()
                 val recentCurrent = recentPrimary.lastOrNull()
                 val (currentMessage, selectedHistory) =
                     if (recentCurrent?.speakerType == SpeakerType.CHARACTER && !inCoopRoom) {
                         val boundedCurrent = requireNotNull(recentCurrent)
-                        val latestPersona = messageRepository.getLatestPrimaryPersona(
-                            chatId, chatSummary?.chat?.contextResetOrderIndex
-                        )
+                        val latestPersona = boundedSnapshot?.latestPersona
                         val windowHistory = recentPrimary.dropLast(1)
                         val hasPersona = windowHistory.any { it.speakerType == SpeakerType.PERSONA }
                         // Preserve the selected Persona after 24+ AI turns
