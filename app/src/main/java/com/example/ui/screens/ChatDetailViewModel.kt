@@ -1872,11 +1872,12 @@ class ChatDetailViewModel(
         if (!isCoopGeneration && sourceMessage?.speakerType == SpeakerType.PERSONA && variantGroupId == null) {
             try {
                 dataCoordinator.withMutation(dataRevision) {
-                    memoryManager.updateAfterCompletedTurn(
+                    memoryManager.updateAfterCompletedTurnFromStoredHistory(
                         chatId = chatId,
                         characterId = character.characterId,
                         personaMessage = sourceMessage,
-                        allPrimaryMessages = (contextMessages + botMsg).filter { it.isPrimaryVariant }
+                        messageRepository = messageRepository,
+                        resetBoundary = chatSummary?.chat?.contextResetOrderIndex
                     )
                 }
             } catch (cancellation: kotlinx.coroutines.CancellationException) {
