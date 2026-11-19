@@ -1174,21 +1174,26 @@ class ChatDetailViewModel(
      * Shared preflight for solo, scenario and co-op authorization.
      * No provider call occurs when this check fails.
      */
-    private fun isWithinPromptBudget(
+    /**
+     * Trim only old transcript turns, preserving all authored system context,
+     * the most recent turns, image attachments and director instructions.
+     * The returned messages are used both for generation and co-op hashing.
+     */
+    private fun fitPromptBudget(
         messages: List<com.example.domain.provider.RoleplayMessage>,
         modelId: String
-    ): Boolean {
-        val decision = com.example.domain.compiler.PromptPreflight.inspect(
+    ): List<com.example.domain.provider.RoleplayMessage>? {
+        val result = com.example.domain.compiler.PromptHistoryTrimmer.fit(
             messages = messages,
             modelContextWindowTokens = modelProvider.cachedContextLength(modelId)
         )
-        if (decision.allowed) return true
+        if (result.decision.allowed) return result.messages
         updateSuccessState {
             it.copy(generationError =
-                "Context exceeds the safe input budget (estimated ${decision.estimatedInputTokens} tokens; " +
-                "limit ${decision.inputCeilingTokens}). Reduce active lore or context before retrying. No API request was sent.")
+                "Context exceeds the safe input budget (estimated ${result.decision.estimatedInputTokens} tokens; " +
+                "limit ${result.decision.inputCeilingTokens}). Reduce active lore or context before retrying. No API request was sent.")
         }
-        return false
+        return null
     }
 
     private suspend fun prepareScenario(current: MessageEntity, history: List<MessageEntity>, continuation: Boolean): PreparedGeneration? {
@@ -1246,8 +1251,8 @@ class ChatDetailViewModel(
             else compileWithMemories(allowedStoryMemories)).map {
             if (it.sourceMessageId == source?.messageId && images.isNotEmpty()) it.copy(images = images) else it
         }
-        if (!isWithinPromptBudget(messages, modelId)) return null
-        return PreparedGeneration(ResponseSpeaker("narrator:$chatId", "Narrator", SpeakerType.NARRATOR), messages,
+        val budgetedMessages = fitPromptBudget(messages, modelId) ?: return null
+        return PreparedGeneration(ResponseSpeaker("narrator:$chatId", "Narrator", SpeakerType.NARRATOR), budgetedMessages,
             GenerationOptions(modelId = modelId, routing = ModelRouting.fromSettings(settings.providerRoutingMode, settings.providerEndpoint),
                 temperature = settings.temperature, topP = settings.topP, maxTokens = null), activePersonaId = personaId)
     }
@@ -1482,10 +1487,10 @@ class ChatDetailViewModel(
             // small completion-token cap can exhaust the budget on reasoning before visible text.
             maxTokens = null
         )
-        if (!isWithinPromptBudget(providerMessages, modelId)) return null
+        val budgetedMessages = fitPromptBudget(providerMessages, modelId) ?: return null
         return PreparedGeneration(
             character = ResponseSpeaker(fullCharacter.characterId, fullCharacter.displayName),
-            messages = providerMessages,
+            messages = budgetedMessages,
             options = options,
             npcBankEnabled = npcBankEnabled,
             activePersonaId = fullPersona.personaId,
