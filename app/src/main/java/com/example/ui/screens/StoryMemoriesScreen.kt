@@ -565,18 +565,27 @@ fun StoryMemoriesScreen(
                             )
                             if (memory.hidden) Text("Hidden from future retrieval", style = MaterialTheme.typography.labelSmall)
                             if (memory.pinned) Text("Pinned for future relevance", style = MaterialTheme.typography.labelSmall)
-                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                TextButton(enabled = !working, onClick = { editing = memory }) { Text("Edit") }
-                                TextButton(enabled = !working, onClick = {
-                                    selectedKnowers = knowers[memory.memoryId].orEmpty()
-                                    grantingKnowledge = memory
-                                }) { Text("Who knows this?") }
-                                TextButton(enabled = !working, onClick = {
-                                    applyChange { repository.update(chatId, memory.memoryId, pinned = !memory.pinned) }
-                                }) { Text(if (memory.pinned) "Unpin" else "Pin") }
-                                TextButton(enabled = !working, onClick = {
-                                    applyChange { repository.update(chatId, memory.memoryId, hidden = !memory.hidden) }
-                                }) { Text(if (memory.hidden) "Show" else "Hide") }
+                            // Keep all four controls inside the phone viewport.
+                            // A single unwrapped Row placed Hide beyond the usable width,
+                            // making its semantics node appear clickable without a hit.
+                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    TextButton(enabled = !working, onClick = { editing = memory }) {
+                                        Text("Edit")
+                                    }
+                                    TextButton(enabled = !working, onClick = {
+                                        selectedKnowers = knowers[memory.memoryId].orEmpty()
+                                        grantingKnowledge = memory
+                                    }) { Text("Who knows this?") }
+                                }
+                                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    TextButton(enabled = !working, onClick = {
+                                        applyChange { repository.update(chatId, memory.memoryId, pinned = !memory.pinned) }
+                                    }) { Text(if (memory.pinned) "Unpin" else "Pin") }
+                                    TextButton(enabled = !working, onClick = {
+                                        applyChange { repository.update(chatId, memory.memoryId, hidden = !memory.hidden) }
+                                    }) { Text(if (memory.hidden) "Show" else "Hide") }
+                                }
                             }
                             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 if (memory.lifecycle == StoryMemoryLifecycle.ACTIVE.name &&
