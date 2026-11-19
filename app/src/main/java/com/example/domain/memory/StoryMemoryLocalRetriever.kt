@@ -5,10 +5,8 @@ import java.util.Locale
 /**
  * Stage 2A: deterministic, offline selection of approved chat-local memories.
  *
- * IMPORTANT: This is a read-only selection component, NOT yet wired to model
- * prompt construction. It must never receive an unfiltered list from callers
- * who plan to send the returned text to a provider without rechecking the
- * recipient and the generation's active branch/Wack state.
+ * The generation repository supplies candidates and recipient-scoped provenance.
+ * Callers must still recheck the generation's active branch/Wack state.
  *
  * Eligibility is always evaluated before scoring. A pinned memory does not
  * override knowledge, selected-variant, provenance, or Wack boundaries.
@@ -76,10 +74,20 @@ object StoryMemoryLocalRetriever {
             val isOpenThread = record.lifecycle == StoryMemoryLifecycle.ACTIVE &&
                 (record.claim == StoryMemoryClaim.PROMISE ||
                     record.claim == StoryMemoryClaim.UNRESOLVED_THREAD)
+            // Resolved promises remain historical facts, but should not compete
+            // with open obligations as though both still require action.
+            // A relationship entry is not automatically the current state:
+            // without a durable supersession link we rank, never rewrite it.
+            val continuityBonus = when {
+                isOpenThread -> 8
+                record.claim == StoryMemoryClaim.RELATIONSHIP &&
+                    record.lifecycle == StoryMemoryLifecycle.ACTIVE -> 6
+                record.lifecycle == StoryMemoryLifecycle.RESOLVED -> 0
+                else -> 0
+            }
             val score = overlap * 10 + actorMatches * 8 +
                 (if (phraseMatch) 12 else 0) +
-                (if (record.pinned) 24 else 0) +
-                (if (isOpenThread) 5 else 0)
+                (if (record.pinned) 24 else 0) + continuityBonus
 
             // Avoid filling a prompt with irrelevant past facts just because
             // they happened to be eligible. Pinned/open threads are explicit
@@ -92,6 +100,9 @@ object StoryMemoryLocalRetriever {
                 .thenBy { it.record.memoryId }
         )
 
+        // Temporal order matters for how the model reads changing relationships.
+        // Preserve relevance ranking for selection, then present chosen events
+        // chronologically so a reconciliation follows the earlier argument.
         val selected = mutableListOf<StoryMemoryRecord>()
         var usedCharacters = 0
         var skipped = 0
@@ -106,7 +117,11 @@ object StoryMemoryLocalRetriever {
             usedCharacters += length
         }
         return StoryMemorySearchResult(
-            selected = selected,
+            selected = selected.sortedWith(
+                compareBy<StoryMemoryRecord> { sourceOrder(it) }
+                    .thenBy { it.updatedAtEpochMillis }
+                    .thenBy { it.memoryId }
+            ),
             eligibleCount = eligible.size,
             excludedCounts = excluded.toSortedMap(compareBy { it.name }),
             skippedForTextLimit = skipped
