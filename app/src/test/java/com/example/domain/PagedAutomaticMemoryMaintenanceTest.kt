@@ -172,7 +172,7 @@ class PagedAutomaticMemoryMaintenanceTest {
         )
         val pagedSummary = requireNotNull(memory.getSummaryOnce(chatId))
         val pagedFacts = memory.getMemoriesOnce(chatId, "paged-character")
-            .map { Triple(it.category, it.content, it.sourceMessageId) }.toSet()
+            .map { Triple(it.category, it.content, it.sourceMessageId) }
 
         assertEquals(2, legacy.savedMemoryCount)
         assertEquals(legacy.savedMemoryCount, paged.savedMemoryCount)
