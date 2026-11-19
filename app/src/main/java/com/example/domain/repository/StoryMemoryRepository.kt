@@ -703,8 +703,7 @@ class StoryMemoryRepository(
         // This cannot transfer another Character's private thoughts or
         // promote a player's note into a model-readable fact.
         val perspectivesByMemory = if (recipient.kind == StoryActorKind.CHARACTER) {
-            dao.currentPerspectivesForChat(chatId)
-                .filter { it.characterId == recipient.stableId }
+            dao.currentPerspectivesForRecipient(chatId, recipient.stableId)
                 .associateBy { it.memoryId }
         } else emptyMap()
         val candidates = dao.forChat(chatId).mapNotNull { memory ->
