@@ -8,6 +8,7 @@ import androidx.room.Query
 import androidx.room.Update
 import com.example.data.model.StoryMemoryActorEntity
 import com.example.data.model.StoryMemoryKnowledgeChangeEntity
+import com.example.data.model.StoryMemoryPerspectiveEntity
 import com.example.data.model.StoryMemoryEntity
 import com.example.data.model.StoryMemoryReturnEntity
 import kotlinx.coroutines.flow.Flow
@@ -37,6 +38,27 @@ interface StoryMemoryDao {
 
     @Query("SELECT a.* FROM story_memory_actors a INNER JOIN story_memories m ON a.memoryId = m.memoryId WHERE m.chatId = :chatId")
     suspend fun actorsForChat(chatId: String): List<StoryMemoryActorEntity>
+
+    @Query("SELECT COALESCE(MAX(revision), 0) FROM story_memory_perspectives WHERE memoryId = :memoryId AND characterId = :characterId")
+    suspend fun latestPerspectiveRevision(memoryId: String, characterId: String): Long
+
+    @Query("SELECT * FROM story_memory_perspectives WHERE memoryId = :memoryId AND characterId = :characterId ORDER BY revision")
+    suspend fun perspectiveHistory(memoryId: String, characterId: String): List<StoryMemoryPerspectiveEntity>
+
+    @Query("SELECT * FROM story_memory_perspectives p WHERE p.memoryId = :memoryId AND p.revision = (SELECT MAX(q.revision) FROM story_memory_perspectives q WHERE q.memoryId = p.memoryId AND q.characterId = p.characterId) ORDER BY p.characterId")
+    suspend fun currentPerspectivesForMemory(memoryId: String): List<StoryMemoryPerspectiveEntity>
+
+    @Query("SELECT p.* FROM story_memory_perspectives p INNER JOIN story_memories m ON p.memoryId = m.memoryId WHERE m.chatId = :chatId AND p.revision = (SELECT MAX(q.revision) FROM story_memory_perspectives q WHERE q.memoryId = p.memoryId AND q.characterId = p.characterId)")
+    suspend fun currentPerspectivesForChat(chatId: String): List<StoryMemoryPerspectiveEntity>
+
+    @Query("SELECT * FROM story_memory_perspectives ORDER BY memoryId, characterId, revision")
+    suspend fun getAllPerspectives(): List<StoryMemoryPerspectiveEntity>
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertPerspective(entry: StoryMemoryPerspectiveEntity)
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertPerspectives(entries: List<StoryMemoryPerspectiveEntity>)
 
     @Query("DELETE FROM story_memory_actors WHERE memoryId = :memoryId AND relation = 'KNOWS'")
     suspend fun clearKnowledgeForMemory(memoryId: String)
