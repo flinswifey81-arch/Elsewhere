@@ -19,7 +19,7 @@ import java.util.UUID
         parentColumns = ["chatId"], childColumns = ["chatId"],
         onDelete = ForeignKey.CASCADE
     )],
-    indices = [Index("chatId"), Index("sourceMessageId")]
+    indices = [Index("chatId"), Index("sourceMessageId"), Index("previousStateMemoryId")]
 )
 data class StoryMemoryEntity(
     @PrimaryKey val memoryId: String = UUID.randomUUID().toString(),
@@ -46,7 +46,11 @@ data class StoryMemoryEntity(
     val believedById: String? = null,
     val createdAtEpochMillis: Long = System.currentTimeMillis(),
     val updatedAtEpochMillis: Long = System.currentTimeMillis(),
-    val userEditedAt: Long? = null
+    val userEditedAt: Long? = null,
+    /** Immutable predecessor link for explicit relationship/promise transitions. */
+    val previousStateMemoryId: String? = null,
+    /** Only for finalized promise-state entries; never inferred automatically. */
+    val promiseOutcome: String? = null
 )
 
 /** Actor IDs are typed; merely mentioned actors do not get knowledge access. */
