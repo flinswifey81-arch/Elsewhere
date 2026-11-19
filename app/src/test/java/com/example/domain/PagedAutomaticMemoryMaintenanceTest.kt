@@ -150,7 +150,8 @@ class PagedAutomaticMemoryMaintenanceTest {
         val edits = mapOf(
             40 to "I prefer forbidden mint tea.",
             150 to "I prefer jasmine tea.",
-            200 to "Remember that the silver compass rests beneath the bridge."
+            200 to "Remember that the silver compass rests beneath the bridge.",
+            250 to "I prefer jasmine tea." // Duplicate must keep source turn 150.
         )
         val expected = original.map { message ->
             val updatedText = edits[message.orderIndex.toInt()]
@@ -164,7 +165,7 @@ class PagedAutomaticMemoryMaintenanceTest {
         )
         val legacySummary = requireNotNull(memory.getSummaryOnce(chatId))
         val legacyFacts = memory.getMemoriesOnce(chatId, "legacy-character")
-            .map { Triple(it.category, it.content, it.sourceMessageId) }.toSet()
+            .map { Triple(it.category, it.content, it.sourceMessageId) }
 
         val paged = manager.updateFromStoredConversation(
             chatId, "paged-character", messages, resetBoundary = 100L
@@ -181,6 +182,10 @@ class PagedAutomaticMemoryMaintenanceTest {
             pagedSummary.summarizedThroughOrderIndex)
         assertFalse(pagedFacts.any { it.second.contains("forbidden mint tea") })
         assertTrue(pagedFacts.any { it.second == "jasmine tea" })
+        assertEquals(
+            "turn-manual-memory-150",
+            pagedFacts.single { it.second == "jasmine tea" }.third
+        )
     }
 
     @Test fun fewerThanRecentLimitMessagesProduceNoSummary() = runBlocking {
