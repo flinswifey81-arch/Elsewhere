@@ -132,7 +132,7 @@ class AppDatabaseMigrationTest {
     }
 
     @Test
-    fun migrationFrom3To17ValidatesAgainstRoomAndPreservesExistingChatData() = runBlocking {
+    fun migrationFrom3To18ValidatesAgainstRoomAndPreservesExistingChatData() = runBlocking {
         val helper = FrameworkSQLiteOpenHelperFactory().create(
             SupportSQLiteOpenHelper.Configuration.builder(context)
                 .name(databaseName)
@@ -176,12 +176,13 @@ class AppDatabaseMigrationTest {
                 AppDatabase.MIGRATION_13_14,
                 AppDatabase.MIGRATION_14_15,
                 AppDatabase.MIGRATION_15_16,
-                AppDatabase.MIGRATION_16_17
+                AppDatabase.MIGRATION_16_17,
+                AppDatabase.MIGRATION_17_18
             )
             .allowMainThreadQueries()
             .build()
         try {
-            // Opening through Room executes every migration through 17 and validates the resulting schema.
+            // Opening through Room executes every migration through 18 and validates the resulting schema.
             migrated.openHelper.writableDatabase
             assertEquals("Keep Me", migrated.chatDao().getChatById("chat-keep")?.displayName)
             assertEquals("Preserve this", migrated.messageDao().getMessagesForChatOnce("chat-keep").single().content)
@@ -670,6 +671,63 @@ class AppDatabaseMigrationTest {
                 }.joinToString(" ")
                 assertTrue("Expected SQLite to use the variant provenance index: $details",
                     details.contains("index_messages_chatId_variantGroupId"))
+            }
+        } finally {
+            helper.close()
+        }
+    }
+
+    @Test
+    fun migrationFrom17To18IndexesSelectedChronologyAndPreservesVariants() {
+        val helper = FrameworkSQLiteOpenHelperFactory().create(
+            SupportSQLiteOpenHelper.Configuration.builder(context).name(databaseName)
+                .callback(object : SupportSQLiteOpenHelper.Callback(17) {
+                    override fun onCreate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                        db.execSQL("""
+                            CREATE TABLE messages (
+                                messageId TEXT NOT NULL PRIMARY KEY,
+                                chatId TEXT NOT NULL,
+                                isPrimaryVariant INTEGER NOT NULL,
+                                orderIndex INTEGER NOT NULL,
+                                content TEXT NOT NULL
+                            )
+                        """.trimIndent())
+                    }
+                    override fun onUpgrade(
+                        db: androidx.sqlite.db.SupportSQLiteDatabase,
+                        oldVersion: Int, newVersion: Int
+                    ) = Unit
+                }).build()
+        )
+        try {
+            val db = helper.writableDatabase
+            db.execSQL("INSERT INTO messages VALUES ('first', 'chat-a', 1, 10, 'First canon')")
+            db.execSQL("INSERT INTO messages VALUES ('alt', 'chat-a', 0, 10, 'Rejected alternate')")
+            db.execSQL("INSERT INTO messages VALUES ('latest', 'chat-a', 1, 20, 'Selected latest')")
+            db.execSQL("INSERT INTO messages VALUES ('other', 'chat-b', 1, 30, 'Other private story')")
+            AppDatabase.MIGRATION_17_18.migrate(db)
+            db.query("SELECT COUNT(*) FROM messages").use {
+                assertTrue(it.moveToFirst())
+                assertEquals(4, it.getInt(0))
+            }
+            db.query("SELECT messageId FROM messages WHERE chatId='chat-a' AND isPrimaryVariant=1 ORDER BY orderIndex DESC LIMIT 2").use {
+                assertTrue(it.moveToFirst())
+                assertEquals("latest", it.getString(0))
+                assertTrue(it.moveToNext())
+                assertEquals("first", it.getString(0))
+            }
+            db.query("SELECT isPrimaryVariant, content FROM messages WHERE messageId='alt'").use {
+                assertTrue(it.moveToFirst())
+                assertEquals(0, it.getInt(0))
+                assertEquals("Rejected alternate", it.getString(1))
+            }
+            db.query("EXPLAIN QUERY PLAN SELECT * FROM messages WHERE chatId='chat-a' AND isPrimaryVariant=1 ORDER BY orderIndex DESC LIMIT 25").use {
+                assertTrue(it.moveToFirst())
+                val plan = buildList {
+                    do { add(it.getString(3)) } while (it.moveToNext())
+                }.joinToString(" ")
+                assertTrue("Selected-turn query should use its covering index: $plan",
+                    plan.contains("index_messages_chatId_isPrimaryVariant_orderIndex"))
             }
         } finally {
             helper.close()
