@@ -39,6 +39,7 @@ jobs:
             --tests com.example.domain.PromptPreflightTest \
             --tests com.example.domain.PromptHistoryTrimmerTest \
             --tests com.example.domain.StoryMemoryTemporalRetrievalTest \
+            --tests com.example.domain.MemoryV2RoomScaleBenchmarkTest \
             --tests com.example.domain.memory.StoryMemoryEligibilityPolicyTest \
             --tests com.example.domain.StoryMemoryStorageTest \
             --tests com.example.AppDatabaseMigrationTest \
