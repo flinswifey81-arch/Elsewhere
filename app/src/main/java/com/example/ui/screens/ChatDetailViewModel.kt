@@ -712,7 +712,20 @@ class ChatDetailViewModel(
         generationStartInProgress = true
         try {
             val state = _uiState.value as? ChatUiState.Success ?: return
-            val history = state.messages.filter { it.isPrimaryVariant && it.messageId != userMsg.messageId }
+            // The freshly persisted Persona turn is the latest selected
+            // message. Normal prompt assembly needs only recent history;
+            // legacy automatic-memory maintenance now reads its own source
+            // from Room after successful persistence.
+            val latest = messageRepository.getLatestPrimaryWindow(chatId, 25)
+            val history = if (latest.lastOrNull()?.messageId == userMsg.messageId) {
+                latest.dropLast(1)
+            } else {
+                // Preserve the established behavior for an unexpected ordering
+                // race (e.g. an imported chat with equal order indices).
+                state.messages.filter {
+                    it.isPrimaryVariant && it.messageId != userMsg.messageId
+                }
+            }
             startGenerationInternal(userMsg, history, dataRevision = dataRevision)
         } catch (cancellation: kotlinx.coroutines.CancellationException) {
             throw cancellation
@@ -849,7 +862,7 @@ class ChatDetailViewModel(
                 val recentPrimary = boundedSnapshot?.messages.orEmpty()
                 val recentCurrent = recentPrimary.lastOrNull()
                 val (currentMessage, selectedHistory) =
-                    if (recentCurrent?.speakerType == SpeakerType.CHARACTER && !inCoopRoom) {
+                    if (recentCurrent != null && !inCoopRoom) {
                         val boundedCurrent = requireNotNull(recentCurrent)
                         val latestPersona = boundedSnapshot?.latestPersona
                         val windowHistory = recentPrimary.dropLast(1)
@@ -863,9 +876,9 @@ class ChatDetailViewModel(
                         hidePersistedNpcControlRegions(listOf(boundedCurrent)).single() to
                             hidePersistedNpcControlRegions(history)
                     } else {
-                        // New Persona turns and co-op must retain full history:
-                        // the legacy automatic-memory updater still rebuilds
-                        // its summary from the complete selected timeline.
+                        // Co-op retains its full synchronized-history contract.
+                        // Local Persona turns already use the bounded window;
+                        // their automatic memory is maintained separately.
                         val full = hidePersistedNpcControlRegions(
                             messageRepository.getMessagesForChatOnce(chatId)
                         ).filter { it.isPrimaryVariant }
@@ -2182,7 +2195,7 @@ class ChatDetailViewModel(
                 try {
                     // A fast provider failure can precede Room's UI emission of the saved player turn.
                     val messages = ContextResetPolicy.eligiblePrimaryMessages(
-                        messageRepository.getMessagesForChatOnce(chatId), chatSummary?.chat?.contextResetOrderIndex)
+                        messageRepository.getLatestPrimaryWindow(chatId, 25), chatSummary?.chat?.contextResetOrderIndex)
                     val current = messages.lastOrNull()?.takeIf { it.speakerType == SpeakerType.PERSONA } ?: return@launch
                     startGenerationInternal(current, messages.dropLast(1), dataRevision = revision)
                 } catch (cancelled: kotlinx.coroutines.CancellationException) {
@@ -2200,8 +2213,7 @@ class ChatDetailViewModel(
         val revision = dataCoordinator.captureRevision()
         viewModelScope.launch {
             try {
-                val primaryMessages = messageRepository.getMessagesForChatOnce(chatId)
-                    .filter { it.isPrimaryVariant }
+                val primaryMessages = messageRepository.getLatestPrimaryWindow(chatId, 25)
                 val lastMessage = primaryMessages.lastOrNull() ?: return@launch
                 val boundary = chatSummary?.chat?.contextResetOrderIndex
                 if (!ContextResetPolicy.includes(lastMessage, boundary)) {
