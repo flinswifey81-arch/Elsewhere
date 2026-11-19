@@ -77,6 +77,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -326,16 +327,43 @@ fun ChatDetailScreen(
                             }
                         }
                         val hasStreamingItem = state.isGenerating || state.partialStopped
+                        val hasEarlierControl = state.hasEarlierHistory ||
+                            state.isLoadingEarlierHistory
                         AutoScrollingChatColumn(
                             conversationKey = chatId,
                             historyLoaded = state.historyLoaded,
-                            itemCount = state.groupedMessages.size + if (hasStreamingItem) 1 else 0,
+                            itemCount = state.groupedMessages.size +
+                                (if (hasStreamingItem) 1 else 0) +
+                                (if (hasEarlierControl) 1 else 0),
                             isStreaming = hasStreamingItem,
+                            hasEarlierHistory = state.hasEarlierHistory,
+                            isLoadingEarlierHistory = state.isLoadingEarlierHistory,
+                            onLoadEarlier = viewModel::loadEarlierMessages,
                             streamContentKey = state.streamingContent,
                             modifier = Modifier
                                 .weight(1f)
                                 .fillMaxWidth()
                         ) {
+                            if (hasEarlierControl) {
+                                item(key = "load-earlier-messages") {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.Center
+                                    ) {
+                                        TextButton(
+                                            enabled = state.hasEarlierHistory &&
+                                                !state.isLoadingEarlierHistory,
+                                            onClick = viewModel::loadEarlierMessages
+                                        ) {
+                                            Text(
+                                                if (state.isLoadingEarlierHistory)
+                                                    "Loading earlier messages…"
+                                                else "Load earlier messages"
+                                            )
+                                        }
+                                    }
+                                }
+                            }
                             items(state.groupedMessages, key = { it.primaryMessage.messageId }) { group ->
                                 MessageBubble(
                                     group = group,
@@ -880,6 +908,9 @@ internal fun AutoScrollingChatColumn(
     isStreaming: Boolean,
     streamContentKey: String?,
     modifier: Modifier = Modifier,
+    hasEarlierHistory: Boolean = false,
+    isLoadingEarlierHistory: Boolean = false,
+    onLoadEarlier: (() -> Unit)? = null,
     listState: LazyListState = rememberLazyListState(),
     content: LazyListScope.() -> Unit
 ) {
@@ -902,6 +933,22 @@ internal fun AutoScrollingChatColumn(
             false
         } else {
             listState.isNearBottom(nearBottomThresholdPx)
+        }
+    }
+
+    // Scrollback triggers only after a user-driven scroll reaches the older
+    // edge. Loading a page prepends stable keyed items, preserving their
+    // visible anchor instead of jumping the reader to the latest reply.
+    LaunchedEffect(
+        conversationKey, historyLoaded, initialScrollComplete,
+        hasEarlierHistory, isLoadingEarlierHistory
+    ) {
+        if (!historyLoaded || !initialScrollComplete || !hasEarlierHistory ||
+            isLoadingEarlierHistory) return@LaunchedEffect
+        snapshotFlow {
+            listState.isScrollInProgress && listState.firstVisibleItemIndex <= 2
+        }.distinctUntilChanged().collect { nearTop ->
+            if (nearTop) onLoadEarlier?.invoke()
         }
     }
 
