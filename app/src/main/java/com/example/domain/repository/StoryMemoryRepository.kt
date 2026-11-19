@@ -324,10 +324,10 @@ class StoryMemoryRepository(
                 StoryPromiseOutcome.BROKEN -> "Broken"
                 StoryPromiseOutcome.RELEASED -> "Released"
             }
-            val content = previous.content + "\nOutcome — $label: " + description
-            require(content.length <= 12_000) {
-                "The promise and outcome together exceed 12,000 characters."
-            }
+            // Only the player's new outcome text is copied forward. The
+            // predecessor holds the original promise, so deleting or editing
+            // it does not leave an automatic duplicate in the live successor.
+            val content = "Promise outcome ($label): " + description
             val latest = maxOf(
                 database.chatDao().getLatestMessageOrderIndex(chatId) ?: -1L,
                 dao.maxSourceOrderForChat(chatId) ?: -1L,
