@@ -29,6 +29,8 @@ data class StoryMemoryPerspectiveEntity(
     val characterId: String,
     val revision: Long,
     val stance: String, // KNOWS, BELIEVES, SUSPECTS, UNAWARE
+    /** SHA-256 of the exact player-approved memory text when this state was set. */
+    val contentSha256: String,
     val note: String? = null,
     val latestMessageOrderIndex: Long? = null,
     val wackBoundaryOrderIndex: Long? = null,
