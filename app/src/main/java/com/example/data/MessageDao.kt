@@ -15,6 +15,37 @@ interface MessageDao {
     suspend fun getMessagesForChatOnce(chatId: String): List<MessageEntity>
 
     /**
+     * Latest selected turns for a bounded Group generation window. Reversing
+     * the result restores the same oldest-to-newest story chronology. ORDER
+     * BY rowid is the deterministic insertion-order tie break for messages
+     * whose orderIndex is equal (common on imported/co-op histories).
+     */
+    @Query("""
+        SELECT * FROM messages
+        WHERE chatId = :chatId AND isPrimaryVariant = 1
+        ORDER BY orderIndex DESC, rowid DESC
+        LIMIT :limit
+    """)
+    suspend fun getLatestPrimaryWindow(chatId: String, limit: Int): List<MessageEntity>
+
+    /** Preserve Group's most recently used Persona even when more than 24
+     * Character turns have passed. A Wack must prohibit pre-reset identity
+     * inference from old Persona messages.
+     */
+    @Query("""
+        SELECT * FROM messages
+        WHERE chatId = :chatId AND isPrimaryVariant = 1
+          AND speakerType = 'PERSONA'
+          AND (:resetBoundary IS NULL OR orderIndex > :resetBoundary)
+        ORDER BY orderIndex DESC, rowid DESC
+        LIMIT 1
+    """)
+    suspend fun getLatestPrimaryPersona(
+        chatId: String,
+        resetBoundary: Long?
+    ): MessageEntity?
+
+    /**
      * Provenance-only lookup for saved memory sources. Query is bounded by
      * referenced message IDs, not by total transcript length.
      */
