@@ -155,6 +155,16 @@ class ChatRepository(
         withContext(Dispatchers.IO) { chatDao.updateChat(chat) }
     }
 
+    /** Only the timestamp changes: never overwrite a Wack boundary from a
+     * pre-reset chat snapshot during background generation completion.
+     */
+    suspend fun touchChatTimestamp(
+        chatId: String,
+        updatedAt: Long = System.currentTimeMillis()
+    ): Int = dataCoordinator.withMutation {
+        withContext(Dispatchers.IO) { chatDao.updateChatTimestamp(chatId, updatedAt) }
+    }
+
     suspend fun establishContextReset(chatId: String, requestedBoundary: Long = System.currentTimeMillis()): ChatEntity? =
         dataCoordinator.withMutation {
             withContext(Dispatchers.IO) {
