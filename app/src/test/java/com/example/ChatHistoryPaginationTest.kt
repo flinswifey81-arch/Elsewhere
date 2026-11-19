@@ -131,14 +131,31 @@ class ChatHistoryPaginationTest {
         assertTrue(older.hasEarlierGroups) // older groups still exist
     }
 
-    @Test fun newlyArrivingGroupsPreserveOldestPageWithoutGrowingOnVariants() {
-        assertEquals(100, retainVisibleScrollbackAfterInsert(100, null, 10_000))
-        assertEquals(101, retainVisibleScrollbackAfterInsert(100, 10_000, 10_001))
-        assertEquals(103, retainVisibleScrollbackAfterInsert(100, 10_000, 10_003))
-        assertEquals(100, retainVisibleScrollbackAfterInsert(100, 10_000, 10_000))
-        assertEquals(100, retainVisibleScrollbackAfterInsert(100, 50, 100))
-        assertEquals(110, retainVisibleScrollbackAfterInsert(100, 50, 110))
-        assertEquals(200, retainVisibleScrollbackAfterInsert(200, 251, 250))
+    @Test fun newlyArrivingGroupsKeepDefaultWindowSmallButRetainLoadedScrollback() {
+        assertEquals(100, retainVisibleScrollbackAfterInsert(
+            100, null, 10_000, olderPagesLoaded = false
+        ))
+        assertEquals(100, retainVisibleScrollbackAfterInsert(
+            100, 10_000, 10_001, olderPagesLoaded = false
+        ))
+        assertEquals(201, retainVisibleScrollbackAfterInsert(
+            200, 10_000, 10_001, olderPagesLoaded = true
+        ))
+        assertEquals(203, retainVisibleScrollbackAfterInsert(
+            200, 10_000, 10_003, olderPagesLoaded = true
+        ))
+        assertEquals(200, retainVisibleScrollbackAfterInsert(
+            200, 10_000, 10_000, olderPagesLoaded = true
+        ))
+        assertEquals(200, retainVisibleScrollbackAfterInsert(
+            200, 50, 100, olderPagesLoaded = true
+        ))
+        assertEquals(210, retainVisibleScrollbackAfterInsert(
+            200, 50, 210, olderPagesLoaded = true
+        ))
+        assertEquals(200, retainVisibleScrollbackAfterInsert(
+            200, 251, 250, olderPagesLoaded = true
+        ))
     }
 
     @Test fun tinyChatAndUnselectedOnlyGroupRetainLegacyDisplayFallback() = runBlocking {
