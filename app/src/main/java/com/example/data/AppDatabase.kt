@@ -7,7 +7,7 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.example.data.model.*
 
-const val APP_DATABASE_VERSION = 20
+const val APP_DATABASE_VERSION = 21
 
 @Database(
     entities = [
@@ -25,6 +25,7 @@ const val APP_DATABASE_VERSION = 20
         StoryMemoryActorEntity::class,
         StoryMemoryReturnEntity::class,
         StoryMemoryKnowledgeChangeEntity::class,
+        StoryMemoryPerspectiveEntity::class,
         ConversationSummaryEntity::class,
         LorebookEntity::class,
         LorebookEntryEntity::class,
@@ -69,6 +70,34 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun worldDao(): WorldDao
 
     companion object {
+        /**
+         * Append-only per-Character fictional perspectives. Existing KNOWS
+         * permissions remain unchanged, and old chats acquire no invented states.
+         */
+        val MIGRATION_20_21 = object : Migration(20, 21) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS story_memory_perspectives (
+                        memoryId TEXT NOT NULL,
+                        characterId TEXT NOT NULL,
+                        revision INTEGER NOT NULL,
+                        stance TEXT NOT NULL,
+                        note TEXT,
+                        latestMessageOrderIndex INTEGER,
+                        wackBoundaryOrderIndex INTEGER,
+                        recordedAtEpochMillis INTEGER NOT NULL,
+                        PRIMARY KEY(memoryId, characterId, revision),
+                        FOREIGN KEY(memoryId) REFERENCES story_memories(memoryId)
+                            ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                """.trimIndent())
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_story_memory_perspectives_characterId " +
+                        "ON story_memory_perspectives(characterId)"
+                )
+            }
+        }
+
         /**
          * Append-only explicit knowledge assignments. Existing KNOWS rows
          * retain their exact current behavior; no historic state is invented.
