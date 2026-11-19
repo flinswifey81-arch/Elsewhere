@@ -7,7 +7,7 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.example.data.model.*
 
-const val APP_DATABASE_VERSION = 16
+const val APP_DATABASE_VERSION = 17
 
 @Database(
     entities = [
@@ -68,6 +68,16 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun worldDao(): WorldDao
 
     companion object {
+        /** Additive performance-only index. No table rebuilds or record rewrites. */
+        val MIGRATION_16_17 = object : Migration(16, 17) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_messages_chatId_variantGroupId " +
+                        "ON messages(chatId, variantGroupId)"
+                )
+            }
+        }
+
         val MIGRATION_15_16 = object : Migration(15, 16) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 // Additive only. Never mutate old roleplay_memories or summaries.
