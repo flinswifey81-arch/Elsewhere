@@ -42,6 +42,21 @@ class MessageRepository(
     }
 
     /**
+     * Selected primary messages newest first for rolling memory summaries.
+     * A page contains at most 128 messages, even in 10k+ message chats.
+     */
+    suspend fun getSelectedHistoryReversePage(
+        chatId: String,
+        resetBoundary: Long?,
+        offset: Int,
+        pageSize: Int = 128
+    ): List<MessageEntity> {
+        require(offset >= 0) { "History offset cannot be negative." }
+        require(pageSize in 1..256) { "History page size must be between 1 and 256." }
+        return messageDao.getSelectedHistoryReversePage(chatId, resetBoundary, pageSize, offset)
+    }
+
+    /**
      * Legacy-memory read gate: validate only saved memory source messages
      * and every alternate in their groups. Unattributed memories need no
      * transcript scan and remain subject to the existing Wack policy.
