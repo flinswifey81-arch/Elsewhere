@@ -104,15 +104,17 @@ class StoryMemoriesScreenTest {
                 StoryMemoriesScreen("ui-story", repository, chats, onNavigateBack = {})
             }
         }
+        val firstMemoryId = runBlocking {
+            database.storyMemoryDao().forChat("ui-story").first().memoryId
+        }
         composeRule.waitUntil(15_000) {
-            composeRule.onAllNodesWithText("Restore after Wack").fetchSemanticsNodes().isNotEmpty()
+            composeRule.onAllNodesWithTag("restore_memory_$firstMemoryId")
+                .fetchSemanticsNodes().isNotEmpty()
         }
         assertTrue(runBlocking { database.storyMemoryDao().getAllReturns().isEmpty() })
-        composeRule.onAllNodesWithText("Restore after Wack")[0].performClick()
-        // The UI state change that opens this confirmation is asynchronous:
-        // wait for the actual dialog, not just the button click dispatch.
+        composeRule.onNodeWithTag("restore_memory_$firstMemoryId").performClick()
         composeRule.waitUntil(10_000) {
-            composeRule.onAllNodesWithText("Restore this one memory")
+            composeRule.onAllNodesWithTag("story_memory_restore_dialog")
                 .fetchSemanticsNodes().isNotEmpty()
         }
         composeRule.onNodeWithText("Restore this one memory").assertExists()
