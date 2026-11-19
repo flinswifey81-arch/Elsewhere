@@ -1408,6 +1408,44 @@ class ChatDetailGenerationTest {
         assertEquals("paged-turn-151", newest.groupedMessages.first().primaryMessage.messageId)
         assertEquals(100, newest.messages.size)
 
+        // Image attachments must follow the visible chat page while draft
+        // images stay available independently of historical scroll position.
+        val testImageDir = java.io.File(context.filesDir, "message_attachments")
+            .apply { mkdirs() }
+        val metadata = listOf(
+            "visible-image" to "paged-turn-240",
+            "older-image" to "paged-turn-49",
+            "alternate-image" to "paged-older-alternate",
+            "pending-draft-image" to null
+        )
+        metadata.forEach { (id, messageId) ->
+            java.io.File(testImageDir, "$id.png").writeBytes(byteArrayOf(1, 2, 3))
+            database.messageAttachmentDao().insert(
+                MessageAttachmentEntity(
+                    attachmentId = id,
+                    chatId = harness.chatId,
+                    messageId = messageId,
+                    relativePath = "message_attachments/$id.png",
+                    mimeType = "image/png",
+                    byteSize = 3,
+                    pixelWidth = 1,
+                    pixelHeight = 1,
+                    sha256 = "synthetic-$id",
+                    sortPosition = 0
+                )
+            )
+        }
+        val initialImages = withTimeout(30_000) {
+            harness.viewModel.uiState.first { state ->
+                state is ChatUiState.Success &&
+                    state.attachments.map { it.attachmentId } == listOf("visible-image") &&
+                    state.draftAttachments.map { it.attachmentId } ==
+                        listOf("pending-draft-image")
+            }
+        } as ChatUiState.Success
+        assertEquals(1, initialImages.attachments.size)
+        assertEquals(4, database.messageAttachmentDao().getForChat(harness.chatId).size)
+
         harness.viewModel.loadEarlierMessages()
         val second = withTimeout(30_000) {
             harness.viewModel.uiState.first { state ->
@@ -1417,6 +1455,11 @@ class ChatDetailGenerationTest {
         } as ChatUiState.Success
         assertTrue(second.hasEarlierHistory)
         assertEquals("paged-turn-51", second.groupedMessages.first().primaryMessage.messageId)
+
+        assertEquals(listOf("visible-image"),
+            second.attachments.map { it.attachmentId })
+        assertEquals(listOf("pending-draft-image"),
+            second.draftAttachments.map { it.attachmentId })
 
         // A new Character reply while reading older turns must not evict
         // the oldest loaded group or pull the reader back to the bottom.
@@ -1472,6 +1515,29 @@ class ChatDetailGenerationTest {
         assertEquals(100, collapsed.messages.size)
         assertEquals(252,
             harness.messageRepository.getMessagesForChatOnce(harness.chatId).size)
+        val allImages = withTimeout(30_000) {
+            harness.viewModel.loadEarlierMessages()
+            harness.viewModel.uiState.first { state ->
+                state is ChatUiState.Success &&
+                    state.attachments.map { it.attachmentId }.toSet() ==
+                        setOf("visible-image", "older-image", "alternate-image") &&
+                    state.draftAttachments.map { it.attachmentId } ==
+                        listOf("pending-draft-image")
+            }
+        } as ChatUiState.Success
+        assertEquals(3, allImages.attachments.size)
+        harness.viewModel.returnToLatestMessages()
+        val latestImages = withTimeout(30_000) {
+            harness.viewModel.uiState.first { state ->
+                state is ChatUiState.Success &&
+                    state.groupedMessages.size == 100 &&
+                    state.attachments.map { it.attachmentId } == listOf("visible-image") &&
+                    state.draftAttachments.map { it.attachmentId } ==
+                        listOf("pending-draft-image")
+            }
+        } as ChatUiState.Success
+        assertEquals(4, database.messageAttachmentDao().getForChat(harness.chatId).size)
+        assertEquals(1, latestImages.attachments.size)
         assertEquals(0, provider.requestCount)
     }
 
