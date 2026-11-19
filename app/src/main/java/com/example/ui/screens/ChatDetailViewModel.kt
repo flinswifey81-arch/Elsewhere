@@ -983,11 +983,16 @@ class ChatDetailViewModel(
         var stopped = false
         var wasUserStopped = false
         var generationError: String? = null
+        // One immutable view is shared by completion and Keep Partial; avoid
+        // copying the full historical list twice for a single generation.
+        val turnContextMessages = com.example.domain.compiler.GenerationHistoryWithCurrent(
+            scopedHistory, currentMessage
+        )
         pendingPartialGeneration = PendingPartialGeneration(
             character = fullCharacter,
             variantGroupId = variantGroupId,
             sourceMessage = currentMessage,
-            contextMessages = scopedHistory + currentMessage,
+            contextMessages = turnContextMessages,
             continuationTarget = continuationTarget,
             npcBankEnabled = prepared.npcBankEnabled,
             activePersonaId = prepared.activePersonaId,
@@ -1098,7 +1103,7 @@ class ChatDetailViewModel(
                         character = fullCharacter,
                         variantGroupId = variantGroupId,
                         sourceMessage = currentMessage,
-                        contextMessages = scopedHistory + currentMessage,
+                        contextMessages = turnContextMessages,
                         continuationTarget = continuationTarget,
                         npcUpdates = parsed.updates,
                         npcWarning = formatWarning,
