@@ -117,9 +117,9 @@ class StoryMemoriesScreenTest {
             composeRule.onAllNodesWithTag("story_memory_restore_dialog", useUnmergedTree = true)
                 .fetchSemanticsNodes().isNotEmpty()
         }
-        composeRule.onNodeWithText("Restore this one memory").assertExists()
+        composeRule.onNodeWithText("Restore this one memory", useUnmergedTree = true).assertExists()
         assertTrue(runBlocking { database.storyMemoryDao().getAllReturns().isEmpty() })
-        composeRule.onNodeWithText("Restore this one memory").performClick()
+        composeRule.onNodeWithText("Restore this one memory", useUnmergedTree = true).performClick()
         composeRule.waitUntil(10_000) {
             runBlocking { database.storyMemoryDao().getAllReturns().size == 1 }
         }
