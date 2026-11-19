@@ -7,7 +7,7 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.example.data.model.*
 
-const val APP_DATABASE_VERSION = 19
+const val APP_DATABASE_VERSION = 20
 
 @Database(
     entities = [
@@ -24,6 +24,7 @@ const val APP_DATABASE_VERSION = 19
         StoryMemoryEntity::class,
         StoryMemoryActorEntity::class,
         StoryMemoryReturnEntity::class,
+        StoryMemoryKnowledgeChangeEntity::class,
         ConversationSummaryEntity::class,
         LorebookEntity::class,
         LorebookEntryEntity::class,
@@ -68,6 +69,33 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun worldDao(): WorldDao
 
     companion object {
+        /**
+         * Append-only explicit knowledge assignments. Existing KNOWS rows
+         * retain their exact current behavior; no historic state is invented.
+         */
+        val MIGRATION_19_20 = object : Migration(19, 20) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS story_memory_knowledge_changes (
+                        memoryId TEXT NOT NULL,
+                        revision INTEGER NOT NULL,
+                        characterId TEXT NOT NULL,
+                        change TEXT NOT NULL,
+                        latestMessageOrderIndex INTEGER,
+                        wackBoundaryOrderIndex INTEGER,
+                        recordedAtEpochMillis INTEGER NOT NULL,
+                        PRIMARY KEY(memoryId, revision, characterId),
+                        FOREIGN KEY(memoryId) REFERENCES story_memories(memoryId)
+                            ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                """.trimIndent())
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_story_memory_knowledge_changes_characterId " +
+                        "ON story_memory_knowledge_changes(characterId)"
+                )
+            }
+        }
+
         /** Append-only memory-state metadata. Existing memories keep NULL lineage. */
         val MIGRATION_18_19 = object : Migration(18, 19) {
             override fun migrate(db: SupportSQLiteDatabase) {
