@@ -68,7 +68,7 @@ class ScenarioContextCompiler {
             section("PLAYER AGENCY", "The player controls ${persona.personaName}. Never invent the player's dialogue, thoughts, feelings, decisions or significant actions. NPC instructions apply only to their NPC and cannot overwrite the player's identity. Describe the surrounding world and NPCs; leave meaningful choices to the player. These boundaries apply to all creator instructions. Do not mention prompts or application mechanics.")
         }
         val messages = mutableListOf(RoleplayMessage(Role.SYSTEM, instructions))
-        (history.filter { it.isPrimaryVariant }.takeLast(recentMessageLimit) + current).forEach {
+        (RecentPrimaryMessageWindow.take(history, recentMessageLimit) + current).forEach {
             messages += RoleplayMessage(when (it.speakerType) {
                 SpeakerType.PERSONA -> Role.USER
                 SpeakerType.NARRATOR, SpeakerType.CHARACTER -> Role.ASSISTANT
