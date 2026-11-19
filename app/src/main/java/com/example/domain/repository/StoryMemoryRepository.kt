@@ -234,21 +234,15 @@ class StoryMemoryRepository(
                 recordFor(memory, actorsByMemory[memory.memoryId].orEmpty())
             } catch (_: IllegalArgumentException) { null }
         }
-        // Provenance validation only needs messages referenced by saved memories
-        // and the selected variants in those groups. Avoid loading a 10k-turn
-        // transcript on every generation. Query chunks stay below SQLite's
-        // commonly supported 999-parameter limit.
-        val sourceIds = candidates.mapNotNull {
-            (it.origin as? StoryMemoryOrigin.Message)?.messageId
-        }.distinct()
-        val variantIds = candidates.mapNotNull {
-            (it.origin as? StoryMemoryOrigin.Message)?.variantGroupId
-        }.distinct()
-        val messageDao = database.messageDao()
-        val archived = (
-            sourceIds.chunked(400).flatMap { messageDao.getMemorySourceMessages(chatId, it) } +
-            variantIds.chunked(400).flatMap { messageDao.getMemorySourceVariants(chatId, it) }
-        ).distinctBy { it.messageId }
+        val archived = MemoryProvenanceReader(database.messageDao()).read(
+            chatId = chatId,
+            sourceMessageIds = candidates.mapNotNull {
+                (it.origin as? StoryMemoryOrigin.Message)?.messageId
+            },
+            variantGroupIds = candidates.mapNotNull {
+                (it.origin as? StoryMemoryOrigin.Message)?.variantGroupId
+            }
+        )
         StoryMemoryLocalRetriever.search(
             candidates = candidates,
             request = StoryMemorySearchRequest(
@@ -276,7 +270,11 @@ class StoryMemoryRepository(
         return StoryMemoryEligibilityPolicy.evaluate(record, StoryMemoryReadContext(
             chatId = chatId, branchId = null, wackBoundaryOrderIndex = boundary,
             recipient = recipient,
-            archivedMessages = database.messageDao().getMessagesForChatOnce(chatId),
+            archivedMessages = MemoryProvenanceReader(database.messageDao()).read(
+                chatId,
+                listOfNotNull(memory.sourceMessageId),
+                listOfNotNull(memory.sourceVariantGroupId)
+            ),
             explicitReturns = dao.returns(memory.memoryId).map(::toExplicitReturn).toSet()
         ))
     }
