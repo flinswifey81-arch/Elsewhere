@@ -264,7 +264,7 @@ class ContextCompilerV1 {
         messages.add(RoleplayMessage(role = Role.SYSTEM, content = coreInstruction))
         
         // Older messages are represented by the persisted rolling summary. Keep recent turns verbatim.
-        val trimmedHistory = chatHistory.filter { it.isPrimaryVariant }.takeLast(recentMessageLimit)
+        val trimmedHistory = RecentPrimaryMessageWindow.take(chatHistory, recentMessageLimit)
         fun promptContent(message: MessageEntity): String {
             val visibleContent = NpcStructuredOutputParser.finalVisibleStoryText(message.content)
             val promptHistory = if (
