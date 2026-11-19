@@ -573,7 +573,7 @@ class StoryMemoryRepository(
             require(previousRevision < Long.MAX_VALUE) {
                 "Perspective revision limit reached."
             }
-            StoryMemoryPerspectiveEntity(
+            val entry = StoryMemoryPerspectiveEntity(
                 memoryId = memoryId,
                 characterId = characterId,
                 revision = previousRevision + 1L,
@@ -581,7 +581,9 @@ class StoryMemoryRepository(
                 note = cleanedNote,
                 latestMessageOrderIndex = database.chatDao().getLatestMessageOrderIndex(chatId),
                 wackBoundaryOrderIndex = chat.contextResetOrderIndex
-            ).also(dao::insertPerspective)
+            )
+            dao.insertPerspective(entry)
+            entry
         }
     }
 
