@@ -2,6 +2,7 @@ package com.example.domain.lore
 
 import com.example.data.model.LorebookEntryEntity
 import com.example.data.model.MessageEntity
+import com.example.domain.compiler.RecentPrimaryMessageWindow
 import com.example.domain.npc.NpcStructuredOutputParser
 import com.example.domain.story.StoryResponseCodec
 
@@ -17,7 +18,7 @@ object LorebookActivationEngine {
         currentMessage: MessageEntity,
         recentMessageLimit: Int = 24
     ): String = buildList {
-        addAll(chatHistory.filter { it.isPrimaryVariant }.takeLast(recentMessageLimit).map { it.visibleStoryText() })
+        addAll(RecentPrimaryMessageWindow.take(chatHistory, recentMessageLimit).map { it.visibleStoryText() })
         add(currentMessage.visibleStoryText())
     }.joinToString("\n")
 
