@@ -57,6 +57,21 @@ class MessageRepository(
     }
 
     /**
+     * Oldest-first selected history pages for manual memory extraction.
+     * Preserves the first source of a repeated fact, as before this change.
+     */
+    suspend fun getSelectedHistoryForwardPage(
+        chatId: String,
+        resetBoundary: Long?,
+        offset: Int,
+        pageSize: Int = 128
+    ): List<MessageEntity> {
+        require(offset >= 0) { "History offset cannot be negative." }
+        require(pageSize in 1..256) { "History page size must be between 1 and 256." }
+        return messageDao.getSelectedHistoryForwardPage(chatId, resetBoundary, pageSize, offset)
+    }
+
+    /**
      * Legacy-memory read gate: validate only saved memory source messages
      * and every alternate in their groups. Unattributed memories need no
      * transcript scan and remain subject to the existing Wack policy.
