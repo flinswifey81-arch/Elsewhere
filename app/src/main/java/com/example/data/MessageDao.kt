@@ -14,6 +14,20 @@ interface MessageDao {
     @Query("SELECT * FROM messages WHERE chatId = :chatId ORDER BY orderIndex ASC")
     suspend fun getMessagesForChatOnce(chatId: String): List<MessageEntity>
 
+    /**
+     * Provenance-only lookup for saved memory sources. Query is bounded by
+     * referenced message IDs, not by total transcript length.
+     */
+    @Query("SELECT * FROM messages WHERE chatId = :chatId AND messageId IN (:messageIds)")
+    suspend fun getMemorySourceMessages(chatId: String, messageIds: List<String>): List<MessageEntity>
+
+    /**
+     * Fetch every variant in the referenced groups to detect ambiguous
+     * primary selections without scanning unrelated historical messages.
+     */
+    @Query("SELECT * FROM messages WHERE chatId = :chatId AND variantGroupId IN (:variantGroupIds)")
+    suspend fun getMemorySourceVariants(chatId: String, variantGroupIds: List<String>): List<MessageEntity>
+
     @Query("SELECT * FROM messages WHERE messageId = :messageId LIMIT 1")
     suspend fun getMessageById(messageId: String): MessageEntity?
 
