@@ -1391,8 +1391,13 @@ class ChatDetailGenerationTest {
                 messages.any { it.content == "Original image reply." }
             }
         }.single { it.content == "Original image reply." }
+        // The saved Room row may precede the asynchronous history collector.
+        // A user can only tap Regenerate once the response bubble is visible.
         withTimeout(30_000) {
-            harness.viewModel.uiState.first { it is ChatUiState.Success && !it.isGenerating }
+            harness.viewModel.uiState.first { state ->
+                state is ChatUiState.Success && !state.isGenerating &&
+                    state.messages.any { it.messageId == original.messageId }
+            }
         }
 
         harness.viewModel.regenerateMessage(original.messageId)
@@ -1402,7 +1407,12 @@ class ChatDetailGenerationTest {
             }
         }.single { it.content == "Regenerated image reply." }
         withTimeout(30_000) {
-            harness.viewModel.uiState.first { it is ChatUiState.Success && !it.isGenerating }
+            harness.viewModel.uiState.first { state ->
+                state is ChatUiState.Success && !state.isGenerating &&
+                    state.messages.any {
+                        it.messageId == regenerated.messageId && it.isPrimaryVariant
+                    }
+            }
         }
 
         harness.viewModel.continueMessage(regenerated.messageId)
