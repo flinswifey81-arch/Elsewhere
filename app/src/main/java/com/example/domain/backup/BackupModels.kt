@@ -84,7 +84,9 @@ data class BackupPayload(
     val storyMemoryActors: List<StoryMemoryActorEntity> = emptyList(),
     val storyMemoryReturns: List<StoryMemoryReturnEntity> = emptyList(),
     // v20, backward-compatible with earlier encrypted backup payloads.
-    val storyMemoryKnowledgeChanges: List<StoryMemoryKnowledgeChangeEntity> = emptyList()
+    val storyMemoryKnowledgeChanges: List<StoryMemoryKnowledgeChangeEntity> = emptyList(),
+    // v21 optional addition: older archives contain no synthetic perspectives.
+    val storyMemoryPerspectives: List<StoryMemoryPerspectiveEntity> = emptyList()
 )
 
 data class BackupPreview(
