@@ -7,6 +7,7 @@ import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Update
 import com.example.data.model.StoryMemoryActorEntity
+import com.example.data.model.StoryMemoryKnowledgeChangeEntity
 import com.example.data.model.StoryMemoryEntity
 import com.example.data.model.StoryMemoryReturnEntity
 import kotlinx.coroutines.flow.Flow
@@ -39,6 +40,18 @@ interface StoryMemoryDao {
 
     @Query("DELETE FROM story_memory_actors WHERE memoryId = :memoryId AND relation = 'KNOWS'")
     suspend fun clearKnowledgeForMemory(memoryId: String)
+
+    @Query("SELECT COALESCE(MAX(revision), 0) FROM story_memory_knowledge_changes WHERE memoryId = :memoryId")
+    suspend fun latestKnowledgeRevision(memoryId: String): Long
+
+    @Query("SELECT * FROM story_memory_knowledge_changes WHERE memoryId = :memoryId ORDER BY revision, characterId")
+    suspend fun knowledgeChangesForMemory(memoryId: String): List<StoryMemoryKnowledgeChangeEntity>
+
+    @Query("SELECT * FROM story_memory_knowledge_changes ORDER BY memoryId, revision, characterId")
+    suspend fun getAllKnowledgeChanges(): List<StoryMemoryKnowledgeChangeEntity>
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertKnowledgeChanges(changes: List<StoryMemoryKnowledgeChangeEntity>)
 
     @Query("SELECT * FROM story_memory_returns ORDER BY memoryId, resetBoundaryOrderIndex")
     suspend fun getAllReturns(): List<StoryMemoryReturnEntity>
