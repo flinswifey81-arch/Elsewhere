@@ -24,6 +24,10 @@ interface StoryMemoryDao {
     @Query("SELECT MAX(sourceOrderIndex) FROM story_memories WHERE chatId = :chatId")
     suspend fun maxSourceOrderForChat(chatId: String): Long?
 
+    /** Rejected proposals count as already reviewed; do not nag the player. */
+    @Query("SELECT sourceMessageId FROM story_memories WHERE chatId = :chatId AND originKind = 'MESSAGE' AND sourceMessageId IS NOT NULL")
+    suspend fun reviewedOrRecordedMessageIds(chatId: String): List<String>
+
     @Query("SELECT * FROM story_memories WHERE memoryId = :memoryId LIMIT 1")
     suspend fun get(memoryId: String): StoryMemoryEntity?
 
