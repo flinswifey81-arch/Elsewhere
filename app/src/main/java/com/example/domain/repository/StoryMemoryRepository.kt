@@ -553,9 +553,10 @@ class StoryMemoryRepository(
         require(note.length <= 2_000) { "Perspective note must be at most 2,000 characters." }
         val cleanedNote = note.trim().takeIf { it.isNotEmpty() }
         database.withTransaction {
-            requireNotNull(get(chatId, memoryId)) {
+            val memory = requireNotNull(get(chatId, memoryId)) {
                 "Memory does not belong to this chat."
             }
+            val contentSha256 = StoryMemoryEligibilityPolicy.sha256(memory.content)
             val chat = requireNotNull(database.chatDao().getChatById(chatId)) {
                 "Chat no longer exists."
             }
@@ -566,7 +567,8 @@ class StoryMemoryRepository(
             }
             val prior = dao.currentPerspectivesForMemory(memoryId)
                 .singleOrNull { it.characterId == characterId }
-            if (prior != null && prior.stance == stance.name && prior.note == cleanedNote) {
+            if (prior != null && prior.stance == stance.name &&
+                prior.note == cleanedNote && prior.contentSha256 == contentSha256) {
                 return@withTransaction prior
             }
             val previousRevision = dao.latestPerspectiveRevision(memoryId, characterId)
@@ -578,6 +580,7 @@ class StoryMemoryRepository(
                 characterId = characterId,
                 revision = previousRevision + 1L,
                 stance = stance.name,
+                contentSha256 = contentSha256,
                 note = cleanedNote,
                 latestMessageOrderIndex = database.chatDao().getLatestMessageOrderIndex(chatId),
                 wackBoundaryOrderIndex = chat.contextResetOrderIndex
@@ -709,8 +712,17 @@ class StoryMemoryRepository(
         val candidates = dao.forChat(chatId).mapNotNull { memory ->
             try {
                 val original = recordFor(memory, actorsByMemory[memory.memoryId].orEmpty())
-                val perspective = perspectivesByMemory[memory.memoryId]
-                    ?.let { StoryCharacterPerspective.valueOf(it.stance) }
+                val savedPerspective = perspectivesByMemory[memory.memoryId]
+                // If an authored memory was edited, its previous perspective
+                // cannot automatically become a claim about the new text.
+                // Fail closed for this Character until the player re-confirms.
+                val perspective = when {
+                    savedPerspective == null -> null
+                    savedPerspective.contentSha256 !=
+                        StoryMemoryEligibilityPolicy.sha256(memory.content) ->
+                        StoryCharacterPerspective.UNAWARE
+                    else -> StoryCharacterPerspective.valueOf(savedPerspective.stance)
+                }
                 if (perspective == null) original else original.copy(
                     perspectives = mapOf(recipient to perspective),
                     content = if (perspective in setOf(
