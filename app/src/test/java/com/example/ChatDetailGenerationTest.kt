@@ -1458,6 +1458,20 @@ class ChatDetailGenerationTest {
                 it.primaryMessage.messageId == "paged-turn-49"
             }.variants.map { it.messageId }.toSet()
         )
+        // Returning to the latest reply releases the hydrated older pages,
+        // but those groups and variants remain retrievable from Room.
+        harness.viewModel.returnToLatestMessages()
+        val collapsed = withTimeout(30_000) {
+            harness.viewModel.uiState.first { state ->
+                state is ChatUiState.Success && state.groupedMessages.size == 100 &&
+                    state.groupedMessages.first().primaryMessage.messageId == "paged-turn-152" &&
+                    state.groupedMessages.last().primaryMessage.messageId == "paged-turn-251" &&
+                    state.hasEarlierHistory && !state.isLoadingEarlierHistory
+            }
+        } as ChatUiState.Success
+        assertEquals(100, collapsed.messages.size)
+        assertEquals(252,
+            harness.messageRepository.getMessagesForChatOnce(harness.chatId).size)
         assertEquals(0, provider.requestCount)
     }
 
