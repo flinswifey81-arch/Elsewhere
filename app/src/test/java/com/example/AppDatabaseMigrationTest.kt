@@ -735,6 +735,52 @@ class AppDatabaseMigrationTest {
         }
     }
 
+    @Test
+    fun migrationFrom18To19PreservesStoryMemoriesAndAddsNullableLineage() {
+        val helper = FrameworkSQLiteOpenHelperFactory().create(
+            SupportSQLiteOpenHelper.Configuration.builder(context).name(databaseName)
+                .callback(object : SupportSQLiteOpenHelper.Callback(18) {
+                    override fun onCreate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                        db.execSQL("""
+                            CREATE TABLE story_memories (
+                                memoryId TEXT NOT NULL PRIMARY KEY,
+                                chatId TEXT NOT NULL,
+                                content TEXT NOT NULL
+                            )
+                        """.trimIndent())
+                    }
+                    override fun onUpgrade(
+                        db: androidx.sqlite.db.SupportSQLiteDatabase,
+                        oldVersion: Int, newVersion: Int
+                    ) = Unit
+                }).build()
+        )
+        try {
+            val db = helper.writableDatabase
+            db.execSQL("INSERT INTO story_memories VALUES ('original', 'story-a', 'Old promise')")
+            AppDatabase.MIGRATION_18_19.migrate(db)
+            db.query("SELECT chatId, content, previousStateMemoryId, promiseOutcome FROM story_memories WHERE memoryId = 'original'").use {
+                assertTrue(it.moveToFirst())
+                assertEquals("story-a", it.getString(0))
+                assertEquals("Old promise", it.getString(1))
+                assertTrue(it.isNull(2))
+                assertTrue(it.isNull(3))
+            }
+            db.execSQL("INSERT INTO story_memories (memoryId, chatId, content, previousStateMemoryId, promiseOutcome) VALUES ('outcome', 'story-a', 'Promise kept', 'original', 'KEPT')")
+            db.query("SELECT content, previousStateMemoryId, promiseOutcome FROM story_memories WHERE memoryId = 'outcome'").use {
+                assertTrue(it.moveToFirst())
+                assertEquals("Promise kept", it.getString(0))
+                assertEquals("original", it.getString(1))
+                assertEquals("KEPT", it.getString(2))
+            }
+            db.query("SELECT name FROM sqlite_master WHERE type='index' AND name='index_story_memories_previousStateMemoryId'").use {
+                assertTrue(it.moveToFirst())
+            }
+        } finally {
+            helper.close()
+        }
+    }
+
     private fun createVersion3Schema(db: androidx.sqlite.db.SupportSQLiteDatabase) {
         listOf(
             "CREATE TABLE IF NOT EXISTS `characters` (`characterId` TEXT NOT NULL, `displayName` TEXT NOT NULL, `characterName` TEXT NOT NULL, `aliases` TEXT NOT NULL, `importSchemaVersion` INTEGER NOT NULL, `identityJson` TEXT, `appearanceJson` TEXT, `personalityJson` TEXT, `voiceJson` TEXT, `behaviorJson` TEXT, `backstoryJson` TEXT, `knowledgeJson` TEXT, `worldContextJson` TEXT, `writingRulesJson` TEXT, `examplesJson` TEXT, `authorNotesJson` TEXT, `extensionFieldsJson` TEXT, `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, `isArchived` INTEGER NOT NULL, PRIMARY KEY(`characterId`))",
