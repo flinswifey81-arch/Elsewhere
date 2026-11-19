@@ -41,6 +41,7 @@ jobs:
             --tests com.example.domain.StoryMemoryTemporalRetrievalTest \
             --tests com.example.domain.BoundedLegacyMemoryProvenanceTest \
             --tests com.example.domain.BoundedGroupGenerationWindowTest \
+            --tests com.example.domain.PagedAutomaticMemoryMaintenanceTest \
             --tests com.example.LocalGroupGenerationTest \
             --tests com.example.domain.backup.BackupRepositoryTest \
             --tests com.example.domain.MemoryV2RoomScaleBenchmarkTest \
