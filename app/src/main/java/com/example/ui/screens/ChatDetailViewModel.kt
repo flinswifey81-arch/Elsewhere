@@ -57,6 +57,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -136,6 +137,8 @@ sealed class ChatUiState {
         val messages: List<MessageEntity>,
         val chatSettings: ChatSettingsEntity,
         val historyLoaded: Boolean = false,
+        val hasEarlierHistory: Boolean = false,
+        val isLoadingEarlierHistory: Boolean = false,
         val groupCharacters: List<GroupCharacterState> = emptyList(),
         val availableGroupCharacters: List<CharacterEntity> = emptyList(),
         val groupParticipantsLoaded: Boolean = false,
@@ -174,6 +177,12 @@ class ChatDetailViewModel(
     private val storyMemoryRepository: StoryMemoryRepository? = null
 ) : ViewModel() {
 
+    private companion object {
+        const val HISTORY_GROUP_PAGE_SIZE = 100
+        const val INITIAL_VISIBLE_GROUPS = HISTORY_GROUP_PAGE_SIZE
+        const val MAX_VISIBLE_HISTORY_GROUPS = 10_000
+    }
+
     private val _uiState = MutableStateFlow<ChatUiState>(ChatUiState.Loading)
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
 
@@ -195,6 +204,7 @@ class ChatDetailViewModel(
     private var activeCoopGenerationExecutionId: String? = null
     private var coopContextAuthorizerToken: String? = null
     private val draftSaveMutex = Mutex()
+    private val visibleHistoryGroupLimit = MutableStateFlow(INITIAL_VISIBLE_GROUPS)
     private val compiler = ContextCompilerV1()
     private val memoryManager = AutomaticMemoryManager(memoryRepository)
     private val parsedNpcOutput = npcOutputParser
@@ -332,21 +342,27 @@ class ChatDetailViewModel(
                 }
             }
 
-            messageRepository.getMessagesForChat(chatId).collect { messages ->
-                val displayMessages = hidePersistedNpcControlRegions(messages)
-                val grouped = displayMessages.groupBy { it.variantGroupId ?: it.messageId }.mapNotNull { (_, msgs) ->
-                    val primary = msgs.find { it.isPrimaryVariant } ?: msgs.firstOrNull()
-                    if (primary != null) MessageGroup(primary, msgs.sortedBy { it.orderIndex }) else null
-                }.sortedBy { it.primaryMessage.orderIndex }
-                updateSuccessState {
-                    it.copy(
-                        messages = displayMessages,
-                        groupedMessages = grouped,
-                        chatSummary = chatSummary ?: summary,
-                        chatSettings = currentChatSettings!!,
-                        historyLoaded = true
-                    )
-                }
+            // Room returns complete variant groups, never a raw row slice.
+            // Querying 101 logical groups keeps the ViewModel from hydrating
+            // a 10k-turn archive merely to display the newest 100 bubbles.
+            visibleHistoryGroupLimit.collectLatest { groupLimit ->
+                messageRepository.observeRecentMessageGroups(chatId, groupLimit)
+                    .collect { rows ->
+                        val selected = selectVisibleChatHistory(
+                            hidePersistedNpcControlRegions(rows), groupLimit
+                        )
+                        updateSuccessState {
+                            it.copy(
+                                messages = selected.messages,
+                                groupedMessages = selected.groupedMessages,
+                                hasEarlierHistory = selected.hasEarlierGroups,
+                                isLoadingEarlierHistory = false,
+                                chatSummary = chatSummary ?: summary,
+                                chatSettings = currentChatSettings!!,
+                                historyLoaded = true
+                            )
+                        }
+                    }
             }
         }
     }
@@ -365,6 +381,7 @@ class ChatDetailViewModel(
         partialResolutionInProgress = false
         activeCoopGenerationRequestId = null
         activeCoopGenerationExecutionId = null
+        visibleHistoryGroupLimit.value = INITIAL_VISIBLE_GROUPS
         chatSummary = null
         currentChatSettings = null
         selectedGroupCharacterId = null
@@ -380,6 +397,20 @@ class ChatDetailViewModel(
                 message.copy(content = NpcStructuredOutputParser.finalVisibleStoryText(message.content))
             } else message
         }
+
+    /** A further batch of complete message groups is retained for scrollback.
+     * Older variants, editing, and Regenerate work once their group is visible.
+     * Full archival history remains in Room and is never discarded.
+     */
+    fun loadEarlierMessages() {
+        val state = _uiState.value as? ChatUiState.Success ?: return
+        if (!state.historyLoaded || !state.hasEarlierHistory ||
+            state.isLoadingEarlierHistory) return
+        updateSuccessState { it.copy(isLoadingEarlierHistory = true) }
+        visibleHistoryGroupLimit.update { limit ->
+            (limit + HISTORY_GROUP_PAGE_SIZE).coerceAtMost(MAX_VISIBLE_HISTORY_GROUPS)
+        }
+    }
 
     fun onDraftChanged(newDraft: String) {
         currentDraft.value = newDraft
