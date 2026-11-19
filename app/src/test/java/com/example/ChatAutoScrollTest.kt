@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.mutableStateOf
@@ -84,6 +85,50 @@ class ChatAutoScrollTest {
 
         composeTestRule.onNodeWithText("Stream end: new chunk").assertDoesNotExist()
         composeTestRule.onNodeWithText("Message 79").assertDoesNotExist()
+    }
+
+    @Test
+    fun olderHistoryCanBeLoadedWithoutJumpingBackToLatestReply() {
+        val loadedEarlier = mutableStateOf(false)
+        composeTestRule.setContent {
+            MaterialTheme {
+                val loaded = loadedEarlier.value
+                val ids = if (loaded) (20..179).toList() else (100..179).toList()
+                AutoScrollingChatColumn(
+                    conversationKey = "long-chat",
+                    historyLoaded = true,
+                    itemCount = ids.size + if (loaded) 0 else 1,
+                    isStreaming = false,
+                    streamContentKey = null,
+                    hasEarlierHistory = !loaded,
+                    onLoadEarlier = { loadedEarlier.value = true },
+                    modifier = Modifier.fillMaxWidth().height(LIST_HEIGHT)
+                ) {
+                    if (!loaded) {
+                        item(key = "load-earlier") {
+                            TextButton(onClick = { loadedEarlier.value = true }) {
+                                Text("Load earlier messages")
+                            }
+                        }
+                    }
+                    items(ids, key = { it }) { id -> messageRow(id) }
+                }
+            }
+        }
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithText("Message 179").assertIsDisplayed()
+
+        // A user who scrolls toward the top either triggers the automatic
+        // edge callback or can explicitly press the accessible load control.
+        composeTestRule.onNodeWithText("Load earlier messages")
+            .performScrollTo()
+        composeTestRule.waitForIdle()
+        if (!loadedEarlier.value) {
+            composeTestRule.onNodeWithText("Load earlier messages").performClick()
+        }
+        composeTestRule.waitForIdle()
+        assert(loadedEarlier.value)
+        composeTestRule.onNodeWithText("Message 179").assertDoesNotExist()
     }
 
     private fun setChatList(streamContent: MutableState<String?>) {
