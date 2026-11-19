@@ -5,6 +5,7 @@ import com.example.data.model.MemoryCategory
 import com.example.data.model.MessageEntity
 import com.example.data.model.RoleplayMemoryEntity
 import com.example.domain.repository.MemoryRepository
+import com.example.domain.repository.MessageRepository
 import com.example.domain.npc.NpcStructuredOutputParser
 import com.example.domain.story.StoryResponseCodec
 
@@ -28,6 +29,65 @@ class AutomaticMemoryManager(
         personaMessages = listOf(personaMessage),
         allPrimaryMessages = allPrimaryMessages
     )
+
+    /**
+     * Production completed-turn path. Prompt preparation no longer has to
+     * carry the entire transcript just for the legacy rolling summary.
+     * Read selected history newest-first in local pages until the complete
+     * retained 12k-character summary suffix is available, then feed the
+     * same deterministic updater as before. No model/API calls.
+     *
+     * Memory maintenance uses the persisted selected branch after the
+     * generated reply is saved, scoped strictly to the active Wack boundary.
+     */
+    suspend fun updateAfterCompletedTurnFromStoredHistory(
+        chatId: String,
+        characterId: String,
+        personaMessage: MessageEntity,
+        messageRepository: MessageRepository,
+        resetBoundary: Long?
+    ): AutomaticMemoryUpdateResult {
+        val messages = loadSummarySource(
+            chatId, resetBoundary, messageRepository
+        )
+        return updateAfterCompletedTurn(
+            chatId = chatId,
+            characterId = characterId,
+            personaMessage = personaMessage,
+            allPrimaryMessages = messages
+        )
+    }
+
+    internal suspend fun loadSummarySource(
+        chatId: String,
+        resetBoundary: Long?,
+        messages: MessageRepository,
+        pageSize: Int = 128
+    ): List<MessageEntity> {
+        require(pageSize in 1..256) { "Summary page size must be 1..256." }
+        val newestFirst = mutableListOf<MessageEntity>()
+        while (true) {
+            val page = messages.getSelectedHistoryReversePage(
+                chatId = chatId,
+                resetBoundary = resetBoundary,
+                offset = newestFirst.size,
+                pageSize = pageSize
+            )
+            if (page.isEmpty()) break
+            newestFirst.addAll(page)
+            // Keep the most recent turns outside the summary. The suffix is
+            // complete as soon as the older portion fills 12k characters.
+            // If it never fills, continue all the way to the start of chat.
+            if (newestFirst.size > recentMessageLimit &&
+                rollingSummaryTail(
+                    newestFirst.subList(recentMessageLimit, newestFirst.size).asReversed()
+                ).length >= MAX_SUMMARY_CHARS
+            ) break
+            if (page.size < pageSize) break
+        }
+        newestFirst.reverse()
+        return newestFirst
+    }
 
     suspend fun updateFromConversation(
         chatId: String,
