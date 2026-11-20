@@ -137,7 +137,8 @@ def require_rooted_disposable_emulator(serial: str) -> None:
 
 def private_path(relpath: str) -> str:
     """Restrict all privileged transfers to a QA-controlled, app-private file."""
-    if not re.fullmatch(r"(databases|files)/[A-Za-z0-9_.-]+", relpath):
+    if (not re.fullmatch(r"(databases|files)/[A-Za-z0-9_.-]+", relpath)
+            or relpath.rsplit("/", 1)[-1] in (".", "..")):
         raise RuntimeError("Invalid disposable app-private QA path")
     return relpath
 
@@ -156,7 +157,9 @@ def app_data_dir(serial: str) -> str:
 
 
 def private_file(serial: str, relpath: str) -> str:
-    return str(PurePosixPath(app_data_dir(serial)) / private_path(relpath))
+    # Validate the name before even querying the privileged app directory.
+    safe_relpath = private_path(relpath)
+    return str(PurePosixPath(app_data_dir(serial)) / safe_relpath)
 
 
 def private_write(serial: str, relpath: str, data: bytes) -> None:
