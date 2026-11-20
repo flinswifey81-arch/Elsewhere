@@ -22,6 +22,9 @@ import com.example.domain.memory.StoryActorKind
 import com.example.domain.memory.StoryActorRef
 import com.example.domain.repository.StoryMemoryRepository
 import com.example.domain.memory.StoryMemoryPromptBudget
+import com.example.domain.compiler.PromptOptionalContextFitter
+import com.example.domain.compiler.PromptOptionalContextChoices
+import com.example.domain.compiler.PromptOptionalContextFit
 import com.example.domain.memory.StoryMemoryRecord
 import com.example.domain.coop.CoopGenerationCommand
 import com.example.domain.coop.CoopGenerationRequestPayload
@@ -100,7 +103,8 @@ private data class PreparedGeneration(
     val activePersonaId: String? = null,
     val ensembleNarrationEnabled: Boolean = false,
     val knownNpcSpeakers: List<StorySpeakerIdentity> = emptyList(),
-    val coLeadRebalanceActive: Boolean = false
+    val coLeadRebalanceActive: Boolean = false,
+    val contextReductionNotice: String? = null
 )
 
 private data class PendingPartialGeneration(
@@ -1081,7 +1085,7 @@ class ChatDetailViewModel(
                 partialStopped = false,
                 partialResolutionInProgress = false,
                 generationError = null,
-                generationWarning = null,
+                generationWarning = prepared.contextReductionNotice,
                 generationCharacterId = fullCharacter.characterId
             )
         }
@@ -1289,27 +1293,28 @@ class ChatDetailViewModel(
         (history.takeLast(6) + current).joinToString(" ") { it.content }.takeLast(4_000)
 
     /**
-     * Shared preflight for solo, scenario and co-op authorization.
-     * No provider call occurs when this check fails.
-     */
-    /**
-     * Trim only old transcript turns, preserving all authored system context,
-     * the most recent turns, image attachments and director instructions.
-     * The returned messages are used both for generation and co-op hashing.
+     * One shared, offline preflight for Solo, Group, Scenario and co-op.
+     * Rebuild optional generated continuity sections, NEVER delete substrings
+     * from potentially user-authored system or World content. The final
+     * returned messages are also used in the co-op context fingerprint.
      */
     private fun fitPromptBudget(
-        messages: List<com.example.domain.provider.RoleplayMessage>,
-        modelId: String
-    ): List<com.example.domain.provider.RoleplayMessage>? {
-        val result = com.example.domain.compiler.PromptHistoryTrimmer.fit(
-            messages = messages,
-            modelContextWindowTokens = modelProvider.cachedContextLength(modelId)
+        modelId: String,
+        available: PromptOptionalContextChoices,
+        compile: (PromptOptionalContextChoices) -> List<RoleplayMessage>
+    ): PromptOptionalContextFit? {
+        val result = PromptOptionalContextFitter.fit(
+            available = available,
+            modelContextWindowTokens = modelProvider.cachedContextLength(modelId),
+            compile = compile
         )
-        if (result.decision.allowed) return result.messages
+        if (result.decision.allowed) return result
         updateSuccessState {
             it.copy(generationError =
                 "Context exceeds the safe input budget (estimated ${result.decision.estimatedInputTokens} tokens; " +
-                "limit ${result.decision.inputCeilingTokens}). Reduce active lore or context before retrying. No API request was sent.")
+                "limit ${result.decision.inputCeilingTokens}), even after excluding optional generated " +
+                "memories, summaries and old turns. Reduce authored lore or context before retrying. " +
+                "No API request was sent.")
         }
         return null
     }
@@ -1358,9 +1363,15 @@ class ChatDetailViewModel(
         val worldContext = scenarioRepository?.worldContextForChat(chatId)
         val scenarioDefinition = com.example.data.model.ScenarioCodec.decode(session.definitionJson)
         val scenarioCompiler = com.example.domain.compiler.ScenarioContextCompiler()
-        fun compileWithMemories(story: List<StoryMemoryRecord>) = scenarioCompiler.compile(
+        fun compileWithMemories(
+            story: List<StoryMemoryRecord>,
+            includeLegacy: Boolean = true,
+            includeSummary: Boolean = true
+        ) = scenarioCompiler.compile(
             scenarioDefinition, persona, settings, history, current,
-            summary = summary, memories = legacyMemories, lore = activeLore,
+            summary = if (includeSummary) summary else null,
+            memories = if (includeLegacy) legacyMemories else emptyList(),
+            lore = activeLore,
             continuation = continuation, worldContext = worldContext,
             storyMemories = story
         )
@@ -1368,14 +1379,37 @@ class ChatDetailViewModel(
         val allowedStoryMemories = StoryMemoryPromptBudget.select(
             baseline, selectedStoryMemories, modelProvider.cachedContextLength(modelId)
         ).selected
-        val messages = (if (allowedStoryMemories.isEmpty()) baseline
-            else compileWithMemories(allowedStoryMemories)).map {
-            if (it.sourceMessageId == source?.messageId && images.isNotEmpty()) it.copy(images = images) else it
-        }
-        val budgetedMessages = fitPromptBudget(messages, modelId) ?: return null
-        return PreparedGeneration(ResponseSpeaker("narrator:$chatId", "Narrator", SpeakerType.NARRATOR), budgetedMessages,
-            GenerationOptions(modelId = modelId, routing = ModelRouting.fromSettings(settings.providerRoutingMode, settings.providerEndpoint),
-                temperature = settings.temperature, topP = settings.topP, maxTokens = null), activePersonaId = personaId)
+        val fitted = fitPromptBudget(
+            modelId = modelId,
+            available = PromptOptionalContextChoices(
+                includeLegacyMemories = legacyMemories.isNotEmpty(),
+                includeStoryMemories = allowedStoryMemories.isNotEmpty(),
+                includeSummary = !summary.isNullOrBlank()
+            )
+        ) { choices ->
+            compileWithMemories(
+                if (choices.includeStoryMemories) allowedStoryMemories else emptyList(),
+                includeLegacy = choices.includeLegacyMemories,
+                includeSummary = choices.includeSummary
+            ).map {
+                if (it.sourceMessageId == source?.messageId && images.isNotEmpty()) {
+                    it.copy(images = images)
+                } else it
+            }
+        } ?: return null
+        return PreparedGeneration(
+            ResponseSpeaker("narrator:$chatId", "Narrator", SpeakerType.NARRATOR),
+            fitted.messages,
+            GenerationOptions(
+                modelId = modelId,
+                routing = ModelRouting.fromSettings(
+                    settings.providerRoutingMode, settings.providerEndpoint
+                ),
+                temperature = settings.temperature, topP = settings.topP, maxTokens = null
+            ),
+            activePersonaId = personaId,
+            contextReductionNotice = fitted.countsOnlyNotice()
+        )
     }
 
     private suspend fun prepareGeneration(
@@ -1518,7 +1552,11 @@ class ChatDetailViewModel(
         // Solo and Group episodes share their World's approved setting and continuity
         // just as Scenario episodes do. This is a local Room read, not another model call.
         val activeWorldContext = scenarioRepository?.worldContextForChat(chatId)
-        fun compileWithMemories(story: List<StoryMemoryRecord>) =
+        fun compileWithMemories(
+            story: List<StoryMemoryRecord>,
+            includeLegacy: Boolean = true,
+            includeSummary: Boolean = true
+        ) =
             if (summary.chat.chatType == ChatType.GROUP) {
             val state = _uiState.value as? ChatUiState.Success
             val activeCharacterNames = state?.groupCharacters
@@ -1537,9 +1575,9 @@ class ChatDetailViewModel(
                 customMin = settings.customMin,
                 customTargetMax = settings.customTargetMax,
                 customHardMax = settings.customHardMax,
-                durableMemories = durableMemories,
+                durableMemories = if (includeLegacy) durableMemories else emptyList(),
                 storyMemories = story,
-                rollingSummary = rollingSummary,
+                rollingSummary = if (includeSummary) rollingSummary else null,
                 activeLore = activeLore,
                 worldContext = activeWorldContext,
                 supportingCastContext = supportingCast,
@@ -1558,9 +1596,9 @@ class ChatDetailViewModel(
                 customMin = settings.customMin,
                 customTargetMax = settings.customTargetMax,
                 customHardMax = settings.customHardMax,
-                durableMemories = durableMemories,
+                durableMemories = if (includeLegacy) durableMemories else emptyList(),
                 storyMemories = story,
-                rollingSummary = rollingSummary,
+                rollingSummary = if (includeSummary) rollingSummary else null,
                 activeLore = activeLore,
                 worldContext = activeWorldContext,
                 supportingCastContext = supportingCast,
@@ -1579,9 +1617,6 @@ class ChatDetailViewModel(
         val allowedStoryMemories = StoryMemoryPromptBudget.select(
             baseline, selectedStoryMemories, modelProvider.cachedContextLength(modelId)
         ).selected
-        val contextMessages = if (allowedStoryMemories.isEmpty()) baseline
-            else compileWithMemories(allowedStoryMemories)
-
         val imageSourceMessage = relevantPersonaMessage?.takeIf { !isContinuation && activeCoopRoom == null }
         val currentImages = imageSourceMessage?.let { source ->
             messageAttachmentRepository?.providerImagesForMessage(source.messageId).orEmpty()
@@ -1605,9 +1640,25 @@ class ChatDetailViewModel(
                 true -> Unit
             }
         }
-        val providerMessages = if (currentImages.isEmpty()) contextMessages else contextMessages.map { message ->
-            if (message.sourceMessageId == imageSourceMessage?.messageId) message.copy(images = currentImages) else message
-        }
+        val fitted = fitPromptBudget(
+            modelId = modelId,
+            available = PromptOptionalContextChoices(
+                includeLegacyMemories = durableMemories.isNotEmpty(),
+                includeStoryMemories = allowedStoryMemories.isNotEmpty(),
+                includeSummary = !rollingSummary.isNullOrBlank()
+            )
+        ) { choices ->
+            val context = compileWithMemories(
+                if (choices.includeStoryMemories) allowedStoryMemories else emptyList(),
+                includeLegacy = choices.includeLegacyMemories,
+                includeSummary = choices.includeSummary
+            )
+            if (currentImages.isEmpty()) context else context.map { message ->
+                if (message.sourceMessageId == imageSourceMessage?.messageId) {
+                    message.copy(images = currentImages)
+                } else message
+            }
+        } ?: return null
 
         val routing = ModelRouting.fromSettings(settings.providerRoutingMode, settings.providerEndpoint)
 
@@ -1620,16 +1671,16 @@ class ChatDetailViewModel(
             // small completion-token cap can exhaust the budget on reasoning before visible text.
             maxTokens = null
         )
-        val budgetedMessages = fitPromptBudget(providerMessages, modelId) ?: return null
         return PreparedGeneration(
             character = ResponseSpeaker(fullCharacter.characterId, fullCharacter.displayName),
-            messages = budgetedMessages,
+            messages = fitted.messages,
             options = options,
             npcBankEnabled = npcBankEnabled,
             activePersonaId = fullPersona.personaId,
             ensembleNarrationEnabled = ensembleNarrationEnabled,
             knownNpcSpeakers = knownNpcSpeakers,
-            coLeadRebalanceActive = coLeadRebalanceActive
+            coLeadRebalanceActive = coLeadRebalanceActive,
+            contextReductionNotice = fitted.countsOnlyNotice()
         )
     }
 
