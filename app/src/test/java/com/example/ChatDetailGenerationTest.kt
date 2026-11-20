@@ -2373,10 +2373,25 @@ class ChatDetailGenerationTest {
                 dataCoordinator = dataCoordinator
             )
         }
-        withTimeout(15_000) {
-            viewModel.uiState.first { it is ChatUiState.Success && it.groupParticipantsLoaded }
+        // The roster and transcript hydrate through separate Room flows.
+        // Group readiness alone does not authorize Update Memory Now:
+        // beginInChatTool deliberately rejects the action until historyLoaded.
+        withTimeout(30_000) {
+            viewModel.uiState.first {
+                it is ChatUiState.Success && it.groupParticipantsLoaded &&
+                    it.historyLoaded && it.groupCharacters.any { participant ->
+                        participant.isActive && participant.character.characterId == "character-2"
+                    } && it.messages.any { message ->
+                        message.speakerType == SpeakerType.PERSONA &&
+                            message.content == "I prefer mint tea."
+                    }
+            }
         }
         viewModel.selectGroupCharacter("character-2")
+        assertEquals(
+            "character-2",
+            (viewModel.uiState.value as ChatUiState.Success).selectedGroupCharacterId
+        )
         viewModel.updateMemoryNow()
         val firstStatus = withTimeout(15_000) {
             viewModel.uiState.first {
