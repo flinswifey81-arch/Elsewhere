@@ -7,6 +7,7 @@ import androidx.test.core.app.ApplicationProvider
 import com.example.data.AppDatabase
 import com.example.data.model.*
 import com.example.domain.compiler.ContextBudgetProbe
+import com.example.domain.compiler.ContextBudgetBucket
 import com.example.domain.compiler.ContextCompilerV1
 import com.example.domain.compiler.PromptOptionalContextChoices
 import com.example.domain.compiler.PromptOptionalContextFitter
@@ -185,6 +186,10 @@ class MemoryV2RoomScaleBenchmarkTest {
             assertFalse(finalFit.messages.first().content.contains("Generated journey recap."))
             assertTrue(finalFit.messages.any { it.sourceMessageId == current.messageId })
             val finalUsage = ContextBudgetProbe.measure(finalFit.messages)
+            assertTrue(
+                "Approved Scenario Story Memory not attributed to MEMORY at $total",
+                finalUsage.utf8BytesByBucket.getValue(ContextBudgetBucket.MEMORY) > 0
+            )
             val hypotheticalTextUsd =
                 requireNotNull(finalUsage.approximateTextInputUsd(2.5))
             assertTrue(hypotheticalTextUsd > 0)
@@ -269,6 +274,11 @@ class MemoryV2RoomScaleBenchmarkTest {
                 worldContext = "WORLD_RULES_ARE_PROTECTED"
             )
             for (allowed in listOf(soloPrompt, rowanGroupPrompt)) {
+                assertTrue(
+                    "Approved Character Story Memory not attributed to MEMORY at $total",
+                    ContextBudgetProbe.measure(allowed)
+                        .utf8BytesByBucket.getValue(ContextBudgetBucket.MEMORY) > 0
+                )
                 val text = allowed.first().content
                 assertTrue("Private belief missing at $total", text.contains(secretMarker))
                 assertTrue(text.contains("CHARACTER_BELIEF_UNCONFIRMED"))
