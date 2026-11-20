@@ -107,6 +107,47 @@ class ContextBudgetProbeTest {
     }
 
     @Test
+    fun newApprovedStoryMemorySectionsAreMeasuredAsMemoryNotAuthoredCore() {
+        val soloMemory = "ROWAN_SUBJECTIVE_BELIEF"
+        val scenarioMemory = "SCENARIO_APPROVED_CONTINUITY"
+        val samples = listOf(
+            RoleplayMessage(Role.SYSTEM, """
+                Never control the player.
+                --- CHARACTER: Rowan ---
+                User-authored canon remains protected.
+                --- RELEVANT CHAT STORY MEMORY (RECIPIENT APPROVED) ---
+                $soloMemory
+                --- ROLLING CONVERSATION SUMMARY ---
+                Synthetic recap.
+            """.trimIndent()),
+            RoleplayMessage(Role.SYSTEM, """
+                Narrator guidance.
+                --- APPROVED LOCAL STORY MEMORY (NARRATOR CONTINUITY, NOT UNIVERSAL NPC KNOWLEDGE) ---
+                $scenarioMemory
+                --- PLAYER PERSONA (controlled only by the player) ---
+                Mara.
+            """.trimIndent())
+        )
+        for ((i, sample) in samples.withIndex()) {
+            val measured = ContextBudgetProbe.measure(listOf(sample))
+            val marker = if (i == 0) soloMemory else scenarioMemory
+            assertTrue(
+                "Approved story memory bytes went to CORE instead of MEMORY",
+                measured.utf8BytesByBucket.getValue(ContextBudgetBucket.MEMORY) >=
+                    marker.toByteArray(Charsets.UTF_8).size
+            )
+            assertTrue(measured.utf8BytesByBucket.getValue(ContextBudgetBucket.CORE) > 0)
+            assertTrue(measured.utf8BytesByBucket.getValue(ContextBudgetBucket.PERSONA) > 0 ||
+                measured.utf8BytesByBucket.getValue(ContextBudgetBucket.CHARACTER) > 0)
+            assertFalse(measured.countsOnlyDebugLine().contains(marker))
+            assertEquals(
+                sample.content.toByteArray(Charsets.UTF_8).size.toLong(),
+                measured.inputUtf8Bytes
+            )
+        }
+    }
+
+    @Test
     fun unicodeIsCountedAsUtf8AndImagesAreNotClaimedAsPricedTokens() {
         val messages = listOf(RoleplayMessage(Role.USER, "한글 🌙", sourceMessageId = "unicode"))
         val sample = ContextBudgetProbe.measure(messages)
