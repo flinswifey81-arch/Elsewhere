@@ -7,7 +7,10 @@ import androidx.test.core.app.ApplicationProvider
 import com.example.data.AppDatabase
 import com.example.data.model.*
 import com.example.domain.compiler.ContextBudgetProbe
+import com.example.domain.compiler.PromptOptionalContextChoices
+import com.example.domain.compiler.PromptOptionalContextFitter
 import com.example.domain.compiler.PromptHistoryTrimmer
+import com.example.domain.memory.StoryCharacterPerspective
 import com.example.domain.compiler.ScenarioContextCompiler
 import com.example.domain.memory.StoryActorKind
 import com.example.domain.memory.StoryActorRef
@@ -142,6 +145,137 @@ class MemoryV2RoomScaleBenchmarkTest {
             assertFalse(flattened.contains("DISCARDED_VARIANT_SECRET"))
             assertFalse(flattened.contains("Silver compass hidden private memo"))
             assertFalse(flattened.contains("Silver compass pending review memo"))
+
+            // Final request budget (not just a standalone size estimate).
+            // Deliberately crowd it with generated, lower-priority summary
+            // and assert that reviewed source-linked events survive.
+            val enormousSummary = "Generated journey recap. ".repeat(700)
+            val budgetOptions = PromptOptionalContextChoices(
+                includeLegacyMemories = false,
+                includeStoryMemories = true,
+                includeSummary = true
+            )
+            val finalFit = PromptOptionalContextFitter.fit(
+                available = budgetOptions, modelContextWindowTokens = 8_192
+            ) { choices ->
+                compiler.compile(
+                    scenario, persona, settings, history, current,
+                    worldContext = "AUTHORED_WORLD_ROUTE_STAYS",
+                    summary = if (choices.includeSummary) enormousSummary else null,
+                    storyMemories = if (choices.includeStoryMemories) warm.selected else emptyList()
+                )
+            }
+            assertTrue("Full prompt fits at $total", finalFit.decision.allowed)
+            assertTrue("Generated summary gave way at $total", finalFit.summaryOmitted)
+            assertFalse("Approved memory was dropped at $total", finalFit.storyMemoriesOmitted)
+            assertTrue(finalFit.messages.first().content.contains("AUTHORED_WORLD_ROUTE_STAYS"))
+            assertTrue(finalFit.messages.first().content.contains("Silver compass waypoint 17"))
+            assertFalse(finalFit.messages.first().content.contains("Generated journey recap."))
+            assertTrue(finalFit.messages.any { it.sourceMessageId == current.messageId })
+            val finalUsage = ContextBudgetProbe.measure(finalFit.messages)
+            val hypotheticalTextUsd = finalUsage.approximateTextInputUsd(2.5)
+            assertNotNull(hypotheticalTextUsd)
+            assertTrue(hypotheticalTextUsd!! > 0)
+            // This is a synthetic rate, NOT an OpenRouter model quote/bill.
+            assertEquals(
+                finalUsage.approximateInputTokens * 2.5 / 1_000_000.0,
+                hypotheticalTextUsd, 0.00000001
+            )
+
+            // New character-level knowledge assertions reuse the SAME 10k
+            // archive. A CHARACTER_ONLY secret must never bleed into the
+            // narrator or another participant's prompt.
+            database.chatDao().insertChatParticipant(
+                ChatParticipantEntity(chatId = chatId, characterId = "rowan")
+            )
+            database.chatDao().insertChatParticipant(
+                ChatParticipantEntity(chatId = chatId, characterId = "selene")
+            )
+            val secretMarker = "ROWAN_PRIVATE_COMPASS_$total"
+            val privateMemory = repository.saveManual(
+                chatId,
+                "Silver compass waypoint: $secretMarker is Rowan's private theory."
+            )
+            repository.setCharacterKnowledge(chatId, privateMemory.memoryId, setOf("rowan"))
+            repository.recordCharacterPerspective(
+                chatId, privateMemory.memoryId, "rowan",
+                StoryCharacterPerspective.BELIEVES,
+                note = "PRIVATE_PLAYER_NOTE_NEVER_SEND"
+            )
+            val rowan = StoryActorRef(StoryActorKind.CHARACTER, "rowan")
+            val selene = StoryActorRef(StoryActorKind.CHARACTER, "selene")
+            val rowanRead = repository.retrieveForGeneration(
+                chatId, rowan, "silver compass waypoint"
+            )
+            val seleneRead = repository.retrieveForGeneration(
+                chatId, selene, "silver compass waypoint"
+            )
+            val narratorRead = repository.retrieveForGeneration(
+                chatId, narrator, "silver compass waypoint"
+            )
+            assertEquals(1, rowanRead.selected.count { it.memoryId == privateMemory.memoryId })
+            val rowanFact = rowanRead.selected.single { it.memoryId == privateMemory.memoryId }
+            assertTrue(rowanFact.content.contains("Character belief"))
+            assertTrue(rowanFact.content.contains(secretMarker))
+            assertFalse(rowanFact.content.contains("PRIVATE_PLAYER_NOTE_NEVER_SEND"))
+            assertFalse(seleneRead.selected.any { it.memoryId == privateMemory.memoryId })
+            assertFalse(narratorRead.selected.any { it.memoryId == privateMemory.memoryId })
+            assertEquals(
+                StoryMemoryExclusion.NOT_KNOWN_TO_RECIPIENT,
+                StoryMemoryExclusion.NOT_KNOWN_TO_RECIPIENT.takeIf {
+                    seleneRead.excludedCounts[it] ?: 0 > 0
+                }
+            )
+            // Editing the underlying fact invalidates old in-story stance;
+            // an old grant never authorizes a changed belief implicitly.
+            repository.update(
+                chatId, privateMemory.memoryId,
+                text = "Silver compass waypoint: $secretMarker was disproven."
+            )
+            assertFalse(repository.retrieveForGeneration(
+                chatId, rowan, "silver compass waypoint"
+            ).selected.any { it.memoryId == privateMemory.memoryId })
+
+            // A regeneration switch renders the originally selected source
+            // ineligible without deleting historical memory rows.
+            val primary = history[28]
+            val alternate = primary.copy(
+                messageId = "discarded-$total",
+                content = "DISCARDED_VARIANT_SECRET",
+                isPrimaryVariant = true
+            )
+            database.withTransaction {
+                database.messageDao().updateMessage(primary.copy(isPrimaryVariant = false))
+                database.messageDao().updateMessage(alternate)
+            }
+            val afterVariantSwitch = repository.retrieveForGeneration(
+                chatId, narrator, "silver compass waypoint"
+            )
+            assertFalse(afterVariantSwitch.selected.any { it.memoryId == saved[1].memoryId })
+            assertTrue(
+                "Exact variant gate at $total",
+                (afterVariantSwitch.excludedCounts[StoryMemoryExclusion.SOURCE_NOT_SELECTED] ?: 0) > 0
+            )
+
+            // The old archive remains stored, but the new Wack boundary is a
+            // hard eligibility gate until one record is explicitly restored.
+            val boundary = total.toLong() - 5L
+            database.chatDao().setContextResetBoundary(chatId, boundary, boundary)
+            val afterWack = repository.retrieveForGeneration(
+                chatId, narrator, "silver compass waypoint"
+            )
+            assertFalse(afterWack.selected.any { it.memoryId == saved.first().memoryId })
+            assertTrue(
+                "Wack blocked pre-boundary records at $total",
+                (afterWack.excludedCounts[StoryMemoryExclusion.WACK_BOUNDARY] ?: 0) >= 5
+            )
+            repository.restoreAcrossWack(chatId, saved.first().memoryId)
+            val afterOneRestore = repository.retrieveForGeneration(
+                chatId, narrator, "silver compass waypoint"
+            )
+            assertTrue(afterOneRestore.selected.any { it.memoryId == saved.first().memoryId })
+            assertFalse(afterOneRestore.selected.any { it.memoryId == saved[2].memoryId })
+
             val usage = ContextBudgetProbe.measure(prompt)
             promptBytes += usage.inputUtf8Bytes
             println(
@@ -150,7 +284,12 @@ class MemoryV2RoomScaleBenchmarkTest {
                     "retrievalMedianMs=${medianMs(readTimes)} " +
                     "prepareAndPreflightMedianMs=${medianMs(prepareTimes)} " +
                     "promptMessages=${prompt.size} promptBytes=${usage.inputUtf8Bytes} " +
-                    "approxInputTokens=${usage.approximateInputTokens}"
+                    "approxInputTokens=${usage.approximateInputTokens} " +
+                    "safeFinalInputTokens=${finalFit.decision.estimatedInputTokens} " +
+                    "safeInputCeiling=${finalFit.decision.inputCeilingTokens} " +
+                    "finalPromptBytes=${finalUsage.inputUtf8Bytes} " +
+                    "hypotheticalTextUsdAt2Point5PerMillion=${hypotheticalTextUsd} " +
+                    "privateRecipients=1 variantInvalidation=true wackRestoreOne=true"
             )
         }
         assertTrue("Prompt scaled with the archive: $promptBytes",
