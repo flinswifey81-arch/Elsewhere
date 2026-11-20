@@ -5,12 +5,25 @@ on:
     branches:
       - main
     paths:
+      # APK output can change from app source, resources, version catalogs,
+      # build logic, or manifests—not just the one Gradle module file.
+      - 'app/src/main/**'
       - 'app/build.gradle.kts'
-      - 'app/src/main/AndroidManifest.xml'
+      - 'build.gradle.kts'
+      - 'settings.gradle.kts'
+      - 'gradle.properties'
+      - 'gradle/**'
+      - 'buildSrc/**'
       - 'qa/apk-identity/**'
       - 'docs/APK_SIGNING_PACKAGE_IDENTITY_RELEASE_GATE_2026-11-20.md'
       - '.github/workflows/apk-identity-safety.yml'
   workflow_dispatch:
+
+# Only the newest APK safety result for this draft PR can count; do not
+# exhaust runner capacity proving obsolete heads.
+concurrency:
+  group: apk-identity-safety-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -141,6 +154,10 @@ jobs:
           assert identities[0].version_name == INSTALLED_V15_VERSION_NAME
           assert identities[0].package == identities[1].package
           assert identities[0].signer_sha256 == identities[1].signer_sha256
+          if identities[1].version_code <= identities[0].version_code:
+              print('PRODUCTION_VERSION_NOT_ADVANCED: candidate versionCode is not greater than 1.5.2; cannot update installed app')
+          else:
+              print('QA_VERSION_ADVANCED: candidate versionCode is higher; actual production signer and device compatibility still unverified')
           print('TWO_REAL_APK_QA_IDENTITY_PASS: frozen v1.5.2 and draft candidate packages and throwaway signer match')
           print('NOT_A_PRODUCTION_UPGRADE: the shared signer is deliberately NOT the installed production signer')
           PY
