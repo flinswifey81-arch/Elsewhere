@@ -38,6 +38,28 @@ The current development Gradle configuration still advertises **`versionCode=3`,
 
 For a signed **Elsewhere Test upgrade**, `--mode test-update` additionally requires the *actual installed Test signer fingerprint* via `--expected-test-signer` and its installed code via `--installed-test-code`. If they are unknown, the tool refuses to promise the Test APK can update the installed copy. The sandbox isolation check does **not** substitute for Test-update compatibility.
 
+## Read-only installed v1.5.2 identity confirmation (owner-controlled, not yet performed)
+
+The historical certificate fingerprint above is **source-workflow evidence**, not evidence from the phone. The verifier now supports `--mode installed-baseline` to check an APK copied locally from the **existing installed production package**, without signing or installing anything. It checks the actual APK's valid v2/v3 signature, original package ID, version code 3/name 1.5.2, non-debuggable flag, and the pinned historical certificate. It **fails closed** on any mismatch; do not automatically change the fingerprint or version expectations to make it pass.
+
+When the owner is ready and has a private backup, the release operator may perform this **locally**, with the owner's knowledge, using installed Android platform tools:
+
+```sh
+adb devices
+adb shell pm path com.aistudio.elsewhere.abwzy.v15
+# Copy the exact path to BASE.APK from the output above. No uninstall or install.
+adb pull "/path/from/pm/output/base.apk" "./installed-elsewhere-v15-base.apk"
+python3 qa/apk-identity/verify_apk_identity.py \
+  --apk "./installed-elsewhere-v15-base.apk" \
+  --aapt "$ANDROID_HOME/build-tools/36.0.0/aapt" \
+  --apksigner "$ANDROID_HOME/build-tools/36.0.0/apksigner" \
+  --mode installed-baseline
+```
+
+These commands are an **operator recipe, not a request to run them now**. The `adb pull` path is an example placeholder, not an actual path on the user's phone. Device authorization and Android SDK paths differ by computer. `pm path` may list both base and split APKs; the base APK is adequate to inspect signing/package identity, and native library packaging is deliberately **not** checked in this mode because native libraries may live in separate splits. If the base APK is inaccessible, stop; do not root the device, uninstall anything, clear data, or substitute a different file.
+
+Do not attach the APK to a chat, ticket, public Actions log, GitHub PR, or artifact. Inspect only on the owner's own computer, share only the non-secret verification result if desired, and delete the temporary local copy afterward. The tool does **not** retrieve a production signing key or access chat/backup data. A matching identity makes further evaluation possible; it still does not prove data migration, installation success, or recoverability.
+
 ## What this cannot prove
 
 The QA signer cannot establish that the production key is available, matches the user's real installed certificate, or that any given candidate has the correct certificate lineage. The read-only APK test does not exercise Android PackageManager's update transaction, file/data retention, device ABI, user permissions, attached image storage, recovery after installation failure, or the user's real v15 encrypted backups.
