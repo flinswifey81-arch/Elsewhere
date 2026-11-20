@@ -83,6 +83,29 @@ class IdentityGateTests(unittest.TestCase):
         self.assertIn("INSTALLED_V15_BASELINE_MATCH", output.getvalue())
         self.assertIn("nativeLibs=not-checked", output.getvalue())
 
+    def test_debug_identity_does_not_enforce_release_native_packaging(self):
+        # Debug APKs can contain uncompressed .so files. The identity test
+        # must not mistake normal debug packaging for an unsafe release.
+        from contextlib import redirect_stdout
+        from io import StringIO
+        from verify_apk_identity import main
+        badging, signatures = report(signer=OTHER_SIGNER)
+        identity = read_identity(badging + "application-debuggable\\n", signatures)
+        output = StringIO()
+        args = ["verify_apk_identity.py", "--apk", "/unused/debug.apk",
+                "--aapt", "/unused/aapt", "--apksigner", "/unused/apksigner",
+                "--mode", "debug-isolation"]
+        with (
+            patch.object(sys, "argv", args),
+            patch("verify_apk_identity.apk_tool_identity", return_value=identity),
+            patch("verify_apk_identity.check_native_libraries",
+                  side_effect=AssertionError("debug packaging must not be tested")),
+            redirect_stdout(output),
+        ):
+            self.assertEqual(0, main())
+        self.assertIn("APK_IDENTITY_PASS mode=debug-isolation", output.getvalue())
+        self.assertIn("nativeLibs=not-checked", output.getvalue())
+
     def test_legacy_signer_and_higher_version_allow_candidate_identity(self):
         verify_policy(self.identity(), "production-update")
 
