@@ -127,6 +127,27 @@ def verify_policy(
             raise GateFailure("test-version-not-increased", "Testing update requires a higher versionCode")
 
 
+def verify_local_upgrade_pair(installed: ApkIdentity, candidate: ApkIdentity) -> None:
+    """Read-only gate for two actual APK identities, never source declarations.
+
+    The installed base.apk is taken locally from the owner's existing app
+    without installing, uninstalling, signing or touching the app's data.
+    Both identities must already have verified v2/v3 signatures. Pin the
+    historical signer AND compare the real two APKs; neither is sufficient
+    in isolation to approve a production update.
+    """
+    verify_policy(installed, "installed-baseline")
+    verify_policy(candidate, "production-update")
+    if candidate.package != installed.package:
+        raise GateFailure("pair-package-mismatch", "Candidate package differs from locally installed APK")
+    if candidate.signer_sha256 != installed.signer_sha256:
+        raise GateFailure("pair-signer-mismatch", "Candidate signer differs from locally installed APK")
+    if candidate.version_code <= installed.version_code:
+        raise GateFailure("pair-version-not-increased", "Candidate versionCode does not exceed locally installed APK")
+    if candidate.version_name == installed.version_name:
+        raise GateFailure("pair-version-name", "Candidate versionName has not changed")
+
+
 def check_native_libraries(apk_path: Path) -> int:
     try:
         with ZipFile(apk_path) as archive:
@@ -163,17 +184,32 @@ def main() -> int:
     parser.add_argument("--apk", required=True, type=Path)
     parser.add_argument("--aapt", required=True)
     parser.add_argument("--apksigner", required=True)
-    parser.add_argument("--mode", required=True, choices=("installed-baseline", "production-update", "sandbox-isolation", "test-update", "debug-isolation"))
+    parser.add_argument("--mode", required=True, choices=("installed-baseline", "production-update", "sandbox-isolation", "test-update", "debug-isolation", "local-upgrade-pair"))
+    parser.add_argument("--installed-apk", type=Path,
+                        help="Read-only existing base.apk from owner's device; required for local-upgrade-pair")
     parser.add_argument("--expected-test-signer")
     parser.add_argument("--installed-test-code", type=int)
     args = parser.parse_args()
     try:
-        identity = apk_tool_identity(args.apk, args.aapt, args.apksigner)
-        verify_policy(
-            identity, args.mode,
-            expected_test_signer=args.expected_test_signer,
-            installed_test_code=args.installed_test_code
-        )
+        if args.mode == "local-upgrade-pair":
+            if args.installed_apk is None:
+                raise GateFailure("missing-installed-apk",
+                                  "Local upgrade verification needs the actual installed base APK")
+            # Read the existing APK first: do not treat a valid candidate as
+            # evidence about the certificate on the user's own device.
+            installed = apk_tool_identity(args.installed_apk, args.aapt, args.apksigner)
+            identity = apk_tool_identity(args.apk, args.aapt, args.apksigner)
+            verify_local_upgrade_pair(installed, identity)
+        else:
+            if args.installed_apk is not None:
+                raise GateFailure("unexpected-installed-apk",
+                                  "--installed-apk is only valid in local-upgrade-pair mode")
+            identity = apk_tool_identity(args.apk, args.aapt, args.apksigner)
+            verify_policy(
+                identity, args.mode,
+                expected_test_signer=args.expected_test_signer,
+                installed_test_code=args.installed_test_code
+            )
         # The packaging policy is relevant to release-shaped and sandbox APKs.
         # Installed base APKs may put libs in ABI splits; debug APKs use
         # platform-default packaging and are checked only for identity/isolation.
@@ -193,6 +229,9 @@ def main() -> int:
     )
     if args.mode == "installed-baseline":
         print("INSTALLED_V15_BASELINE_MATCH: Read-only local APK identity evidence only; no installation or signing-key access.")
+    if args.mode == "local-upgrade-pair":
+        print("LOCAL_UPGRADE_APK_PAIR_PASS: installed base APK and candidate have matching historical signer/package, increased release version, and valid candidate native packaging.")
+        print("IDENTITY_ONLY_NOT_INSTALL_APPROVAL: This does not test owner's data, successful installation, backup restore, or authorize production deployment.")
     if args.mode == "sandbox-isolation":
         print("QA_SANDBOX_ONLY: This result does not validate the signer of any installed Test app.")
     return 0
