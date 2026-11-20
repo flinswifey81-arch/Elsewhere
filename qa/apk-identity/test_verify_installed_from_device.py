@@ -127,6 +127,7 @@ class InstalledReadOnlyIdentityTests(unittest.TestCase):
             "package:/data/app/../private/base.apk\n",
             "package:/data/app/one/base.apk\npackage:/data/app/two/base.apk\n",
             "package:/data/app/one/split_config.arm64.apk\n",
+            "package:/data/app/other.app/base.apk\n",
         )
         for output in invalid:
             with self.subTest(output=output):
@@ -145,6 +146,10 @@ class InstalledReadOnlyIdentityTests(unittest.TestCase):
             ("-s", SERIAL, "root"),
             ("-s", SERIAL, "shell", "run-as", PRODUCTION_PACKAGE, "cat", "databases/db"),
             ("-s", SERIAL, "push", "source", "destination"),
+            ("-s", SERIAL, "pull", "/sdcard/private/base.apk",
+             "/tmp/installed-base.apk"),
+            ("-s", SERIAL, "pull", "/data/app/other.app/base.apk",
+             "/tmp/installed-base.apk"),
             ("shell", "pm", "path", PRODUCTION_PACKAGE),
         ]
         for args in forbidden:
