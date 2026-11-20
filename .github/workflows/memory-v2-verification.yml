@@ -110,7 +110,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
-      ELSEWHERE_V15_FIXTURE_PATH: ${{ runner.temp }}/room-v15-native-qa.db
+      ELSEWHERE_V15_FIXTURE_PATH: /tmp/room-v15-native-qa.db
       ELSEWHERE_REQUIRE_V15_FIXTURE: '1'
     steps:
       - name: Check out proposed v21 changes
