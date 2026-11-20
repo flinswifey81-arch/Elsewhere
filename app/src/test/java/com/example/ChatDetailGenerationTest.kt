@@ -258,19 +258,28 @@ class ChatDetailGenerationTest {
     @Test
     fun generatedSummaryOverflowIsDroppedForThisRequestWithoutDeletingSavedData() = runBlocking {
         val provider = RecordingStreamingProvider(contextWindow = 4_096)
-        val harness = createHarness(provider, ResponseLengthProfile.NORMAL)
+        val story = StoryMemoryRepository(database, dataCoordinator)
+        val harness = createHarness(
+            provider, ResponseLengthProfile.NORMAL, storyMemoryRepository = story
+        )
+        val approved = story.saveManual(
+            harness.chatId, "PLAYER_APPROVED_SILVER_COMPASS_MEMO: silver compass stays in the lantern room."
+        )
+        story.setCharacterKnowledge(harness.chatId, approved.memoryId, setOf("character-1"))
         val savedSummary = "OLD_GENERATED_CONTEXT_TO_DROP_" + "s".repeat(12_000)
         harness.memoryRepository.upsertSummary(
             ConversationSummaryEntity(harness.chatId, savedSummary, 0L)
         )
-        harness.viewModel.onDraftChanged("I open the lantern room.")
+        harness.viewModel.onDraftChanged("I inspect the silver compass in the lantern room.")
         harness.viewModel.sendMessage()
         awaitCompletedTurn(harness.viewModel, 2) { provider.requests.size }
         assertEquals(1, provider.requests.size)
         val sent = provider.requests.single()
         assertTrue(sent.first().content.contains("You are participating in a roleplay."))
-        assertTrue(sent.last().content.contains("I open the lantern room."))
+        assertTrue(sent.last().content.contains("I inspect the silver compass in the lantern room."))
         assertFalse(sent.first().content.contains("OLD_GENERATED_CONTEXT_TO_DROP_"))
+        assertTrue("Reviewed continuity should outrank a generated summary",
+            sent.first().content.contains("PLAYER_APPROVED_SILVER_COMPASS_MEMO"))
         assertEquals(savedSummary,
             harness.memoryRepository.getSummaryOnce(harness.chatId)?.summary)
         assertTrue(com.example.domain.compiler.PromptPreflight.inspect(sent, 4_096).allowed)
