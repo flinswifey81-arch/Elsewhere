@@ -56,7 +56,7 @@ def run_adb(*args: str, timeout: int = 40) -> str:
 
 
 def validate_serial(serial: str) -> None:
-    if not re.fullmatch(r"[A-Za-z0-9_.:-]{4,128}", serial):
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{3,127}", serial):
         raise LocalInspectionError("A valid explicit ADB device serial is required")
     if serial.startswith("emulator-"):
         raise LocalInspectionError("Refusing to treat an emulator as the owner's installed app")
