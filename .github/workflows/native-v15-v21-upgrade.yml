@@ -30,12 +30,12 @@ jobs:
       - name: Check out pinned ORIGINAL Room v15 source in separate folder
         uses: actions/checkout@v4
         with:
-          ref: 5494d99e38deff9510ed2fd12ffb5776fc784986
+          ref: b2295d69877ba003e6473c8a40e1f7a514c560f7
           path: pinned-original-v15
           persist-credentials: false
       - name: Verify pinned source and generated fixture test isolation
         run: |
-          test "$(git -C pinned-original-v15 rev-parse HEAD)" = 5494d99e38deff9510ed2fd12ffb5776fc784986
+          test "$(git -C pinned-original-v15 rev-parse HEAD)" = b2295d69877ba003e6473c8a40e1f7a514c560f7
           grep -q 'const val APP_DATABASE_VERSION = 15' pinned-original-v15/app/src/main/java/com/example/data/AppDatabase.kt
           mkdir -p pinned-original-v15/app/src/test/java/com/example
           cp qa/v15-v21/FullV15RoomFixtureExportTest.kt pinned-original-v15/app/src/test/java/com/example/
