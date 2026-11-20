@@ -174,9 +174,13 @@ def main() -> int:
             expected_test_signer=args.expected_test_signer,
             installed_test_code=args.installed_test_code
         )
-        # Installed base APKs can move native libraries into ABI splits.
-        # Do not demand production-build packaging for identity-only inspection.
-        native_count = "not-checked" if args.mode == "installed-baseline" else check_native_libraries(args.apk)
+        # The packaging policy is relevant to release-shaped and sandbox APKs.
+        # Installed base APKs may put libs in ABI splits; debug APKs use
+        # platform-default packaging and are checked only for identity/isolation.
+        native_count = (
+            "not-checked" if args.mode in ("installed-baseline", "debug-isolation")
+            else check_native_libraries(args.apk)
+        )
     except GateFailure as failure:
         print(f"APK_IDENTITY_BLOCKED reason={failure.code} (no install performed)")
         return 1
