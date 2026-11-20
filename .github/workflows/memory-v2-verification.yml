@@ -61,6 +61,7 @@ jobs:
             --tests com.example.NpcSceneCastResolverTest \
             --tests com.example.domain.Stage0ContextWindowContractTest \
             --tests com.example.domain.Stage0ContextCostAndContinuityBenchmarkTest \
+            --tests com.example.domain.ContextBudgetProbeTest \
             --tests com.example.domain.memory.StoryMemoryEligibilityPolicyTest \
             --tests com.example.domain.StoryMemoryStorageTest \
             --tests com.example.StoryRelationshipStateTest \
