@@ -126,6 +126,7 @@ jobs:
               PRODUCTION_PACKAGE, PRODUCTION_V15_SIGNER,
               INSTALLED_V15_VERSION_CODE, INSTALLED_V15_VERSION_NAME,
               apk_tool_identity, check_native_libraries,
+              verify_local_upgrade_pair, GateFailure,
           )
           tools = Path(os.environ['ANDROID_HOME']) / 'build-tools' / '36.0.0'
           key = os.environ['QA_ONLY_KEYSTORE']
@@ -159,6 +160,17 @@ jobs:
           else:
               print('QA_VERSION_ADVANCED: candidate versionCode is higher; actual production signer and device compatibility still unverified')
           print('TWO_REAL_APK_QA_IDENTITY_PASS: frozen v1.5.2 and draft candidate packages and throwaway signer match')
+          # Even when two *real* QA-built APKs match each other, the paired
+          # local release gate MUST reject the throwaway signing identity.
+          try:
+              verify_local_upgrade_pair(identities[0], identities[1])
+          except GateFailure as failure:
+              assert failure.code == 'installed-signer-mismatch', (
+                  f'Unexpected paired gate rejection reason: {failure.code}'
+              )
+              print('QA_SIGNER_PAIR_REJECTED: local-upgrade-pair refuses a throwaway signer')
+          else:
+              raise AssertionError('QA-signed APK pair falsely passed as a real production update')
           print('NOT_A_PRODUCTION_UPGRADE: the shared signer is deliberately NOT the installed production signer')
           PY
 
