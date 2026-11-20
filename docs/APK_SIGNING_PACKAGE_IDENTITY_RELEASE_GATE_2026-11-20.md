@@ -19,7 +19,9 @@ The pinned fingerprint comes from `.github/workflows/build-v15-release-apk.yml`,
 
 ## Two different gates
 
-**1. CI-only identity isolation proof (runs automatically on PR changes)**
+**1. CI-only identity isolation proof (runs automatically on APK-affecting PR changes)**
+
+The trigger covers app source/resources/manifests, app and root Gradle settings, build logic, version catalogs, and the verifier itself. Only the newest in-progress run of this workflow for the PR is retained by its concurrency policy; cancelled older runs are not accepted as verification evidence. The two-APK comparison additionally labels a candidate whose versionCode is not greater than the historical version **not upgrade-ready**, even if its package ID and temporary QA signing identity match.
 
 The workflow separately checks out the **pinned historical 1.5.2 release workflow** and verifies the frozen package, version, and certificate fingerprint against that source; nobody may silently redefine the accepted signer. It builds the **pinned historical v1.5.2 production-shaped APK** and the **current draft production-shaped APK**, both using the same disposable QA signing key. It compares their actual manifest package IDs and certificate identities, checks the frozen historical version, and explicitly refuses to treat their matching throwaway signer as a valid production update. It also runs actual Android **sandbox and debug APKs** through `aapt` and `apksigner`. Sandbox must be the isolated `.test` app with a `-test` version and non-production signer. Debug uses the **same package ID as production** in the current Gradle settings, but must be both visibly debuggable and signed by a certificate **different from production**. Neither should ever be installed over the owner's live application. The workflow also verifies all native `.so` libraries are compressed for the existing release packaging policy.
 
@@ -64,6 +66,6 @@ Do not attach the APK to a chat, ticket, public Actions log, GitHub PR, or artif
 
 The QA signer cannot establish that the production key is available, matches the user's real installed certificate, or that any given candidate has the correct certificate lineage. The read-only APK test does not exercise Android PackageManager's update transaction, file/data retention, device ABI, user permissions, attached image storage, recovery after installation failure, or the user's real v15 encrypted backups.
 
-**CI verification is pending on the newest workflow commit:** the two-APK comparison is implemented but must not be described as passing until its GitHub Actions run completes. The historical source checkout is pinned at `b2295d69877ba003e6473c8a40e1f7a514c560f7`.
+**CI verification status must be checked at the current PR head:** the two-APK comparison is implemented but must not be described as passing until its GitHub Actions run completes. The historical source checkout is pinned at `b2295d69877ba003e6473c8a40e1f7a514c560f7`.
 
 **Physical-device release gate is still BLOCKED:** Obtain/confirm the historical certificate and exact package/version **locally from the existing owner-installed APK**, keep protected backups and signer credentials out of GitHub PRs, build the candidate using a verified correct signing key, compare finished APK certificates and version to original, then test an update on a **separately provisioned disposable signed QA device** with rollback and decrypted data verification. Do not install over the only production app or clear its data without explicit owner approval. No Google Play upload, installation or signing-secret access is part of this PR gate.
