@@ -117,16 +117,23 @@ jobs:
           # This real, correctly formed release APK intentionally uses the
           # runner's generated throwaway key. Reject it for the *specific*
           # reason that its signer cannot update the installed production APK.
-          python3 - "$release" "$tools/aapt" "$tools/apksigner" <<'PY'
-          import sys
+          qa_certificate="$(keytool -exportcert -keystore "$QA_ONLY_KEYSTORE" \
+            -storepass "$QA_ONLY_STORE_PASSWORD" -alias upload | \
+            openssl dgst -sha256 -r | awk '{print $1}')"
+          test "${#qa_certificate}" -eq 64
+          QA_CERT_SHA256="$qa_certificate" python3 - "$release" "$tools/aapt" "$tools/apksigner" <<'PY'
+          import os, sys
           from pathlib import Path
           sys.path.insert(0, "qa/apk-identity")
           from verify_apk_identity import (
-              PRODUCTION_PACKAGE, GateFailure, apk_tool_identity,
-              verify_policy, check_native_libraries
+              PRODUCTION_PACKAGE, PRODUCTION_V15_SIGNER, GateFailure,
+              apk_tool_identity, verify_policy, check_native_libraries
           )
           identity = apk_tool_identity(Path(sys.argv[1]), sys.argv[2], sys.argv[3])
           assert identity.package == PRODUCTION_PACKAGE, "Bad release-shaped fixture package"
+          assert identity.signer_sha256 == os.environ["QA_CERT_SHA256"], "QA APK signer differs from disposable QA keystore"
+          assert identity.signer_sha256 != PRODUCTION_V15_SIGNER, "Disposable signer collided with production"
+          print("EPHEMERAL_APK_SIGNER_VERIFIED: actual APK matches temporary QA key")
           assert check_native_libraries(Path(sys.argv[1])) > 0
           try:
               verify_policy(identity, "production-update")
