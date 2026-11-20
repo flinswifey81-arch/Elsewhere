@@ -69,7 +69,7 @@ def parse_apk_identity(badging: str, verifier: str) -> ApkIdentity:
         version_name=value("versionName"),
         signer_sha256=signers[0][1].lower(),
         modern_apk_signature=modern,
-        debuggable=bool(re.search(r"^application-debuggable\\b", badging, re.MULTILINE)),
+        debuggable=bool(re.search(r"^application-debuggable\b", badging, re.MULTILINE)),
     )
 
 
