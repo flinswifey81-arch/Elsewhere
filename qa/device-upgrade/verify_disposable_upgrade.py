@@ -136,10 +136,12 @@ def copy_device_database(serial: str, folder: Path) -> Path:
     if not original:
         raise RuntimeError("Could not read disposable emulator database")
     target.write_bytes(original)
-    for suffix in ("-wal", "-shm"):
-        data = private_read(serial, f"databases/{DATABASE}{suffix}", optional=True)
-        if data:
-            (folder / (DATABASE + suffix)).write_bytes(data)
+    # SQLite's -shm is a device-specific transient shared-memory index;
+    # copying it to a host SQLite process is neither required nor safe.
+    # The host rebuilds its own WAL index from the checkpointable -wal log.
+    wal = private_read(serial, f"databases/{DATABASE}-wal", optional=True)
+    if wal:
+        (folder / (DATABASE + "-wal")).write_bytes(wal)
     return target
 
 
@@ -150,11 +152,17 @@ def rehearsal(old: Path, new: Path, test_apk: Path, fixture: Path) -> None:
     # All steps occur on the fresh, verified emulator. No real-device adb target.
     adb(serial, "install", str(old))
     adb(serial, "shell", "run-as", PRODUCTION_PACKAGE, "mkdir", "-p", "databases", "files")
-    private_write(serial, f"databases/{DATABASE}", fixture.read_bytes())
+    # The historical full-schema database is already populated by real Room
+    # v15 in a separate checkout. Before *any* app process starts, verify that
+    # adb's binary transfer preserves the exact bytes, and establish a clean
+    # pre-upgrade database snapshot. A prior test launched the v15 app first and
+    # then sampled its WAL files independently; that snapshot was malformed.
+    fixture_bytes = fixture.read_bytes()
+    private_write(serial, f"databases/{DATABASE}", fixture_bytes)
+    echoed = private_read(serial, f"databases/{DATABASE}")
+    if echoed != fixture_bytes:
+        raise RuntimeError("Emulator database staging did not preserve the exact v15 fixture bytes")
     private_write(serial, "files/qa-upgrade-marker", SENTINEL)
-    adb(serial, "shell", "am", "start", "-W", "-n",
-        PRODUCTION_PACKAGE + "/com.example.MainActivity")
-    adb(serial, "shell", "am", "force-stop", PRODUCTION_PACKAGE)
 
     with tempfile.TemporaryDirectory(prefix="elsewhere-disposable-upgrade-") as td:
         before = Path(td) / "before"
@@ -166,6 +174,8 @@ def rehearsal(old: Path, new: Path, test_apk: Path, fixture: Path) -> None:
             raise RuntimeError("Emulator baseline is not the complete historical Room v15 database")
         if private_read(serial, "files/qa-upgrade-marker") != SENTINEL:
             raise RuntimeError("Synthetic app-private marker was not seeded")
+        print("EMULATOR_V15_STAGING_PASS: complete original Room v15 database byte-identical "
+              "after Android app-private transfer; no production/user data")
 
         # The -r transaction is the behavior this test actually exercises.
         # The candidate is debug-signed and emulator-versioned ONLY.
