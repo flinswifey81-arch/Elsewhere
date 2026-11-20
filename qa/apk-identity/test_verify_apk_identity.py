@@ -58,11 +58,17 @@ class IdentityGateTests(unittest.TestCase):
         self.assert_blocked("production-signer-mismatch",
             lambda: verify_local_upgrade_pair(original, self.identity(signer=OTHER_SIGNER)))
 
-    def test_pair_rejects_wrong_installed_version_and_debuggable_build(self):
+    def test_pair_rejects_wrong_installed_version(self):
         for old in (self.identity(code=4, name="1.5.2"),
                     self.identity(code=3, name="1.5.1")):
             self.assert_blocked("installed-version-unexpected",
                 lambda: verify_local_upgrade_pair(old, self.identity()))
+
+    def test_pair_rejects_debuggable_installed_apk(self):
+        badging, signature = report(code=3, name="1.5.2")
+        installed = read_identity(badging + "application-debuggable\n", signature)
+        self.assert_blocked("installed-debuggable",
+            lambda: verify_local_upgrade_pair(installed, self.identity()))
 
     def test_pair_rejects_unchanged_candidate_version_and_name(self):
         original = self.identity(code=3, name="1.5.2")
