@@ -64,7 +64,7 @@ class IdentityGateTests(unittest.TestCase):
     def test_installed_baseline_debuggable_is_rejected(self):
         badging, signatures = report(code=3, name="1.5.2")
         self.assert_blocked("installed-debuggable",
-            lambda: verify_policy(read_identity(badging + "application-debuggable\\n", signatures),
+            lambda: verify_policy(read_identity(badging + "application-debuggable\n", signatures),
                                   "installed-baseline"))
 
     def test_installed_baseline_does_not_require_native_libs_in_base_split(self):
@@ -75,9 +75,9 @@ class IdentityGateTests(unittest.TestCase):
         output = StringIO()
         args = ["verify_apk_identity.py", "--apk", "/unused/base.apk", "--aapt", "/unused/aapt",
                 "--apksigner", "/unused/apksigner", "--mode", "installed-baseline"]
-        with patch.object(sys, "argv", args), \\
-                patch("verify_apk_identity.apk_tool_identity", return_value=identity), \\
-                patch("verify_apk_identity.check_native_libraries", side_effect=AssertionError("must not inspect split libs")), \\
+        with patch.object(sys, "argv", args), \
+                patch("verify_apk_identity.apk_tool_identity", return_value=identity), \
+                patch("verify_apk_identity.check_native_libraries", side_effect=AssertionError("must not inspect split libs")), \
                 redirect_stdout(output):
             self.assertEqual(0, main())
         self.assertIn("INSTALLED_V15_BASELINE_MATCH", output.getvalue())
