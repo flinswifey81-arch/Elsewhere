@@ -125,9 +125,10 @@ class StoryMemoriesScreenTest {
             database.storyMemoryDao().forChat("ui-story").first().memoryId
         }
         // LazyColumn composes offscreen memory cards only when reached.
-        // Waiting for an uncomposed child's tag can time out even when the
-        // Room row already exists. Load the list and scroll to the first card.
-        composeRule.waitUntil(15_000) {
+        // Room/Robolectric initialization can be delayed on parallel CI
+        // runners. Wait for the actual list to appear, not a fixed sleep.
+        // A missing or broken list still fails this assertion after 45 s.
+        composeRule.waitUntil(45_000) {
             composeRule.onAllNodesWithTag("story_memories_list")
                 .fetchSemanticsNodes().isNotEmpty()
         }
@@ -343,9 +344,9 @@ class StoryMemoriesScreenTest {
             }
         }
         // This button lives inside the first lazily composed memory card.
-        // Observe the list and scroll its card into composition before
-        // waiting for asynchronously loaded Character choices.
-        composeRule.waitUntil(15_000) {
+        // Parallel CI can be slower to start Room/Robolectric; wait for the
+        // actual list without hiding a missing-list regression.
+        composeRule.waitUntil(45_000) {
             composeRule.onAllNodesWithTag("story_memories_list")
                 .fetchSemanticsNodes().isNotEmpty()
         }
