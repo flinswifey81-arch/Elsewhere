@@ -42,8 +42,8 @@ data class PromptOptionalContextFit(
 /**
  * Stage 2 additive recovery:
  * 1. Trim older, unprotected history using the existing shared safe preflight.
- * 2. On overflow, rebuild without legacy generated memory, then optional
- *    retrieved story memories, then generated summary.
+ * 2. On overflow, rebuild without legacy generated memory, then generated
+ *    summary, then approved retrieved story memories as a last resort.
  * 3. If authored/system/recent context still cannot fit, fail closed BEFORE
  *    any provider request. Do not truncate source text or canon.
  *
@@ -85,9 +85,9 @@ object PromptOptionalContextFitter {
             choices = when {
                 choices.includeLegacyMemories ->
                     choices.copy(includeLegacyMemories = false)
-                choices.includeStoryMemories ->
-                    choices.copy(includeStoryMemories = false)
-                else -> choices.copy(includeSummary = false)
+                choices.includeSummary ->
+                    choices.copy(includeSummary = false)
+                else -> choices.copy(includeStoryMemories = false)
             }
         }
     }
