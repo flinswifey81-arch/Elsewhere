@@ -24,18 +24,29 @@ class LocalInspectionError(ValueError):
     pass
 
 
+def is_installed_base_path(path: str) -> bool:
+    """Accept one installed package base.apk, never a private database or cache."""
+    return (len(path) <= 2048
+            and path.endswith("/base.apk")
+            and (path.startswith("/data/app/") or path.startswith("/mnt/expand/"))
+            and PRODUCTION_PACKAGE in path
+            and ".." not in path.split("/")
+            and all(32 <= ord(character) < 127 for character in path))
+
+
 def run_adb(*args: str, timeout: int = 40) -> str:
-    """ADB commands used here may only read device metadata or copy base.apk."""
-    if args[0] not in ("devices", "-s"):
-        raise LocalInspectionError("Unexpected local ADB command")
-    if args[0] == "devices" and args != ("devices",):
-        raise LocalInspectionError("Unexpected ADB device enumeration arguments")
-    if args[0] == "-s":
-        if len(args) < 4 or args[2:] not in (
+    """Command allowlist: devices, two read-only shell queries, one base.apk pull."""
+    allowed = args == ("devices",)
+    if len(args) >= 4 and args[0] == "-s":
+        allowed = allowed or args[2:] in (
             ("shell", "getprop", "ro.kernel.qemu"),
             ("shell", "pm", "path", PRODUCTION_PACKAGE),
-        ) and not (len(args) == 5 and args[2] == "pull"):
-            raise LocalInspectionError("ADB command is not allowed by read-only verifier")
+        )
+        if len(args) == 5 and args[2] == "pull":
+            allowed = allowed or (is_installed_base_path(args[3])
+                                  and Path(args[4]).name == "installed-base.apk")
+    if not allowed:
+        raise LocalInspectionError("ADB command is not allowed by read-only verifier")
     result = subprocess.run(("adb", *args), capture_output=True, text=True,
                             check=False, timeout=timeout)
     if result.returncode:
@@ -70,10 +81,7 @@ def installed_base_path(serial: str) -> str:
         if not line.startswith("package:"):
             continue
         path = line[len("package:"):].strip()
-        if (path.endswith("/base.apk")
-                and (path.startswith("/data/app/") or path.startswith("/mnt/expand/"))
-                and ".." not in path.split("/")
-                and "\x00" not in path):
+        if is_installed_base_path(path):
             candidates.append(path)
     if len(candidates) != 1:
         raise LocalInspectionError("Expected exactly one installed Elsewhere base APK path")
