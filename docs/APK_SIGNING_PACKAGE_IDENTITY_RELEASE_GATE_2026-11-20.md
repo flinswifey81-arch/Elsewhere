@@ -77,6 +77,23 @@ The pair check validates the **installed historical APK before trusting the cand
 The result is an **identity/packaging prerequisite**, not approval to install or a proof about the owner's data, device migration, or backup recoverability. The current app Gradle still advertises **versionCode=3**, so it cannot currently pass as a production update. Do not increment production versioning, access historical signing secrets, or install anything until the real release preparation is explicitly approved.
 
 **Privacy:** keep both local APK files off GitHub, chat attachments, CI artifacts and public servers. Only the non-secret verification outcome is needed for a release review. This step never requests or modifies the production signing key.
+## Optional owner-controlled, one-command read-only installed APK preflight
+
+`qa/apk-identity/verify_installed_from_device.py` automates the **installed baseline** portion of the gate locally, without asking the owner to handle or share any APK file. It must **never** run in GitHub CI or against an unapproved device; it only runs when the owner chooses to connect and authorize their own phone through Android Debug Bridge. It is not needed to run automated CI or to continue general development.
+
+On a trusted local computer with Android platform tools, Python 3, and the Android build-tools installed, first run `adb devices` to obtain the **exact authorized phone serial**, then invoke:
+
+```sh
+python3 qa/apk-identity/verify_installed_from_device.py --serial YOUR_DEVICE_SERIAL --aapt PATH_TO_ANDROID_AAPT --apksigner PATH_TO_ANDROID_APKSIGNER
+```
+
+On Windows, `python` or `py -3` can replace `python3`, and the SDK tool paths typically end with `aapt.exe` and `apksigner.bat`. Only local tool paths and the ADB device serial are needed; **no signing key, backup file, password, RP content, or API token** is requested.
+
+The script explicitly selects the authorized serial, refuses emulators and unauthorized/offline devices, queries only `ro.kernel.qemu` and `pm path` for the historical production package, copies only the installed **base.apk** via `adb pull` to a private temporary directory, validates its verified v2/v3 APK certificate/package/version against the frozen historical v15 identity, and removes the temporary APK on success or failure. The command allowlist cannot invoke `adb install`, `adb uninstall`, `adb root`, `adb push`, app private directories, or a backup/restore. If the phone refuses ordinary APK file access, stop; **do not root, uninstall, clear storage or lower protections** to make this pass.
+
+An optional `--candidate PATH_TO_FINISHED_PRODUCTION_APK` also verifies both the real installed and real proposed APK identities and the candidate's native packaging using the same fail-closed paired gate. Neither a matching certificate nor a green local pair check is permission to install a release. Physical-device upgrade, private backup recovery, production-key availability, and the release `versionCode` increment remain separate mandatory release decisions.
+
+**Current status:** This command is implemented and testable with simulated local ADB responses, but has **not** been run against the owner's actual installed Elsewhere. The historical certificate remains unconfirmed from the phone. This is a developer-prepared procedure for later owner-controlled release verification, not a request to connect a phone now.
 ## First live CI finding
 
 An initial signing QA run on older commit `10dd197` built its APKs and passed sandbox identity isolation, but failed when the **debug** APK's native-library compression was incorrectly tested against the release policy (`native-lib-packaging`). The verifier was corrected on the draft branch to apply that packaging check only to release-shaped and sandbox builds. A dedicated regression test was added. **The corrected current-head run must pass before marking the gate verified**; the older failure is not evidence of a production APK signing mismatch.
