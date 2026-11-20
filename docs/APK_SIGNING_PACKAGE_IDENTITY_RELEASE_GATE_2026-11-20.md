@@ -62,6 +62,21 @@ These commands are an **operator recipe, not a request to run them now**. The `a
 
 Do not attach the APK to a chat, ticket, public Actions log, GitHub PR, or artifact. Inspect only on the owner's own computer, share only the non-secret verification result if desired, and delete the temporary local copy afterward. The tool does **not** retrieve a production signing key or access chat/backup data. A matching identity makes further evaluation possible; it still does not prove data migration, installation success, or recoverability.
 
+## Paired local verification of an actual installed APK and proposed release
+
+The verifier now offers **`--mode local-upgrade-pair`** as a read-only step. It inspects two actual local APK files with `aapt` and `apksigner`; it never installs, uninstalls, roots, signs, or reads app-private data. The first APK must be the **base APK extracted from the owner's current installed Elsewhere**. The second must be the **finished, correctly production-signed release candidate**, never a throwaway CI, debug, or Test APK.
+
+Run on the owner's own trusted computer only after both files actually exist:
+
+```sh
+python3 qa/apk-identity/verify_apk_identity.py --installed-apk ./installed-elsewhere-v15-base.apk --apk ./proposed-elsewhere-release.apk --aapt "$ANDROID_HOME/build-tools/36.0.0/aapt" --apksigner "$ANDROID_HOME/build-tools/36.0.0/apksigner" --mode local-upgrade-pair
+```
+
+The pair check validates the **installed historical APK before trusting the candidate**, then requires the exact production package ID, original installed version (1.5.2/code 3), non-debuggable APKs, verified historical production certificate on **both actual APKs**, a strictly higher candidate versionCode, a changed non-Test versionName, and candidate native-library packaging. A fake release APK signed with the CI throwaway key **must fail**. There is **no actual installed-APK certificate comparison result yet**.
+
+The result is an **identity/packaging prerequisite**, not approval to install or a proof about the owner's data, device migration, or backup recoverability. The current app Gradle still advertises **versionCode=3**, so it cannot currently pass as a production update. Do not increment production versioning, access historical signing secrets, or install anything until the real release preparation is explicitly approved.
+
+**Privacy:** keep both local APK files off GitHub, chat attachments, CI artifacts and public servers. Only the non-secret verification outcome is needed for a release review. This step never requests or modifies the production signing key.
 ## First live CI finding
 
 An initial signing QA run on older commit `10dd197` built its APKs and passed sandbox identity isolation, but failed when the **debug** APK's native-library compression was incorrectly tested against the release policy (`native-lib-packaging`). The verifier was corrected on the draft branch to apply that packaging check only to release-shaped and sandbox builds. A dedicated regression test was added. **The corrected current-head run must pass before marking the gate verified**; the older failure is not evidence of a production APK signing mismatch.
