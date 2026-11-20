@@ -20,7 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
-      ELSEWHERE_V15_FIXTURE_PATH: ${{ runner.temp }}/elsewhere-native-v15-synthetic.db
+      ELSEWHERE_V15_FIXTURE_PATH: /tmp/elsewhere-native-v15-synthetic.db
       ELSEWHERE_REQUIRE_V15_FIXTURE: '1'
     steps:
       - name: Check out current proposed v21 code
