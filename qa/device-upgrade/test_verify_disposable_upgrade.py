@@ -1,5 +1,7 @@
 """Offline contract tests for the disposable emulator's Base64 ADB transport."""
 import base64
+import subprocess
+import tempfile
 from pathlib import Path
 import sys
 import unittest
@@ -16,9 +18,28 @@ class DeviceTransferTests(unittest.TestCase):
             qa.private_write("emulator-5554", "databases/elsewhere_database", payload)
         command.assert_called_once_with(
             "emulator-5554", "exec-in", "run-as", qa.PRODUCTION_PACKAGE,
-            "sh", "-c", "'base64 -d > databases/elsewhere_database'",
+            "sh", "-c", "base64 -d > databases/elsewhere_database",
             input_bytes=base64.b64encode(payload),
         )
+
+    def test_actual_sh_c_decodes_binary_stdin_into_a_real_file(self):
+        # The former mock assertion *expected* the incorrect extra quoting.
+        # Execute the exact script argv locally to catch that error before CI
+        # spends time building Android APKs or starting an emulator.
+        payload = b"SQLite format 3\\x00\\xfe\\xff\\x00" + bytes(range(256))
+        with patch.object(qa, "adb") as command:
+            qa.private_write("emulator-5554", "databases/elsewhere_database", payload)
+        call = command.call_args
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "databases").mkdir()
+            result = subprocess.run(
+                ["sh", "-c", call.args[-1]], cwd=root,
+                input=call.kwargs["input_bytes"],
+                capture_output=True, check=False,
+            )
+            self.assertEqual(0, result.returncode, result.stderr.decode())
+            self.assertEqual(payload, (root / "databases/elsewhere_database").read_bytes())
 
     def test_reads_wrapped_ascii_base64_without_modifying_binary_data(self):
         payload = b"SQLite format 3\x00\xfe\xff\0\x01\n" + bytes(range(256))
