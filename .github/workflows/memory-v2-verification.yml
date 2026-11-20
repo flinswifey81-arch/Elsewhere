@@ -7,6 +7,7 @@ on:
     paths:
       - 'app/src/**'
       - 'qa/v15-v21/**'
+      - 'docs/NATIVE_V15_ENCRYPTED_BACKUP_RECOVERY_QA_2026-11-20.md'
       - '.github/workflows/memory-v2-verification.yml'
   workflow_dispatch:
 
