@@ -121,6 +121,41 @@ class IdentityGateTests(unittest.TestCase):
             package=SANDBOX_PACKAGE, name="1.6.0-test", signer=TEST_SIGNER, code=4
         ), "test-update", expected_test_signer=TEST_SIGNER, installed_test_code=3)
 
+    def test_production_debuggable_apk_is_never_an_update(self):
+        unsigned_metadata = self.identity()
+        self.assert_blocked("production-debuggable",
+            lambda: verify_policy(unsigned_metadata.__class__(
+                unsigned_metadata.package, unsigned_metadata.version_code,
+                unsigned_metadata.version_name, unsigned_metadata.signer_sha256,
+                unsigned_metadata.v2_or_v3_signed, True
+            ), "production-update"))
+
+    def test_debug_build_with_production_package_cannot_reuse_the_production_signer(self):
+        debug_identity = read_identity(
+            report(signer=OTHER_SIGNER)[0] + "application-debuggable\n",
+            report(signer=OTHER_SIGNER)[1]
+        )
+        self.assertTrue(debug_identity.debuggable)
+        verify_policy(debug_identity, "debug-isolation")
+        with_production_signer = read_identity(
+            report()[0] + "application-debuggable\n", report()[1]
+        )
+        self.assert_blocked("debug-production-signer",
+            lambda: verify_policy(with_production_signer, "debug-isolation"))
+        self.assert_blocked("production-debuggable",
+            lambda: verify_policy(with_production_signer, "production-update"))
+
+    def test_debug_isolation_requires_debuggable_and_historical_package(self):
+        self.assert_blocked("debug-flag",
+            lambda: verify_policy(self.identity(signer=OTHER_SIGNER), "debug-isolation"))
+        debug_sandbox = read_identity(
+            report(package=SANDBOX_PACKAGE, signer=OTHER_SIGNER)[0] +
+                "application-debuggable\n",
+            report(signer=OTHER_SIGNER)[1]
+        )
+        self.assert_blocked("debug-package",
+            lambda: verify_policy(debug_sandbox, "debug-isolation"))
+
     def test_multisigner_fails_closed(self):
         self.assert_blocked("signer-count",
             lambda: read_identity(*report(second_signer=TEST_SIGNER)))
