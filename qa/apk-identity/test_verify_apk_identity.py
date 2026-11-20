@@ -42,6 +42,47 @@ class IdentityGateTests(unittest.TestCase):
             operation()
         self.assertEqual(err.exception.code, code)
 
+    def test_installed_152_apk_matches_frozen_identity_only(self):
+        verify_policy(self.identity(code=3, name="1.5.2"), "installed-baseline")
+
+    def test_installed_baseline_wrong_package_is_rejected(self):
+        self.assert_blocked("installed-package-mismatch",
+            lambda: verify_policy(self.identity(package=SANDBOX_PACKAGE, code=3, name="1.5.2"),
+                                  "installed-baseline"))
+
+    def test_installed_baseline_unexpected_version_is_rejected(self):
+        for code, name in ((4, "1.5.2"), (3, "1.6.0"), (2, "1.5.1")):
+            with self.subTest(code=code, name=name):
+                self.assert_blocked("installed-version-unexpected",
+                    lambda: verify_policy(self.identity(code=code, name=name), "installed-baseline"))
+
+    def test_installed_baseline_foreign_signer_is_rejected(self):
+        self.assert_blocked("installed-signer-mismatch",
+            lambda: verify_policy(self.identity(code=3, name="1.5.2", signer=OTHER_SIGNER),
+                                  "installed-baseline"))
+
+    def test_installed_baseline_debuggable_is_rejected(self):
+        badging, signatures = report(code=3, name="1.5.2")
+        self.assert_blocked("installed-debuggable",
+            lambda: verify_policy(read_identity(badging + "application-debuggable\\n", signatures),
+                                  "installed-baseline"))
+
+    def test_installed_baseline_does_not_require_native_libs_in_base_split(self):
+        from contextlib import redirect_stdout
+        from io import StringIO
+        from verify_apk_identity import main
+        identity = self.identity(code=3, name="1.5.2")
+        output = StringIO()
+        args = ["verify_apk_identity.py", "--apk", "/unused/base.apk", "--aapt", "/unused/aapt",
+                "--apksigner", "/unused/apksigner", "--mode", "installed-baseline"]
+        with patch.object(sys, "argv", args), \\
+                patch("verify_apk_identity.apk_tool_identity", return_value=identity), \\
+                patch("verify_apk_identity.check_native_libraries", side_effect=AssertionError("must not inspect split libs")), \\
+                redirect_stdout(output):
+            self.assertEqual(0, main())
+        self.assertIn("INSTALLED_V15_BASELINE_MATCH", output.getvalue())
+        self.assertIn("nativeLibs=not-checked", output.getvalue())
+
     def test_legacy_signer_and_higher_version_allow_candidate_identity(self):
         verify_policy(self.identity(), "production-update")
 
