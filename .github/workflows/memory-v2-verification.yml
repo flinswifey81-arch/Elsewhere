@@ -111,6 +111,8 @@ jobs:
     timeout-minutes: 60
     env:
       ELSEWHERE_V15_FIXTURE_PATH: /tmp/room-v15-native-qa.db
+      ELSEWHERE_V15_ENCRYPTED_PATH: /tmp/native-v15-encrypted-synthetic.ewbak
+      ELSEWHERE_REQUIRE_V15_ENCRYPTED: '1'
       ELSEWHERE_REQUIRE_V15_FIXTURE: '1'
     steps:
       - name: Check out proposed v21 changes
@@ -141,8 +143,12 @@ jobs:
           test "$(git -C pinned-original-v15 rev-parse HEAD)" = b2295d69877ba003e6473c8a40e1f7a514c560f7
           grep -q 'const val APP_DATABASE_VERSION = 15' pinned-original-v15/app/src/main/java/com/example/data/AppDatabase.kt
           cp qa/v15-v21/FullV15RoomFixtureExportTest.kt pinned-original-v15/app/src/test/java/com/example/
-          (cd pinned-original-v15 && bash ./gradlew :app:testSandboxUnitTest --no-daemon --tests com.example.FullV15RoomFixtureExportTest)
+          cp qa/v15-v21/OriginalV15EncryptedBackupExportTest.kt pinned-original-v15/app/src/test/java/com/example/
+          (cd pinned-original-v15 && bash ./gradlew :app:testDebugUnitTest --no-daemon \
+            --tests com.example.FullV15RoomFixtureExportTest \
+            --tests com.example.OriginalV15EncryptedBackupExportTest)
           test -s "$ELSEWHERE_V15_FIXTURE_PATH"
+          test -s "$ELSEWHERE_V15_ENCRYPTED_PATH"
       - name: Reject incomplete, empty or forged-version fixtures
         run: |
           python3 - <<'PY'
@@ -161,7 +167,9 @@ jobs:
           PY
       - name: Migrate with real Room v21 and prove atomic rollback after injected failure
         run: |
-          bash ./gradlew :app:testSandboxUnitTest --no-daemon --tests com.example.FullSchemaV15ToV21MigrationTest
+          bash ./gradlew :app:testSandboxUnitTest --no-daemon \
+            --tests com.example.FullSchemaV15ToV21MigrationTest \
+            --tests com.example.domain.backup.NativeV15EncryptedRestoreAcceptanceTest
       - name: Require both full-schema acceptance cases to actually execute
         run: |
           python3 - <<'PY'
@@ -175,5 +183,16 @@ jobs:
             'interruptedMigrationRollsBackAllChangesAndCanRetryFromOriginalV15'
           }
           assert all(not any(c.findall(k) for k in ('failure','error','skipped')) for c in cases)
+          encrypted=Path('app/build/test-results/testSandboxUnitTest/TEST-com.example.domain.backup.NativeV15EncryptedRestoreAcceptanceTest.xml')
+          assert encrypted.is_file(), "Missing original-v15 encrypted-archive restore report"
+          restored=list(ET.parse(encrypted).getroot().iter('testcase'))
+          assert {c.get('name') for c in restored}=={
+            'genuineV15CiphertextInspectAndRestorePreservesHistoryAndBinaryImages',
+            'wrongPasswordTamperAndChangedAfterInspectionNeverReplaceExistingData',
+            'genuineV15EncryptedRestoreFailureAfterDatabaseReplacementRecoversExactPreviousData',
+            'genuineV15EncryptedRestoreFailureAfterProfileReplacementRecoversExactPreviousData'
+          }
+          assert all(not any(c.findall(k) for k in ('skipped','failure','error')) for c in restored)
+          print("ORIGINAL_V15_ENCRYPTED_TO_V21_RESTORE_PASS: 4 executed, 0 skipped, 0 failed; no model calls.")
           print("NATIVE_ROOM15_TO_21_UPGRADE_ROLLBACK_VERIFIED: tests=2 skipped=0 failures=0")
           PY
