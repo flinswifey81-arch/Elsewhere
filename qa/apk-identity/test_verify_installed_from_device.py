@@ -49,6 +49,19 @@ class FakeADB:
 
 
 class InstalledReadOnlyIdentityTests(unittest.TestCase):
+    def setUp(self):
+        # These are mocked device unit tests, not an actual CI-device read.
+        allow_mocked_runner = patch.dict(local.os.environ, {"GITHUB_ACTIONS": ""})
+        allow_mocked_runner.start()
+        self.addCleanup(allow_mocked_runner.stop)
+
+    def test_ci_cannot_attempt_owner_device_inspection(self):
+        with patch.dict(local.os.environ, {"GITHUB_ACTIONS": "true"}), \
+                patch.object(local, "run_adb",
+                             side_effect=AssertionError("CI must never contact ADB")):
+            with self.assertRaisesRegex(local.LocalInspectionError, "disabled in GitHub Actions"):
+                local.inspect_installed(SERIAL, "aapt", "apksigner")
+
     def test_inspection_copies_only_base_apk_and_deletes_it_after_success(self):
         adb = FakeADB()
         with patch.object(local, "run_adb", side_effect=adb), \
