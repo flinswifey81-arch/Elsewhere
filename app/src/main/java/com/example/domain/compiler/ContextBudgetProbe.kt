@@ -110,7 +110,9 @@ object ContextBudgetProbe {
             normalized.startsWith("RELEVANT SUPPORTING CAST") ||
                 normalized.startsWith("CREATOR-DEFINED NPC:") -> ContextBudgetBucket.SUPPORTING_CAST
             normalized.startsWith("DURABLE ROLEPLAY MEMORY") ||
-                normalized.startsWith("SESSION MEMORY") -> ContextBudgetBucket.MEMORY
+                normalized.startsWith("SESSION MEMORY") ||
+                normalized.startsWith("RELEVANT CHAT STORY MEMORY") ||
+                normalized.startsWith("APPROVED LOCAL STORY MEMORY") -> ContextBudgetBucket.MEMORY
             normalized.startsWith("ROLLING CONVERSATION SUMMARY") ||
                 normalized.startsWith("EARLIER SESSION SUMMARY") -> ContextBudgetBucket.SUMMARY
             normalized.startsWith("SCENARIO ") ||
