@@ -7,6 +7,7 @@ on:
     paths:
       - 'qa/v15-v21/**'
       - 'app/src/test/java/com/example/FullSchemaV15ToV21MigrationTest.kt'
+      - 'app/src/test/java/com/example/domain/backup/NativeV15EncryptedRestoreAcceptanceTest.kt'
       - 'app/src/main/java/com/example/data/**'
       - '.github/workflows/native-v15-v21-upgrade.yml'
   workflow_dispatch:
@@ -21,6 +22,8 @@ jobs:
     timeout-minutes: 60
     env:
       ELSEWHERE_V15_FIXTURE_PATH: /tmp/elsewhere-native-v15-synthetic.db
+      ELSEWHERE_V15_ENCRYPTED_PATH: /tmp/native-v15-encrypted-synthetic.ewbak
+      ELSEWHERE_REQUIRE_V15_ENCRYPTED: '1'
       ELSEWHERE_REQUIRE_V15_FIXTURE: '1'
     steps:
       - name: Check out current proposed v21 code
@@ -39,6 +42,7 @@ jobs:
           grep -q 'const val APP_DATABASE_VERSION = 15' pinned-original-v15/app/src/main/java/com/example/data/AppDatabase.kt
           mkdir -p pinned-original-v15/app/src/test/java/com/example
           cp qa/v15-v21/FullV15RoomFixtureExportTest.kt pinned-original-v15/app/src/test/java/com/example/
+          cp qa/v15-v21/OriginalV15EncryptedBackupExportTest.kt pinned-original-v15/app/src/test/java/com/example/
           echo "Using exact committed Room v15 source snapshot; fixture source is copied into ephemeral checkout only."
       - name: Set up Java 21
         uses: actions/setup-java@v4
@@ -57,9 +61,11 @@ jobs:
       - name: Build authentic native full-schema v15 SQLite database with linked synthetic records
         working-directory: pinned-original-v15
         run: |
-          bash ./gradlew :app:testSandboxUnitTest --no-daemon \
-            --tests com.example.FullV15RoomFixtureExportTest
+          bash ./gradlew :app:testDebugUnitTest --no-daemon \
+            --tests com.example.FullV15RoomFixtureExportTest \
+            --tests com.example.OriginalV15EncryptedBackupExportTest
           test -s "$ELSEWHERE_V15_FIXTURE_PATH"
+          test -s "$ELSEWHERE_V15_ENCRYPTED_PATH"
 
       - name: Verify the exact v15 schema and seeded rows without disclosing text
         run: |
@@ -89,7 +95,8 @@ jobs:
       - name: Run true v15 to v21 Room upgrade and simulated-failure rollback tests
         run: |
           bash ./gradlew :app:testSandboxUnitTest --no-daemon \
-            --tests com.example.FullSchemaV15ToV21MigrationTest
+            --tests com.example.FullSchemaV15ToV21MigrationTest \
+            --tests com.example.domain.backup.NativeV15EncryptedRestoreAcceptanceTest
 
       - name: Require both migration tests to execute without skips or failures
         run: |
@@ -107,6 +114,17 @@ jobs:
           }, names
           for test in tests:
             assert not any(test.findall(kind) for kind in ('skipped','failure','error')),test.get('name')
+          encrypted=Path('app/build/test-results/testSandboxUnitTest/TEST-com.example.domain.backup.NativeV15EncryptedRestoreAcceptanceTest.xml')
+          assert encrypted.is_file(), "Missing original-v15 encrypted-archive restore report"
+          restored=list(ET.parse(encrypted).getroot().iter('testcase'))
+          assert {c.get('name') for c in restored}=={
+            'genuineV15CiphertextInspectAndRestorePreservesHistoryAndBinaryImages',
+            'wrongPasswordTamperAndChangedAfterInspectionNeverReplaceExistingData',
+            'genuineV15EncryptedRestoreFailureAfterDatabaseReplacementRecoversExactPreviousData',
+            'genuineV15EncryptedRestoreFailureAfterProfileReplacementRecoversExactPreviousData'
+          }
+          assert all(not any(c.findall(k) for k in ('skipped','failure','error')) for c in restored)
+          print("ORIGINAL_V15_ENCRYPTED_TO_V21_RESTORE_PASS: 4 executed, 0 skipped, 0 failed; no model calls.")
           print("NATIVE_V15_TO_V21_ACCEPTANCE_PASS: 2 executed, 0 skipped, 0 failed; no model calls.")
           PY
       - name: Show failure summaries without private transcript contents
