@@ -9,6 +9,7 @@ signing, credential access, or Android backup operation is performed.
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 import re
 import subprocess
@@ -91,6 +92,10 @@ def installed_base_path(serial: str) -> str:
 def inspect_installed(serial: str, aapt: str, apksigner: str,
                       candidate: Path | None = None):
     """Read only; temporary installed APK deleted on success or failure."""
+    if os.environ.get("GITHUB_ACTIONS", "").lower() == "true":
+        raise LocalInspectionError(
+            "Owner-device inspection is disabled in GitHub Actions"
+        )
     check_selected_device(serial)
     source = installed_base_path(serial)
     if candidate is not None and (not candidate.is_file() or candidate.stat().st_size == 0):
