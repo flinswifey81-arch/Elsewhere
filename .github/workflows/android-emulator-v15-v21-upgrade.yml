@@ -51,6 +51,7 @@ jobs:
           grep -q 'const val APP_DATABASE_VERSION = 15' pinned-v15-emulator/app/src/main/java/com/example/data/AppDatabase.kt
           grep -q 'const val APP_DATABASE_VERSION = 21' app/src/main/java/com/example/data/AppDatabase.kt
           python3 -m py_compile qa/device-upgrade/verify_disposable_upgrade.py
+          python3 -m unittest discover -s qa/device-upgrade -p 'test_*.py' -v
           cp qa/v15-v21/FullV15RoomFixtureExportTest.kt pinned-v15-emulator/app/src/test/java/com/example/
 
       - name: Set up Java 21
