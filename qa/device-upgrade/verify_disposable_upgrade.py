@@ -180,6 +180,9 @@ def private_write(serial: str, relpath: str, data: bytes) -> None:
                 app_data_dir(serial)).decode("ascii", "replace").strip()
     if not re.fullmatch(r"[0-9]+:[0-9]+", owner):
         raise RuntimeError("Unexpected disposable app data owner")
+    app_uid, app_gid = (int(value) for value in owner.split(":"))
+    if app_uid < 10_000 or app_gid < 10_000:
+        raise RuntimeError("Refusing to stage app files with system/root ownership")
     adb(serial, "shell", "chown", owner, destination)
     adb(serial, "shell", "chmod", "600", destination)
     adb(serial, "shell", "restorecon", "-R",
@@ -187,7 +190,10 @@ def private_write(serial: str, relpath: str, data: bytes) -> None:
 
     expected_sha256 = hashlib.sha256(data).hexdigest()
     device_report = adb(serial, "shell", "sha256sum", destination)
-    device_sha256 = device_report.decode("ascii", "replace").strip().split()[0].lower()
+    digest_tokens = device_report.decode("ascii", "replace").strip().split()
+    if not digest_tokens or not re.fullmatch(r"[0-9a-fA-F]{64}", digest_tokens[0]):
+        raise RuntimeError("Device did not return a valid synthetic file SHA-256")
+    device_sha256 = digest_tokens[0].lower()
     if device_sha256 != expected_sha256:
         raise RuntimeError(
             "ADB push changed synthetic app-private file: "
