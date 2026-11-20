@@ -87,6 +87,20 @@ class IdentityGuardTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     evaluate(BASELINE, candidate, "qa", historical=historical)
 
+    def test_debuggable_release_and_stale_version_name_are_never_approved(self):
+        flagged = parse_apk_identity(BADGING + "application-debuggable\\n", VERIFIED)
+        self.assertTrue(flagged.debuggable)
+        with self.assertRaises(ValueError):
+            evaluate(BASELINE, flagged, "qa", historical=apk())
+        for candidate in (
+            apk(signer=PROD_SIGNER, code=4, name="1.5.2"),
+            apk(signer=PROD_SIGNER, code=4, name="1.6.0-test"),
+            ApkIdentity(PKG, 4, "1.6.0", PROD_SIGNER, True, True),
+        ):
+            with self.subTest(candidate=candidate):
+                with self.assertRaises(ValueError):
+                    evaluate(BASELINE, candidate, "production")
+
     def test_production_gate_requires_matching_signer_and_version_increment(self):
         for candidate in (apk(signer=QA_SIGNER, code=4), apk(signer=PROD_SIGNER, code=3)):
             with self.subTest(candidate=candidate):
