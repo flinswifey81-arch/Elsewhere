@@ -256,6 +256,55 @@ class ChatDetailGenerationTest {
     }
 
     @Test
+    fun generatedSummaryOverflowIsDroppedForThisRequestWithoutDeletingSavedData() = runBlocking {
+        val provider = RecordingStreamingProvider(contextWindow = 4_096)
+        val harness = createHarness(provider, ResponseLengthProfile.NORMAL)
+        val savedSummary = "OLD_GENERATED_CONTEXT_TO_DROP_" + "s".repeat(12_000)
+        harness.memoryRepository.upsertSummary(
+            ConversationSummaryEntity(harness.chatId, savedSummary, 0L)
+        )
+        harness.viewModel.onDraftChanged("I open the lantern room.")
+        harness.viewModel.sendMessage()
+        awaitCompletedTurn(harness.viewModel, 2) { provider.requests.size }
+        assertEquals(1, provider.requests.size)
+        val sent = provider.requests.single()
+        assertTrue(sent.first().content.contains("You are participating in a roleplay."))
+        assertTrue(sent.last().content.contains("I open the lantern room."))
+        assertFalse(sent.first().content.contains("OLD_GENERATED_CONTEXT_TO_DROP_"))
+        assertEquals(savedSummary,
+            harness.memoryRepository.getSummaryOnce(harness.chatId)?.summary)
+        assertTrue(com.example.domain.compiler.PromptPreflight.inspect(sent, 4_096).allowed)
+    }
+
+    @Test
+    fun oversizedAuthoredNarratorInstructionsBlockProviderEvenAfterOptionalRecovery() = runBlocking {
+        val provider = RecordingStreamingProvider(contextWindow = 2_048)
+        val harness = createHarness(
+            provider = provider,
+            responseLengthProfile = ResponseLengthProfile.NORMAL,
+            narratorEnabled = true,
+            narratorInstructions = "PLAYER_AUTHORED_INSTRUCTIONS_" + "c".repeat(3_500)
+        )
+        harness.viewModel.onDraftChanged("The storm begins.")
+        harness.viewModel.sendMessage()
+        val state = withTimeout(15_000) {
+            harness.viewModel.uiState.first {
+                it is ChatUiState.Success && it.generationError?.contains(
+                    "No API request was sent"
+                ) == true
+            }
+        } as ChatUiState.Success
+        assertTrue(state.generationError.orEmpty().contains("safe input budget"))
+        assertTrue(provider.requests.isEmpty())
+        // The user's message was saved before attempted generation; no
+        // authored instructions were truncated in storage.
+        assertTrue(harness.messageRepository.getMessagesForChatOnce(harness.chatId)
+            .any { it.content == "The storm begins." })
+        assertTrue(harness.chatRepository.getChatSettingsById(harness.chatId)
+            ?.narratorInstructions.orEmpty().contains("PLAYER_AUTHORED_INSTRUCTIONS_"))
+    }
+
+    @Test
     fun soloRetryWithLongStoredHistoryKeepsMemorySummaryAndBoundsPrompt() = runBlocking {
         val provider = SequentialResponseProvider(listOf("The compass is still safe."))
         val harness = createHarness(provider, ResponseLengthProfile.NORMAL)
@@ -2466,7 +2515,9 @@ class ChatDetailGenerationTest {
         )
     }
 
-    private class RecordingStreamingProvider : ModelProvider {
+    private class RecordingStreamingProvider(
+        private val contextWindow: Int? = null
+    ) : ModelProvider {
         lateinit var messages: List<RoleplayMessage>
         lateinit var options: GenerationOptions
         val requests = mutableListOf<List<RoleplayMessage>>()
@@ -2474,6 +2525,7 @@ class ChatDetailGenerationTest {
         override suspend fun getModels(): List<OpenRouterModel> = emptyList()
         override suspend fun getEndpoints(modelId: String): List<ProviderEndpoint> = emptyList()
         override suspend fun supportsImageInput(modelId: String): Boolean = true
+        override fun cachedContextLength(modelId: String): Int? = contextWindow
 
         override fun streamResponse(
             messages: List<RoleplayMessage>,
