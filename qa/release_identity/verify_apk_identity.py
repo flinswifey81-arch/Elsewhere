@@ -23,6 +23,7 @@ class ApkIdentity:
     version_name: str
     signer_sha256: str
     modern_apk_signature: bool
+    debuggable: bool = False
 
 
 def parse_apk_identity(badging: str, verifier: str) -> ApkIdentity:
@@ -68,6 +69,7 @@ def parse_apk_identity(badging: str, verifier: str) -> ApkIdentity:
         version_name=value("versionName"),
         signer_sha256=signers[0][1].lower(),
         modern_apk_signature=modern,
+        debuggable=bool(re.search(r"^application-debuggable\\b", badging, re.MULTILINE)),
     )
 
 
@@ -126,14 +128,16 @@ def evaluate(
     }
 
     if mode == "qa":
+        if candidate.debuggable:
+            raise ValueError("QA release candidate must not be debuggable")
         if historical is None:
             raise ValueError("QA mode requires an actual historical APK, signed with the disposable QA key")
         if historical.package != expected_package:
             raise ValueError("Historical APK package differs from version-controlled release baseline")
         if historical.version_code != expected_code or historical.version_name != expected_name:
             raise ValueError("Historical APK version differs from pinned release baseline")
-        if not historical.modern_apk_signature:
-            raise ValueError("Historical APK must have a valid modern APK signature")
+        if not historical.modern_apk_signature or historical.debuggable:
+            raise ValueError("Historical release APK must be nondebuggable with a valid modern APK signature")
         if historical.signer_sha256 != candidate.signer_sha256:
             raise ValueError("Disposable QA signing certificate drifted between v15 and candidate")
         if uses_pinned_production_signer:
@@ -150,6 +154,10 @@ def evaluate(
             ],
         })
     else:
+        if candidate.debuggable:
+            raise ValueError("Production candidate APK must not be debuggable")
+        if candidate.version_name == expected_name or candidate.version_name.endswith("-test"):
+            raise ValueError("Production candidate must use a new non-Test versionName")
         if not uses_pinned_production_signer:
             raise ValueError("Production candidate APK signer differs from pinned existing production certificate")
         if not advances_version:
