@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from verify_apk_identity import (
     ApkIdentity, GateFailure, PRODUCTION_PACKAGE, SANDBOX_PACKAGE,
     PRODUCTION_V15_SIGNER, read_identity, verify_policy, check_native_libraries,
-    apk_tool_identity,
+    apk_tool_identity, verify_local_upgrade_pair,
 )
 
 OTHER_SIGNER = "a" * 64
@@ -41,6 +41,89 @@ class IdentityGateTests(unittest.TestCase):
         with self.assertRaises(GateFailure) as err:
             operation()
         self.assertEqual(err.exception.code, code)
+
+
+    def test_real_installed_apk_and_candidate_identity_must_both_pass(self):
+        original = self.identity(code=3, name="1.5.2")
+        update = self.identity(code=4, name="1.6.0")
+        verify_local_upgrade_pair(original, update)
+
+    def test_pair_rejects_wrong_installed_signer_even_if_candidate_is_valid(self):
+        installed = self.identity(code=3, name="1.5.2", signer=OTHER_SIGNER)
+        self.assert_blocked("installed-signer-mismatch",
+            lambda: verify_local_upgrade_pair(installed, self.identity()))
+
+    def test_pair_rejects_wrong_candidate_signer_after_valid_installed_baseline(self):
+        original = self.identity(code=3, name="1.5.2")
+        self.assert_blocked("production-signer-mismatch",
+            lambda: verify_local_upgrade_pair(original, self.identity(signer=OTHER_SIGNER)))
+
+    def test_pair_rejects_wrong_installed_version_and_debuggable_build(self):
+        for old in (self.identity(code=4, name="1.5.2"),
+                    self.identity(code=3, name="1.5.1")):
+            self.assert_blocked("installed-version-unexpected",
+                lambda: verify_local_upgrade_pair(old, self.identity()))
+
+    def test_pair_rejects_unchanged_candidate_version_and_name(self):
+        original = self.identity(code=3, name="1.5.2")
+        self.assert_blocked("production-version-not-increased",
+            lambda: verify_local_upgrade_pair(original,
+                                             self.identity(code=3, name="1.5.2")))
+        self.assert_blocked("production-version-name",
+            lambda: verify_local_upgrade_pair(original,
+                                             self.identity(code=4, name="1.5.2")))
+
+    def test_local_pair_cli_fails_closed_when_installed_apk_missing(self):
+        from contextlib import redirect_stdout
+        from io import StringIO
+        from verify_apk_identity import main
+        argv = ["verify_apk_identity.py", "--apk", "/unused/candidate.apk",
+                "--aapt", "/unused/aapt", "--apksigner", "/unused/apksigner",
+                "--mode", "local-upgrade-pair"]
+        output = StringIO()
+        with patch.object(sys, "argv", argv), \
+                patch("verify_apk_identity.apk_tool_identity",
+                      side_effect=AssertionError("do not read an APK before argument gate")), \
+                redirect_stdout(output):
+            self.assertEqual(1, main())
+        self.assertIn("reason=missing-installed-apk", output.getvalue())
+
+    def test_local_pair_cli_checks_installed_first_then_candidate_and_packaging(self):
+        from contextlib import redirect_stdout
+        from io import StringIO
+        from verify_apk_identity import main
+        original = self.identity(code=3, name="1.5.2")
+        update = self.identity(code=4, name="1.6.0")
+        argv = ["verify_apk_identity.py", "--installed-apk", "/only-local/installed.apk",
+                "--apk", "/only-local/update.apk", "--aapt", "/unused/aapt",
+                "--apksigner", "/unused/apksigner", "--mode", "local-upgrade-pair"]
+        output = StringIO()
+        with patch.object(sys, "argv", argv), \
+                patch("verify_apk_identity.apk_tool_identity",
+                      side_effect=[original, update]) as parse_apk, \
+                patch("verify_apk_identity.check_native_libraries", return_value=11) as natives, \
+                redirect_stdout(output):
+            self.assertEqual(0, main())
+        self.assertEqual(["/only-local/installed.apk", "/only-local/update.apk"],
+                         [str(call.args[0]) for call in parse_apk.call_args_list])
+        natives.assert_called_once_with(Path("/only-local/update.apk"))
+        self.assertIn("LOCAL_UPGRADE_APK_PAIR_PASS", output.getvalue())
+        self.assertIn("IDENTITY_ONLY_NOT_INSTALL_APPROVAL", output.getvalue())
+
+    def test_other_modes_refuse_unused_installed_apk_argument(self):
+        from contextlib import redirect_stdout
+        from io import StringIO
+        from verify_apk_identity import main
+        argv = ["verify_apk_identity.py", "--apk", "/unused/sandbox.apk",
+                "--installed-apk", "/unused/installed.apk", "--aapt", "/unused/aapt",
+                "--apksigner", "/unused/apksigner", "--mode", "sandbox-isolation"]
+        output = StringIO()
+        with patch.object(sys, "argv", argv), \
+                patch("verify_apk_identity.apk_tool_identity",
+                      side_effect=AssertionError("mode argument rejection should happen first")), \
+                redirect_stdout(output):
+            self.assertEqual(1, main())
+        self.assertIn("reason=unexpected-installed-apk", output.getvalue())
 
     def test_installed_152_apk_matches_frozen_identity_only(self):
         verify_policy(self.identity(code=3, name="1.5.2"), "installed-baseline")
