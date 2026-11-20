@@ -8,11 +8,13 @@ accounts, paid provider calls, installation artifacts or private data.
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import json
 import os
 from pathlib import Path
 import re
+import shlex
 import sqlite3
 import subprocess
 import sys
@@ -120,14 +122,36 @@ def only_emulator() -> str:
     return serial
 
 
+def private_path(relpath: str) -> str:
+    """Only QA-controlled, app-private paths may be touched on the emulator."""
+    if not re.fullmatch(r"(databases|files)/[A-Za-z0-9_.-]+", relpath):
+        raise RuntimeError("Invalid disposable app-private QA path")
+    return relpath
+
+
 def private_write(serial: str, relpath: str, data: bytes) -> None:
-    # exec-in streams binary stdin, without a PTY or any /sdcard/public copy.
-    adb(serial, "exec-in", "run-as", PRODUCTION_PACKAGE, "tee", relpath, input_bytes=data)
+    # The first emulator run proved raw adb exec-in/tee + exec-out/cat did
+    # NOT preserve this SQLite fixture's exact bytes. Encode over the adb
+    # transport and decode inside run-as instead of assuming binary fidelity.
+    # shlex.quote keeps '>' inside the app's run-as shell, never on the host.
+    path = private_path(relpath)
+    script = shlex.quote(f"base64 -d > {path}")
+    adb(serial, "exec-in", "run-as", PRODUCTION_PACKAGE, "sh", "-c", script,
+        input_bytes=base64.b64encode(data))
 
 
 def private_read(serial: str, relpath: str, optional: bool = False) -> bytes | None:
-    return adb(serial, "exec-out", "run-as", PRODUCTION_PACKAGE, "cat", relpath,
-               optional=optional)
+    # The device sends only ASCII. Decode locally with strict validation; the
+    # host must never interpret arbitrary raw SQLite bytes from adb exec-out.
+    path = private_path(relpath)
+    payload = adb(serial, "exec-out", "run-as", PRODUCTION_PACKAGE, "base64", path,
+                  optional=optional)
+    if payload is None:
+        return None
+    try:
+        return base64.b64decode(b"".join(payload.split()), validate=True)
+    except (ValueError, base64.binascii.Error) as exc:
+        raise RuntimeError("Device app-private QA file transfer was not valid Base64") from exc
 
 
 def copy_device_database(serial: str, folder: Path) -> Path:
@@ -161,7 +185,13 @@ def rehearsal(old: Path, new: Path, test_apk: Path, fixture: Path) -> None:
     private_write(serial, f"databases/{DATABASE}", fixture_bytes)
     echoed = private_read(serial, f"databases/{DATABASE}")
     if echoed != fixture_bytes:
-        raise RuntimeError("Emulator database staging did not preserve the exact v15 fixture bytes")
+        expected_digest = hashlib.sha256(fixture_bytes).hexdigest()
+        actual_digest = hashlib.sha256(echoed or b"").hexdigest()
+        raise RuntimeError(
+            "Emulator v15 fixture transfer mismatch (synthetic only): "
+            f"sourceBytes={len(fixture_bytes)} deviceBytes={len(echoed or b'')} "
+            f"sourceSha256={expected_digest} deviceSha256={actual_digest}"
+        )
     private_write(serial, "files/qa-upgrade-marker", SENTINEL)
 
     with tempfile.TemporaryDirectory(prefix="elsewhere-disposable-upgrade-") as td:
