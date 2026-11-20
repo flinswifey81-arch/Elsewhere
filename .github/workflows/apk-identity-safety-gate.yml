@@ -8,6 +8,7 @@ on:
       - 'app/build.gradle.kts'
       - 'app/src/**'
       - 'qa/release/**'
+      - 'qa/release_identity/**'
       - '.github/workflows/apk-identity-safety-gate.yml'
   workflow_dispatch:
 
@@ -52,7 +53,9 @@ jobs:
           print("PRODUCTION_IDENTITY_BASELINE_PIN_PASS: original 1.5.2 release workflow")
           PY
       - name: Exercise both positive and fail-closed identity policies offline
-        run: python3 -m unittest discover -s qa/release -p 'test_apk_identity_gate.py' -v
+        run: |
+          python3 -m unittest discover -s qa/release -p 'test_apk_identity_gate.py' -v
+          python3 -m unittest discover -s qa/release_identity -p 'test_*.py' -v
       - name: Set up Java 21
         uses: actions/setup-java@v4
         with:
@@ -87,6 +90,31 @@ jobs:
         run: |
           bash ./gradlew :app:assembleRelease :app:assembleSandbox :app:assembleDebug \
             --no-daemon --no-configuration-cache
+      - name: Build historical v15 release APK using SAME disposable QA certificate
+        working-directory: pinned-v15-identity
+        run: bash ./gradlew :app:assembleRelease --no-daemon --no-configuration-cache
+      - name: Compare actual historical and current APK IDs and verified certificate continuity
+        run: |
+          set -euo pipefail
+          python3 qa/release_identity/verify_apk_identity.py \
+            --mode qa \
+            --contract qa/release_identity/historical_v15_contract.json \
+            --historical-apk pinned-v15-identity/app/build/outputs/apk/release/app-release.apk \
+            --candidate-apk app/build/outputs/apk/release/app-release.apk \
+            --aapt "$ANDROID_HOME/build-tools/36.0.0/aapt" \
+            --apksigner "$ANDROID_HOME/build-tools/36.0.0/apksigner" \
+            --report "$RUNNER_TEMP/elsewhere-v15-candidate-qa-identity.json"
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          record=json.loads((Path(os.environ['RUNNER_TEMP'])/'elsewhere-v15-candidate-qa-identity.json').read_text())
+          assert record['status']=='QA_CHAIN_VERIFIED_PRODUCTION_RELEASE_BLOCKED'
+          assert record['samePackage'] and record['historicalAndCandidateShareDisposableQaSigner']
+          assert not record['usesPinnedProductionSigner']
+          assert not record['eligibleForInPlaceProductionUpdate']
+          print('ACTUAL_HISTORICAL_APK_QA_CHAIN_PASS: package and shared disposable signer verified')
+          print('PRODUCTION_UPDATE_STILL_BLOCKED: not the installed signer; versionCodeIncreases=', record['versionCodeIncreases'])
+          PY
       - name: Compare actual APK identities and require signer rejection for release
         run: |
           set -euo pipefail
@@ -133,5 +161,7 @@ jobs:
           rm -f app/build/outputs/apk/release/app-release.apk
           rm -f app/build/outputs/apk/debug/app-debug.apk
           rm -f app/build/outputs/apk/sandbox/app-sandbox.apk
+          rm -f pinned-v15-identity/app/build/outputs/apk/release/app-release.apk
+          rm -f "$RUNNER_TEMP/elsewhere-v15-candidate-qa-identity.json"
       # NO upload-artifact and NO install step. This pipeline is identity QA,
       # explicitly not a signed production release or a release-candidate APK.
