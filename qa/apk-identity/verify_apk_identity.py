@@ -33,6 +33,7 @@ class ApkIdentity:
     version_name: str
     signer_sha256: str
     v2_or_v3_signed: bool
+    debuggable: bool = False
 
 
 _PACKAGE = re.compile(
@@ -56,7 +57,10 @@ def read_identity(badging: str, signature_report: str) -> ApkIdentity:
     if not _SIGNED_V2_V3.search(signature_report):
         raise GateFailure("signature-scheme", "APK must have a verified v2 or v3 signature")
     package, code, name = packages[0]
-    return ApkIdentity(package, int(code), name, signers[0][1].lower(), True)
+    return ApkIdentity(
+        package, int(code), name, signers[0][1].lower(), True,
+        bool(re.search(r"^application-debuggable\b", badging, re.MULTILINE))
+    )
 
 
 def verify_policy(
@@ -64,6 +68,8 @@ def verify_policy(
     installed_test_code: int | None = None
 ) -> None:
     if mode == "production-update":
+        if apk.debuggable:
+            raise GateFailure("production-debuggable", "Release APK must not be debuggable")
         if apk.package != PRODUCTION_PACKAGE:
             raise GateFailure("production-package-mismatch", "Production package ID differs from installed Elsewhere")
         # Check the trusted historical fingerprint BEFORE asking whether the
@@ -74,6 +80,18 @@ def verify_policy(
             raise GateFailure("production-version-not-increased", "A new release must increment versionCode beyond installed v15")
         if apk.version_name == INSTALLED_V15_VERSION_NAME or apk.version_name.endswith("-test"):
             raise GateFailure("production-version-name", "Production update still advertises the old/test version name")
+        return
+
+    if mode == "debug-isolation":
+        # Historic debug shares the production package name but cannot be
+        # a compatible update unless someone mistakenly signs it with the
+        # actual production certificate. Never install it over production.
+        if apk.package != PRODUCTION_PACKAGE:
+            raise GateFailure("debug-package", "Debug APK package differs from historical configuration")
+        if not apk.debuggable:
+            raise GateFailure("debug-flag", "Expected a debuggable nonproduction APK")
+        if apk.signer_sha256 == PRODUCTION_V15_SIGNER:
+            raise GateFailure("debug-production-signer", "Debug APK must not carry production signer")
         return
 
     if mode not in ("sandbox-isolation", "test-update"):
@@ -131,7 +149,7 @@ def main() -> int:
     parser.add_argument("--apk", required=True, type=Path)
     parser.add_argument("--aapt", required=True)
     parser.add_argument("--apksigner", required=True)
-    parser.add_argument("--mode", required=True, choices=("production-update", "sandbox-isolation", "test-update"))
+    parser.add_argument("--mode", required=True, choices=("production-update", "sandbox-isolation", "test-update", "debug-isolation"))
     parser.add_argument("--expected-test-signer")
     parser.add_argument("--installed-test-code", type=int)
     args = parser.parse_args()
