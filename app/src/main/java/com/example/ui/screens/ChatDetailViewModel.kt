@@ -1375,7 +1375,12 @@ class ChatDetailViewModel(
             continuation = continuation, worldContext = worldContext,
             storyMemories = story
         )
-        val baseline = compileWithMemories(emptyList())
+        // Admit reviewed story memories against the protected authored baseline.
+        // Generated summaries/legacy memory are lower priority and may be
+        // excluded by the final shared prompt fitter if space is tight.
+        val baseline = compileWithMemories(
+            emptyList(), includeLegacy = false, includeSummary = false
+        )
         val allowedStoryMemories = StoryMemoryPromptBudget.select(
             baseline, selectedStoryMemories, modelProvider.cachedContextLength(modelId)
         ).selected
@@ -1613,7 +1618,12 @@ class ChatDetailViewModel(
         }
 
         val modelId = settings.selectedModelId ?: "openrouter/auto"
-        val baseline = compileWithMemories(emptyList())
+        // Admit reviewed story memories against the protected authored baseline.
+        // Generated summaries/legacy memory are lower priority and may be
+        // excluded by the final shared prompt fitter if space is tight.
+        val baseline = compileWithMemories(
+            emptyList(), includeLegacy = false, includeSummary = false
+        )
         val allowedStoryMemories = StoryMemoryPromptBudget.select(
             baseline, selectedStoryMemories, modelProvider.cachedContextLength(modelId)
         ).selected
