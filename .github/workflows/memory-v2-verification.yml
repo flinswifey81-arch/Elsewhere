@@ -38,6 +38,7 @@ jobs:
           bash ./gradlew :app:testSandboxUnitTest --no-daemon \
             --tests com.example.domain.PromptPreflightTest \
             --tests com.example.domain.PromptHistoryTrimmerTest \
+            --tests com.example.domain.PromptOptionalContextFitterTest \
             --tests com.example.domain.StoryMemoryTemporalRetrievalTest \
             --tests com.example.domain.BoundedLegacyMemoryProvenanceTest \
             --tests com.example.domain.BoundedGroupGenerationWindowTest \
