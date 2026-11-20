@@ -46,7 +46,10 @@ def parse_apk_identity(badging: str, verifier: str) -> ApkIdentity:
         verifier,
         re.MULTILINE,
     )
-    if len(signers) != 1 or signers[0][0] != "1":
+    signer_count = re.findall(r"^Number of signers:\s*(\d+)\s*$", verifier, re.MULTILINE)
+    if len(signers) != 1 or signers[0][0] != "1" or (
+        signer_count and signer_count != ["1"]
+    ):
         raise ValueError("Require exactly one verified APK signer with a SHA-256 certificate digest")
 
     modern = bool(
@@ -102,6 +105,8 @@ def evaluate(
         raise ValueError("Invalid historical release version code")
     if candidate.package != expected_package or not candidate.modern_apk_signature:
         raise ValueError("Candidate package or APK signature is incompatible with v15 identity")
+    if candidate.version_code < expected_code:
+        raise ValueError("Candidate Android versionCode must not downgrade below installed v15 baseline")
     if mode not in ("qa", "production"):
         raise ValueError("Unexpected audit mode")
 
