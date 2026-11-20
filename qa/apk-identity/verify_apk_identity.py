@@ -67,6 +67,20 @@ def verify_policy(
     apk: ApkIdentity, mode: str, *, expected_test_signer: str | None = None,
     installed_test_code: int | None = None
 ) -> None:
+    if mode == "installed-baseline":
+        # Read-only evidence from the APK of the app already on the owner's device.
+        # Base APK identity is sufficient; native libraries may be in separate splits.
+        if apk.package != PRODUCTION_PACKAGE:
+            raise GateFailure("installed-package-mismatch", "Installed APK is not the historical Elsewhere production package")
+        if apk.debuggable:
+            raise GateFailure("installed-debuggable", "Installed APK is debuggable; stop and investigate the baseline")
+        if (apk.version_code != INSTALLED_V15_VERSION_CODE or
+                apk.version_name != INSTALLED_V15_VERSION_NAME):
+            raise GateFailure("installed-version-unexpected", "Installed app version differs from the pinned 1.5.2 baseline")
+        if apk.signer_sha256 != PRODUCTION_V15_SIGNER:
+            raise GateFailure("installed-signer-mismatch", "Installed APK signer differs from the pinned historical certificate")
+        return
+
     if mode == "production-update":
         if apk.debuggable:
             raise GateFailure("production-debuggable", "Release APK must not be debuggable")
@@ -149,7 +163,7 @@ def main() -> int:
     parser.add_argument("--apk", required=True, type=Path)
     parser.add_argument("--aapt", required=True)
     parser.add_argument("--apksigner", required=True)
-    parser.add_argument("--mode", required=True, choices=("production-update", "sandbox-isolation", "test-update", "debug-isolation"))
+    parser.add_argument("--mode", required=True, choices=("installed-baseline", "production-update", "sandbox-isolation", "test-update", "debug-isolation"))
     parser.add_argument("--expected-test-signer")
     parser.add_argument("--installed-test-code", type=int)
     args = parser.parse_args()
@@ -160,7 +174,9 @@ def main() -> int:
             expected_test_signer=args.expected_test_signer,
             installed_test_code=args.installed_test_code
         )
-        native_count = check_native_libraries(args.apk)
+        # Installed base APKs can move native libraries into ABI splits.
+        # Do not demand production-build packaging for identity-only inspection.
+        native_count = "not-checked" if args.mode == "installed-baseline" else check_native_libraries(args.apk)
     except GateFailure as failure:
         print(f"APK_IDENTITY_BLOCKED reason={failure.code} (no install performed)")
         return 1
@@ -171,6 +187,8 @@ def main() -> int:
         f"signerSha256={identity.signer_sha256} nativeLibs={native_count} "
         "installedAppTouched=false"
     )
+    if args.mode == "installed-baseline":
+        print("INSTALLED_V15_BASELINE_MATCH: Read-only local APK identity evidence only; no installation or signing-key access.")
     if args.mode == "sandbox-isolation":
         print("QA_SANDBOX_ONLY: This result does not validate the signer of any installed Test app.")
     return 0
