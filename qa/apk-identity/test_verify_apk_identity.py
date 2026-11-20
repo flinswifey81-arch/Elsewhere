@@ -90,7 +90,7 @@ class IdentityGateTests(unittest.TestCase):
         from io import StringIO
         from verify_apk_identity import main
         badging, signatures = report(signer=OTHER_SIGNER)
-        identity = read_identity(badging + "application-debuggable\\n", signatures)
+        identity = read_identity(badging + "application-debuggable\n", signatures)
         output = StringIO()
         args = ["verify_apk_identity.py", "--apk", "/unused/debug.apk",
                 "--aapt", "/unused/aapt", "--apksigner", "/unused/apksigner",
