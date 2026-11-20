@@ -11,10 +11,11 @@ import verify_disposable_upgrade as qa
 
 class FakeEmulatorAdb:
     """Simulate adb's file-transfer API, not shell stdin/stdout."""
-    def __init__(self, break_digest=False):
+    def __init__(self, break_digest=False, owner="10145:10145"):
         self.data = {}
         self.calls = []
         self.break_digest = break_digest
+        self.owner = owner
         self.root = f"/data/user/0/{qa.PRODUCTION_PACKAGE}"
 
     def __call__(self, serial, *args, **kwargs):
@@ -23,7 +24,7 @@ class FakeEmulatorAdb:
         if args == ("shell", "run-as", qa.PRODUCTION_PACKAGE, "pwd"):
             return (self.root + "\n").encode()
         if args == ("shell", "stat", "-c", "%u:%g", self.root):
-            return b"10145:10145\n"
+            return (self.owner + "\n").encode()
         if args[0] == "push":
             self.data[args[2]] = Path(args[1]).read_bytes()
             return b"pushed"
@@ -77,6 +78,18 @@ class DeviceTransferTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "ADB push changed synthetic"):
                 qa.private_write("emulator-5554",
                                  "databases/elsewhere_database", b"synthetic-only")
+
+    def test_root_or_system_owned_app_directory_fails_closed(self):
+        for owner in ("0:0", "1000:1000", "not-an-owner"):
+            with self.subTest(owner=owner):
+                fake = FakeEmulatorAdb(owner=owner)
+                with patch.object(qa, "adb", side_effect=fake):
+                    with self.assertRaisesRegex(RuntimeError, "owner|ownership"):
+                        qa.private_write("emulator-5554",
+                                         "databases/elsewhere_database", b"synthetic")
+                self.assertNotIn(("shell", "chown", owner,
+                    fake.root + "/databases/elsewhere_database"),
+                    [args for args, _ in fake.calls])
 
     def test_optional_absent_wal_is_not_considered_corruption(self):
         fake = FakeEmulatorAdb()
