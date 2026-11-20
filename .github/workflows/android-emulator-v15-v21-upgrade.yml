@@ -128,15 +128,10 @@ jobs:
           profile: pixel_5
           disable-animations: true
           emulator-options: -no-snapshot-load -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -camera-front none
-          script: |
-            python3 qa/device-upgrade/verify_disposable_upgrade.py \
-              --baseline pinned-v15-emulator/app/build/outputs/apk/debug/app-debug.apk \
-              --candidate app/build/outputs/apk/debug/app-debug.apk \
-              --fixture "$ELSEWHERE_V15_FIXTURE_PATH" \
-              --test-apk app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk \
-              --aapt "$ANDROID_HOME/build-tools/36.0.0/aapt" \
-              --apksigner "$ANDROID_HOME/build-tools/36.0.0/apksigner" \
-              --on-emulator
+          # This action executes script through 'sh -c'. Supply ONE command rather
+          # than a YAML multiline shell continuation: in the initial run only
+          # the Python filename was passed and argparse rejected missing flags.
+          script: python3 qa/device-upgrade/verify_disposable_upgrade.py --baseline pinned-v15-emulator/app/build/outputs/apk/debug/app-debug.apk --candidate app/build/outputs/apk/debug/app-debug.apk --fixture "$ELSEWHERE_V15_FIXTURE_PATH" --test-apk app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk --aapt "$ANDROID_HOME/build-tools/36.0.0/aapt" --apksigner "$ANDROID_HOME/build-tools/36.0.0/apksigner" --on-emulator
 
       - name: Delete temporary APKs, synthetic database and throwaway debug key
         if: always()
