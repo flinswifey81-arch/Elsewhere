@@ -1,0 +1,114 @@
+name: APK Identity and Signing Safety (no install or release key)
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'app/build.gradle.kts'
+      - 'app/src/main/AndroidManifest.xml'
+      - 'qa/apk-identity/**'
+      - 'docs/APK_SIGNING_PACKAGE_IDENTITY_RELEASE_GATE_2026-11-20.md'
+      - '.github/workflows/apk-identity-safety.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  apk-identity:
+    name: Verify real QA APK and reject wrong-signer production lookalike
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      QA_ONLY_KEYSTORE: /tmp/elsewhere-qa-do-not-install.p12
+      QA_ONLY_STORE_PASSWORD: qa-ci-dummy-not-a-release-secret
+    steps:
+      - name: Check out the proposed change (read-only)
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Execute fail-closed verifier unit and hostile input tests
+        run: python3 -m unittest discover -s qa/apk-identity -p 'test_*.py' -v
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools
+      - name: Install Android build tools and compile platform
+        run: sdkmanager "platforms;android-36.1" "build-tools;36.0.0"
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Create THROWAWAY QA signer (not any production or Test signing key)
+        run: |
+          set -euo pipefail
+          umask 077
+          keytool -genkeypair -noprompt -alias upload \
+            -keystore "$QA_ONLY_KEYSTORE" -storetype PKCS12 \
+            -storepass "$QA_ONLY_STORE_PASSWORD" \
+            -keypass "$QA_ONLY_STORE_PASSWORD" \
+            -keyalg RSA -keysize 3072 -validity 2 \
+            -dname "CN=QA Only Do Not Install,O=Disposable Elsewhere Test,C=US" >/dev/null
+          test -s "$QA_ONLY_KEYSTORE"
+
+      - name: Compile separate sandbox and QA-only, intentionally WRONG-SIGNER release lookalike
+        env:
+          KEYSTORE_PATH: ${{ env.QA_ONLY_KEYSTORE }}
+          STORE_PASSWORD: ${{ env.QA_ONLY_STORE_PASSWORD }}
+          KEY_PASSWORD: ${{ env.QA_ONLY_STORE_PASSWORD }}
+        run: |
+          bash ./gradlew :app:assembleSandbox :app:assembleRelease --no-daemon --no-configuration-cache
+
+      - name: Check actual APK manifest, verified signature, native packaging, and rejection of foreign production signer
+        run: |
+          set -euo pipefail
+          tools="$ANDROID_HOME/build-tools/36.0.0"
+          qa="app/build/outputs/apk/sandbox/app-sandbox.apk"
+          release="app/build/outputs/apk/release/app-release.apk"
+          test -s "$qa"
+          test -s "$release"
+          # The sandbox APK must not be able to replace the installed app.
+          python3 qa/apk-identity/verify_apk_identity.py \
+            --apk "$qa" --aapt "$tools/aapt" --apksigner "$tools/apksigner" \
+            --mode sandbox-isolation
+
+          # This real, correctly formed release APK intentionally uses the
+          # runner's generated throwaway key. Reject it for the *specific*
+          # reason that its signer cannot update the installed production APK.
+          python3 - "$release" "$tools/aapt" "$tools/apksigner" <<'PY'
+          import sys
+          from pathlib import Path
+          sys.path.insert(0, "qa/apk-identity")
+          from verify_apk_identity import (
+              PRODUCTION_PACKAGE, GateFailure, apk_tool_identity,
+              verify_policy, check_native_libraries
+          )
+          identity = apk_tool_identity(Path(sys.argv[1]), sys.argv[2], sys.argv[3])
+          assert identity.package == PRODUCTION_PACKAGE, "Bad release-shaped fixture package"
+          assert check_native_libraries(Path(sys.argv[1])) > 0
+          try:
+              verify_policy(identity, "production-update")
+          except GateFailure as failure:
+              assert failure.code == "production-signer-mismatch", (
+                  f"Incorrect rejection reason: {failure.code}"
+              )
+              print("FOREIGN_SIGNER_RELEASE_APK_REJECTED reason=production-signer-mismatch")
+          else:
+              raise AssertionError("A foreign-signed production-looking APK passed the release gate")
+          PY
+          echo "APK_IDENTITY_CI_PASS: actual APKs parsed and signed; no installed app touched."
+
+      - name: Delete disposable signing key and production-looking QA artifact
+        if: always()
+        run: |
+          rm -f "$QA_ONLY_KEYSTORE"
+          rm -f app/build/outputs/apk/release/app-release.apk
+          rm -f app/build/outputs/apk/sandbox/app-sandbox.apk
+          echo "Deleted QA APKs and ephemeral keystore. No upload, deploy, merge or installation."
