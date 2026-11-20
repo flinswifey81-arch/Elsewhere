@@ -21,15 +21,15 @@ The pinned fingerprint comes from `.github/workflows/build-v15-release-apk.yml`,
 
 **1. CI-only identity isolation proof (runs automatically on PR changes)**
 
-The workflow builds a **real Android sandbox APK** signed by a disposable debug key and verifies its actual `aapt` package/version metadata and `apksigner` signature. Its package must be the isolated `.test` app, its name visibly marked `-test`, and its signer cannot be the pinned production signer. It also checks that all native `.so` libraries are compressed for the current release packaging policy.
+The workflow separately checks out the **pinned historical 1.5.2 release workflow** and verifies the frozen package, version, and certificate fingerprint against that source; nobody may silently redefine the accepted signer. It runs actual Android **sandbox and debug APKs** through `aapt` and `apksigner`. Sandbox must be the isolated `.test` app with a `-test` version and non-production signer. Debug uses the **same package ID as production** in the current Gradle settings, but must be both visibly debuggable and signed by a certificate **different from production**. Neither should ever be installed over the owner's live application. The workflow also verifies all native `.so` libraries are compressed for the existing release packaging policy.
 
-The workflow also creates an **actual production-shaped APK using a throwaway QA keystore**. That APK must be REJECTED by the verifier, **specifically** for `production-signer-mismatch`. This ensures a release-looking filename, manifest and valid signature do not trick the gate into declaring it an update to the user's app. These synthetic APKs and the QA keystore are deleted from the runner and never uploaded as build artifacts, installed, distributed or signed with historical secrets.
+The workflow also creates an **actual production-shaped APK using a throwaway QA keystore**. It checks that the APK's certificate matches the newly generated disposable key, and that this certificate does **not** match the historical production signer. That APK must be REJECTED by the verifier, **specifically** for `production-signer-mismatch`. This ensures a release-looking filename, manifest and valid signature do not trick the gate into declaring it an update to the user's app. These synthetic APKs and the QA keystore are deleted from the runner and never uploaded as build artifacts, installed, distributed or signed with historical secrets.
 
 **2. True release-candidate verification (not yet run on the user's real release signer)**
 
 `verify_apk_identity.py --mode production-update` must read the *actual finished candidate APK*, not trust Gradle source declarations, and enforce:
 - Exact production application ID
-- A valid, single-signer v2/v3 APK signing certificate matching the **pinned v15 certificate SHA-256**
+- A valid, single-signer v2/v3 APK signing certificate matching the **pinned v15 certificate SHA-256**, with no debuggable flag
 - Strictly increasing `versionCode`: **greater than 3** for a v15 production upgrade
 - A new non-Test `versionName` (not `1.5.2`)
 - Actual native-library packaging policy
