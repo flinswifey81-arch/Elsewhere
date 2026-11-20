@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - 'qa/v15-v21/**'
+      - 'docs/NATIVE_V15_ENCRYPTED_BACKUP_RECOVERY_QA_2026-11-20.md'
       - 'app/src/test/java/com/example/FullSchemaV15ToV21MigrationTest.kt'
       - 'app/src/test/java/com/example/domain/backup/NativeV15EncryptedRestoreAcceptanceTest.kt'
       - 'app/src/main/java/com/example/data/**'
