@@ -7,6 +7,7 @@ import androidx.test.core.app.ApplicationProvider
 import com.example.data.AppDatabase
 import com.example.data.model.*
 import com.example.domain.compiler.ContextBudgetProbe
+import com.example.domain.compiler.ContextCompilerV1
 import com.example.domain.compiler.PromptOptionalContextChoices
 import com.example.domain.compiler.PromptOptionalContextFitter
 import com.example.domain.compiler.PromptHistoryTrimmer
@@ -52,7 +53,18 @@ class MemoryV2RoomScaleBenchmarkTest {
         worldContextJson = null, privateNotesJson = null, extensionFieldsJson = null
     )
 
-    private fun medianMs(times: List<Long>): Double = times.sorted()[times.size / 2] / 1_000_000.0
+    private val rowanCharacter = CharacterEntity(
+        characterId = "rowan", displayName = "Rowan", characterName = "Rowan",
+        aliases = emptyList(), importSchemaVersion = 1,
+        identityJson = "A stubborn traveling scholar.",
+        appearanceJson = null, personalityJson = null, voiceJson = null,
+        behaviorJson = null, backstoryJson = null, knowledgeJson = null,
+        worldContextJson = null, writingRulesJson = null, examplesJson = null,
+        authorNotesJson = null, extensionFieldsJson = null
+    )
+
+    private fun medianMs(times: List<Long>): Double =
+        times.sorted()[times.size / 2] / 1_000_000.0
 
     @Test
     fun roomRetrievalAndPreparationAt5002000And10000Messages() = runBlocking {
@@ -173,9 +185,9 @@ class MemoryV2RoomScaleBenchmarkTest {
             assertFalse(finalFit.messages.first().content.contains("Generated journey recap."))
             assertTrue(finalFit.messages.any { it.sourceMessageId == current.messageId })
             val finalUsage = ContextBudgetProbe.measure(finalFit.messages)
-            val hypotheticalTextUsd = finalUsage.approximateTextInputUsd(2.5)
-            assertNotNull(hypotheticalTextUsd)
-            assertTrue(hypotheticalTextUsd!! > 0)
+            val hypotheticalTextUsd =
+                requireNotNull(finalUsage.approximateTextInputUsd(2.5))
+            assertTrue(hypotheticalTextUsd > 0)
             // This is a synthetic rate, NOT an OpenRouter model quote/bill.
             assertEquals(
                 finalUsage.approximateInputTokens * 2.5 / 1_000_000.0,
@@ -220,12 +232,55 @@ class MemoryV2RoomScaleBenchmarkTest {
             assertFalse(rowanFact.content.contains("PRIVATE_PLAYER_NOTE_NEVER_SEND"))
             assertFalse(seleneRead.selected.any { it.memoryId == privateMemory.memoryId })
             assertFalse(narratorRead.selected.any { it.memoryId == privateMemory.memoryId })
-            assertEquals(
-                StoryMemoryExclusion.NOT_KNOWN_TO_RECIPIENT,
-                StoryMemoryExclusion.NOT_KNOWN_TO_RECIPIENT.takeIf {
-                    seleneRead.excludedCounts[it] ?: 0 > 0
-                }
+            assertTrue(
+                (seleneRead.excludedCounts[StoryMemoryExclusion.NOT_KNOWN_TO_RECIPIENT]
+                    ?: 0) > 0
             )
+            // Compile actual Solo and Group prompts from RECIPIENT-SCOPED
+            // retrieval, not narrator memory. Group must never broadcast
+            // Rowan's subjective belief to another Character.
+            val characterCompiler = ContextCompilerV1()
+            val soloPrompt = characterCompiler.compileSoloContext(
+                character = rowanCharacter, persona = persona,
+                chatHistory = history, currentMessage = current,
+                responseProfile = ResponseLengthProfile.NORMAL,
+                customMin = null, customTargetMax = null, customHardMax = null,
+                storyMemories = rowanRead.selected,
+                worldContext = "WORLD_RULES_ARE_PROTECTED"
+            )
+            val rowanGroupPrompt = characterCompiler.compileGroupCharacterContext(
+                character = rowanCharacter, persona = persona,
+                activeCharacterNames = listOf("Rowan", "Selene"),
+                chatHistory = history, currentMessage = current,
+                responseProfile = ResponseLengthProfile.NORMAL,
+                customMin = null, customTargetMax = null, customHardMax = null,
+                storyMemories = rowanRead.selected,
+                worldContext = "WORLD_RULES_ARE_PROTECTED"
+            )
+            val seleneGroupPrompt = characterCompiler.compileGroupCharacterContext(
+                character = rowanCharacter.copy(
+                    characterId = "selene", displayName = "Selene", characterName = "Selene"
+                ), persona = persona,
+                activeCharacterNames = listOf("Rowan", "Selene"),
+                chatHistory = history, currentMessage = current,
+                responseProfile = ResponseLengthProfile.NORMAL,
+                customMin = null, customTargetMax = null, customHardMax = null,
+                storyMemories = seleneRead.selected,
+                worldContext = "WORLD_RULES_ARE_PROTECTED"
+            )
+            for (allowed in listOf(soloPrompt, rowanGroupPrompt)) {
+                val text = allowed.first().content
+                assertTrue("Private belief missing at $total", text.contains(secretMarker))
+                assertTrue(text.contains("CHARACTER_BELIEF_UNCONFIRMED"))
+                assertTrue(text.contains("WORLD_RULES_ARE_PROTECTED"))
+                assertFalse(text.contains("PRIVATE_PLAYER_NOTE_NEVER_SEND"))
+                assertFalse(text.contains("Silver compass waypoint 17"))
+            }
+            val seleneText = seleneGroupPrompt.joinToString("\n") { it.content }
+            assertFalse("Secret reached another group recipient at $total",
+                seleneText.contains(secretMarker))
+            assertTrue(seleneText.contains("Respond only as Selene"))
+
             // Editing the underlying fact invalidates old in-story stance;
             // an old grant never authorizes a changed belief implicitly.
             repository.update(
