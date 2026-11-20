@@ -14,7 +14,6 @@ import json
 import os
 from pathlib import Path
 import re
-import shlex
 import sqlite3
 import subprocess
 import sys
@@ -133,9 +132,12 @@ def private_write(serial: str, relpath: str, data: bytes) -> None:
     # The first emulator run proved raw adb exec-in/tee + exec-out/cat did
     # NOT preserve this SQLite fixture's exact bytes. Encode over the adb
     # transport and decode inside run-as instead of assuming binary fidelity.
-    # shlex.quote keeps '>' inside the app's run-as shell, never on the host.
+    # subprocess.run passes the script directly as the argument to sh -c.
+    # Do NOT shlex.quote the *entire* script: that causes sh to try to run
+    # a literal program named "base64 -d > ..." (exit 127). The path is
+    # already restricted to safe QA names by private_path().
     path = private_path(relpath)
-    script = shlex.quote(f"base64 -d > {path}")
+    script = f"base64 -d > {path}"
     adb(serial, "exec-in", "run-as", PRODUCTION_PACKAGE, "sh", "-c", script,
         input_bytes=base64.b64encode(data))
 
