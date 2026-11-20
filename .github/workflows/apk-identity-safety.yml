@@ -29,6 +29,33 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Check out original frozen v15 signing/package baseline
+        uses: actions/checkout@v4
+        with:
+          ref: b2295d69877ba003e6473c8a40e1f7a514c560f7
+          path: pinned-v15-identity
+          persist-credentials: false
+      - name: Verify pinned original signer and package against historical release workflow
+        run: |
+          python3 - <<'PY'
+          import re, sys
+          from pathlib import Path
+          sys.path.insert(0, 'qa/apk-identity')
+          from verify_apk_identity import (
+              PRODUCTION_PACKAGE, PRODUCTION_V15_SIGNER,
+              INSTALLED_V15_VERSION_CODE, INSTALLED_V15_VERSION_NAME
+          )
+          original = Path('pinned-v15-identity/.github/workflows/build-v15-release-apk.yml').read_text()
+          for field, expected in (
+              ('package', PRODUCTION_PACKAGE),
+              ('legacy_signer', PRODUCTION_V15_SIGNER),
+              ('version_code', INSTALLED_V15_VERSION_CODE),
+              ('version_name', INSTALLED_V15_VERSION_NAME),
+          ):
+              found = re.search(r'expected_' + field + r'="([^"]+)"', original)
+              assert found and found.group(1) == str(expected), 'Historical v15 identity lock changed: ' + field
+          print('HISTORICAL_V15_PRODUCTION_IDENTITY_PIN_PASS: package, signer and installed version')
+          PY
       - name: Execute fail-closed verifier unit and hostile input tests
         run: python3 -m unittest discover -s qa/apk-identity -p 'test_*.py' -v
 
@@ -58,13 +85,13 @@ jobs:
             -dname "CN=QA Only Do Not Install,O=Disposable Elsewhere Test,C=US" >/dev/null
           test -s "$QA_ONLY_KEYSTORE"
 
-      - name: Compile separate sandbox and QA-only, intentionally WRONG-SIGNER release lookalike
+      - name: Compile separate sandbox, debug and WRONG-SIGNER QA release lookalike
         env:
           KEYSTORE_PATH: ${{ env.QA_ONLY_KEYSTORE }}
           STORE_PASSWORD: ${{ env.QA_ONLY_STORE_PASSWORD }}
           KEY_PASSWORD: ${{ env.QA_ONLY_STORE_PASSWORD }}
         run: |
-          bash ./gradlew :app:assembleSandbox :app:assembleRelease --no-daemon --no-configuration-cache
+          bash ./gradlew :app:assembleSandbox :app:assembleRelease :app:assembleDebug --no-daemon --no-configuration-cache
 
       - name: Check actual APK manifest, verified signature, native packaging, and rejection of foreign production signer
         run: |
@@ -72,12 +99,20 @@ jobs:
           tools="$ANDROID_HOME/build-tools/36.0.0"
           qa="app/build/outputs/apk/sandbox/app-sandbox.apk"
           release="app/build/outputs/apk/release/app-release.apk"
+          debug="app/build/outputs/apk/debug/app-debug.apk"
+          test -s "$debug"
           test -s "$qa"
           test -s "$release"
           # The sandbox APK must not be able to replace the installed app.
           python3 qa/apk-identity/verify_apk_identity.py \
             --apk "$qa" --aapt "$tools/aapt" --apksigner "$tools/apksigner" \
             --mode sandbox-isolation
+
+          # A debug APK deliberately shares the production package name,
+          # but it must be debuggable and signed by a NON-production key.
+          python3 qa/apk-identity/verify_apk_identity.py \
+            --apk "$debug" --aapt "$tools/aapt" --apksigner "$tools/apksigner" \
+            --mode debug-isolation
 
           # This real, correctly formed release APK intentionally uses the
           # runner's generated throwaway key. Reject it for the *specific*
@@ -111,4 +146,5 @@ jobs:
           rm -f "$QA_ONLY_KEYSTORE"
           rm -f app/build/outputs/apk/release/app-release.apk
           rm -f app/build/outputs/apk/sandbox/app-sandbox.apk
+          rm -f app/build/outputs/apk/debug/app-debug.apk
           echo "Deleted QA APKs and ephemeral keystore. No upload, deploy, merge or installation."
