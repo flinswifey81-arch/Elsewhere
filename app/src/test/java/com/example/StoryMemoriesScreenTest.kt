@@ -124,7 +124,15 @@ class StoryMemoriesScreenTest {
         val firstMemoryId = runBlocking {
             database.storyMemoryDao().forChat("ui-story").first().memoryId
         }
+        // LazyColumn composes offscreen memory cards only when reached.
+        // Waiting for an uncomposed child's tag can time out even when the
+        // Room row already exists. Load the list and scroll to the first card.
         composeRule.waitUntil(15_000) {
+            composeRule.onAllNodesWithTag("story_memories_list")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithTag("story_memories_list").performScrollToIndex(1)
+        composeRule.waitUntil(30_000) {
             composeRule.onAllNodesWithTag("restore_memory_$firstMemoryId")
                 .fetchSemanticsNodes().isNotEmpty()
         }
@@ -334,7 +342,15 @@ class StoryMemoriesScreenTest {
                 StoryMemoriesScreen("ui-story", repository, chats, onNavigateBack = {})
             }
         }
+        // This button lives inside the first lazily composed memory card.
+        // Observe the list and scroll its card into composition before
+        // waiting for asynchronously loaded Character choices.
         composeRule.waitUntil(15_000) {
+            composeRule.onAllNodesWithTag("story_memories_list")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithTag("story_memories_list").performScrollToIndex(1)
+        composeRule.waitUntil(30_000) {
             composeRule.onAllNodesWithTag("story_memory_perspectives_${memory.memoryId}")
                 .fetchSemanticsNodes().isNotEmpty()
         }
