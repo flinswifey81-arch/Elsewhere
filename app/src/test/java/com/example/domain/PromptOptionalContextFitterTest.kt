@@ -29,7 +29,7 @@ class PromptOptionalContextFitterTest {
             RoleplayMessage(
                 Role.SYSTEM, canon +
                     (if (options.includeLegacyMemories) "LEGACY_MEMORY_" + "L".repeat(2_000) else "") +
-                    (if (options.includeStoryMemories) "APPROVED_STORY_" + "S".repeat(3_500) else "") +
+                    (if (options.includeStoryMemories) "APPROVED_STORY_" + "S".repeat(2_500) else "") +
                     (if (options.includeSummary) "GENERATED_SUMMARY_" + "M".repeat(1_000) else "")
             ),
             current
@@ -40,19 +40,19 @@ class PromptOptionalContextFitterTest {
         val fit = PromptOptionalContextFitter.fit(all, 8_192, compile = ::fakeCompile)
         assertTrue(fit.decision.allowed)
         assertTrue(fit.legacyMemoriesOmitted)
-        assertTrue(fit.storyMemoriesOmitted)
-        assertFalse(fit.summaryOmitted)
+        assertFalse(fit.storyMemoriesOmitted)
+        assertTrue(fit.summaryOmitted)
         assertEquals(0, fit.historyTurnsRemoved)
         assertTrue(fit.messages.first().content.contains(canon))
-        assertTrue(fit.messages.first().content.contains("GENERATED_SUMMARY_"))
+        assertTrue(fit.messages.first().content.contains("APPROVED_STORY_"))
         assertFalse(fit.messages.first().content.contains("LEGACY_MEMORY_"))
-        assertFalse(fit.messages.first().content.contains("APPROVED_STORY_"))
+        assertFalse(fit.messages.first().content.contains("GENERATED_SUMMARY_"))
         assertEquals(current, fit.messages.last())
         assertEquals(canon, full.first().content.substring(0, canon.length))
         assertEquals(6_144, fit.decision.inputCeilingTokens)
         val notice = requireNotNull(fit.countsOnlyNotice())
         assertTrue(notice.contains("legacy generated memory"))
-        assertTrue(notice.contains("optional approved story memories"))
+        assertTrue(notice.contains("generated conversation summary"))
         assertFalse(notice.contains("LEGACY_MEMORY_"))
         assertFalse(notice.contains("CURRENT_PLAYER_TURN_"))
     }
