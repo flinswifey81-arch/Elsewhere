@@ -124,7 +124,10 @@ jobs:
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 35
-          target: google_apis
+          # AOSP/userdebug is REQUIRED: the harness verifies emulator identity
+          # then uses adb root strictly to push/pull synthetic app-private files.
+          # Never substitute a Play Store user build or a physical device.
+          target: default
           arch: x86_64
           profile: pixel_5
           disable-animations: true
