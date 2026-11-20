@@ -8,11 +8,10 @@ accounts, paid provider calls, installation artifacts or private data.
 from __future__ import annotations
 
 import argparse
-import base64
 import hashlib
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import sqlite3
 import subprocess
@@ -121,39 +120,89 @@ def only_emulator() -> str:
     return serial
 
 
+def require_rooted_disposable_emulator(serial: str) -> None:
+    """Permit root only on a verified, disposable AOSP CI emulator."""
+    if only_emulator() != serial:
+        raise RuntimeError("ADB target changed before isolated emulator root check")
+    build_type = adb(serial, "shell", "getprop", "ro.build.type").strip()
+    if build_type not in (b"userdebug", b"eng"):
+        raise RuntimeError("Refusing root: AOSP userdebug/eng emulator required")
+    adb(serial, "root")
+    adb(serial, "wait-for-device")
+    if only_emulator() != serial:
+        raise RuntimeError("ADB target changed during emulator-only root setup")
+    if adb(serial, "shell", "id", "-u").strip() != b"0":
+        raise RuntimeError("Disposable emulator adbd did not obtain root permissions")
+
+
 def private_path(relpath: str) -> str:
-    """Only QA-controlled, app-private paths may be touched on the emulator."""
+    """Restrict all privileged transfers to a QA-controlled, app-private file."""
     if not re.fullmatch(r"(databases|files)/[A-Za-z0-9_.-]+", relpath):
         raise RuntimeError("Invalid disposable app-private QA path")
     return relpath
 
 
+def app_data_dir(serial: str) -> str:
+    # Resolve the real debuggable package directory, not a guessed alias.
+    actual = adb(serial, "shell", "run-as", PRODUCTION_PACKAGE, "pwd")
+    directory = actual.decode("utf-8", "replace").strip()
+    allowed = {
+        f"/data/user/0/{PRODUCTION_PACKAGE}",
+        f"/data/data/{PRODUCTION_PACKAGE}",
+    }
+    if directory not in allowed:
+        raise RuntimeError("Emulator returned unexpected app-private directory")
+    return directory
+
+
+def private_file(serial: str, relpath: str) -> str:
+    return str(PurePosixPath(app_data_dir(serial)) / private_path(relpath))
+
+
 def private_write(serial: str, relpath: str, data: bytes) -> None:
-    # The first emulator run proved raw adb exec-in/tee + exec-out/cat did
-    # NOT preserve this SQLite fixture's exact bytes. Encode over the adb
-    # transport and decode inside run-as instead of assuming binary fidelity.
-    # subprocess.run passes the script directly as the argument to sh -c.
-    # Do NOT shlex.quote the *entire* script: that causes sh to try to run
-    # a literal program named "base64 -d > ..." (exit 127). The path is
-    # already restricted to safe QA names by private_path().
-    path = private_path(relpath)
-    script = f"base64 -d > {path}"
-    adb(serial, "exec-in", "run-as", PRODUCTION_PACKAGE, "sh", "-c", script,
-        input_bytes=base64.b64encode(data))
+    """ADB binary push, then ownership, SELinux and device SHA-256 checks.
+
+    Previous emulator runs returned empty/malformed bytes from streaming
+    via ADB command stdin/stdout. Never transport a SQLite database that way.
+    """
+    destination = private_file(serial, relpath)
+    with tempfile.TemporaryDirectory(prefix="elsewhere-qa-adb-push-") as directory:
+        source = Path(directory) / "synthetic-only.bin"
+        source.write_bytes(data)
+        adb(serial, "push", str(source), destination)
+
+    # Root-owned files are not writable by the app. Restore UID/GID and
+    # the app-data SELinux label before attempting an on-device Room open.
+    owner = adb(serial, "shell", "stat", "-c", "%u:%g",
+                app_data_dir(serial)).decode("ascii", "replace").strip()
+    if not re.fullmatch(r"[0-9]+:[0-9]+", owner):
+        raise RuntimeError("Unexpected disposable app data owner")
+    adb(serial, "shell", "chown", owner, destination)
+    adb(serial, "shell", "chmod", "600", destination)
+    adb(serial, "shell", "restorecon", "-R",
+        str(PurePosixPath(destination).parent))
+
+    expected_sha256 = hashlib.sha256(data).hexdigest()
+    device_report = adb(serial, "shell", "sha256sum", destination)
+    device_sha256 = device_report.decode("ascii", "replace").strip().split()[0].lower()
+    if device_sha256 != expected_sha256:
+        raise RuntimeError(
+            "ADB push changed synthetic app-private file: "
+            f"expectedSha256={expected_sha256} deviceSha256={device_sha256}"
+        )
 
 
 def private_read(serial: str, relpath: str, optional: bool = False) -> bytes | None:
-    # The device sends only ASCII. Decode locally with strict validation; the
-    # host must never interpret arbitrary raw SQLite bytes from adb exec-out.
-    path = private_path(relpath)
-    payload = adb(serial, "exec-out", "run-as", PRODUCTION_PACKAGE, "base64", path,
-                  optional=optional)
-    if payload is None:
-        return None
-    try:
-        return base64.b64decode(b"".join(payload.split()), validate=True)
-    except (ValueError, base64.binascii.Error) as exc:
-        raise RuntimeError("Device app-private QA file transfer was not valid Base64") from exc
+    """Pull the real app-private file as binary, never through shell stdout."""
+    source = private_file(serial, relpath)
+    with tempfile.TemporaryDirectory(prefix="elsewhere-qa-adb-pull-") as directory:
+        target = Path(directory) / "synthetic-only.bin"
+        result = adb(serial, "pull", source, str(target), optional=optional)
+        if result is None:
+            return None
+        if not target.is_file():
+            raise RuntimeError("ADB pull succeeded without creating the local QA file")
+        return target.read_bytes()
 
 
 def copy_device_database(serial: str, folder: Path) -> Path:
@@ -173,6 +222,8 @@ def copy_device_database(serial: str, folder: Path) -> Path:
 
 def rehearsal(old: Path, new: Path, test_apk: Path, fixture: Path) -> None:
     serial = only_emulator()
+    # The Android guest is deliberately disposable. Never root another device.
+    require_rooted_disposable_emulator(serial)
     if not test_apk.is_file():
         raise RuntimeError("Missing temporary instrumentation APK")
     # All steps occur on the fresh, verified emulator. No real-device adb target.
