@@ -300,7 +300,7 @@ class ChatDetailGenerationTest {
         // authored instructions were truncated in storage.
         assertTrue(harness.messageRepository.getMessagesForChatOnce(harness.chatId)
             .any { it.content == "The storm begins." })
-        assertTrue(harness.chatRepository.getChatSettingsById(harness.chatId)
+        assertTrue(harness.chatRepository.getChatSettings(harness.chatId)
             ?.narratorInstructions.orEmpty().contains("PLAYER_AUTHORED_INSTRUCTIONS_"))
     }
 
