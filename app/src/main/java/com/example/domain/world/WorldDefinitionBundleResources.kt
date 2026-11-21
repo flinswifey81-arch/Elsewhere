@@ -122,6 +122,13 @@ internal class WorldDefinitionBundleResources(
         require(doc.continuity.none { it.sourceChatId != null }) {
             "Chat-linked continuity requires an encrypted World archive."
         }
+        val supportedCastProfile = setOf(
+            "identity", "appearance", "personality", "voice",
+            "backstory", "motivations", "knowledge_limits", "role"
+        )
+        require(doc.resources.worldCast.all {
+            it.profile.keys.all(supportedCastProfile::contains)
+        }) { "World Cast has unsupported profile fields; refusing a lossy import." }
         val chars = doc.resources.characters.map(::parseCharacter)
         val personas = doc.resources.personas.map(::parsePersona)
         val scenarios = doc.resources.scenarios
