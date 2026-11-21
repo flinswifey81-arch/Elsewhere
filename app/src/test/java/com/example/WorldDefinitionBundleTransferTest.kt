@@ -138,7 +138,7 @@ class WorldDefinitionBundleTransferTest {
         val oldBookId = original.world.defaultLorebookIds.single()
         val first = worlds.importDefinition(WorldDefinitionCodec.encode(original))
         assertNotEquals(original.world.worldId, first.worldId)
-        assertEquals(1, worlds.getCast(first.worldId).size - 1)
+        assertEquals(2, worlds.getCast(first.worldId).size)
         val members = worlds.getMemberships(first.worldId)
         assertEquals(4, members.size)
         assertEquals(setOf("CHARACTER", "PERSONA", "SCENARIO", "LOREBOOK"),
@@ -251,6 +251,6 @@ class WorldDefinitionBundleTransferTest {
         db.chatDao().insertChat(chat)
         worlds.attach(saved.worldId, WorldResourceType.CHAT, chat.chatId)
         assertTrue(runCatching { worlds.exportDefinition(saved.worldId) }.isFailure)
-        assertEquals(1, db.chatDao().getAllChats().first().chatId.let { 1 })
+        assertNotNull(db.chatDao().getChatById(chat.chatId))
     }
 }
