@@ -11,6 +11,35 @@ class ScenarioRepository(
     fun observeAll() = database.scenarioDao().observeAll()
     suspend fun get(id: String) = database.scenarioDao().get(id)
     suspend fun session(chatId: String) = database.scenarioDao().session(chatId)
+
+    /**
+     * Player-initiated revision of this ONE ongoing playthrough.
+     * Does not rewrite its reusable template, prior transcript, World baseline
+     * or any sibling sessions created from the same Scenario.
+     * Generation rereads the current session definition for each new response.
+     */
+    suspend fun updateActiveSession(chatId: String, definition: ScenarioDefinition) =
+        coordinator.withMutation {
+            require(chatId.isNotBlank()) { "The active chat ID is missing." }
+            definition.validate()
+            database.withTransaction {
+                val chat = requireNotNull(database.chatDao().getChatById(chatId)) {
+                    "This chat no longer exists."
+                }
+                require(chat.chatType == ChatType.SCENARIO) {
+                    "Only an ongoing Scenario playthrough can be edited here."
+                }
+                requireNotNull(database.scenarioDao().session(chatId)) {
+                    "This Scenario playthrough no longer exists."
+                }
+                require(database.scenarioDao().updateSessionDefinition(
+                    chatId, ScenarioCodec.encode(definition)
+                ) == 1) {
+                    "The Scenario playthrough changed before your edits were saved."
+                }
+            }
+        }
+
     suspend fun save(id: String, definition: ScenarioDefinition) = coordinator.withMutation {
         require(id.isNotBlank()) { "Scenario identifier is required." }
         definition.validate()
