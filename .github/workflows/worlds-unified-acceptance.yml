@@ -62,6 +62,7 @@ jobs:
             --tests com.example.domain.backup.BackupRepositoryTest \
             --tests com.example.ProfileImageRepositoryTest \
             --tests com.example.ChatMessageReadingUiTest \
+            --tests com.example.ChatPdfExportContractTest \
             --tests com.example.OpenRouterModelProviderTest \
             --tests com.example.ChatDetailGenerationTest.continueFromCharacterGreetingNeedsNoPersonaTurn \
             --tests com.example.ChatDetailGenerationTest.malformedNarratedOutputIsSavedWithoutExposingControlMarkers \
