@@ -1638,8 +1638,18 @@ class ChatDetailViewModel(
                 }
             )
         } else null
-        val supportingCast = listOfNotNull(sceneInstructions, activeNpcDossiers)
-            .joinToString("\n\n").takeIf(String::isNotBlank)
+        val promotedSpeakerRelationship = if (npcBankEnabled) {
+            npcRepository?.promotedSpeakerRelationshipContext(
+                chatId = chatId,
+                characterId = fullCharacter.characterId,
+                activePersonaId = fullPersona.personaId,
+                asOfOrderIndex = currentMessage.orderIndex,
+                afterOrderIndex = summary.chat.contextResetOrderIndex
+            )
+        } else null
+        val supportingCast = listOfNotNull(
+            sceneInstructions, activeNpcDossiers, promotedSpeakerRelationship
+        ).joinToString("\n\n").takeIf(String::isNotBlank)
 
         // Solo and Group episodes share their World's approved setting and continuity
         // just as Scenario episodes do. This is a local Room read, not another model call.
