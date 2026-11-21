@@ -685,7 +685,10 @@ class NpcRepository(
                         (afterOrderIndex == null || event.sourceOrderIndex > afterOrderIndex)
                 }
             }
+            // A promoted NPC and the active Character share an ID; do not
+            // introduce that identity again as a separate supporting actor.
             val dossiers = project(bases, updates)
+                .filterNot { it.npcId == observerCharacterId }
             if (dossiers.isEmpty()) return@withContext null
             val recentText = recentMessages.filter { it.isPrimaryVariant }.takeLast(4)
                 .joinToString("\n") {
