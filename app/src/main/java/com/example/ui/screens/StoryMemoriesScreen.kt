@@ -218,6 +218,7 @@ fun StoryMemoriesScreen(
         var toExpanded by remember { mutableStateOf(false) }
         val prior = continuingRelationship
         AlertDialog(
+            modifier = Modifier.testTag("relationship_state_dialog"),
             onDismissRequest = {
                 if (!working) {
                     relationshipDialogOpen = false
@@ -283,6 +284,7 @@ fun StoryMemoriesScreen(
                             style = MaterialTheme.typography.bodySmall)
                     }
                     OutlinedTextField(
+                        modifier = Modifier.testTag("relationship_state_input"),
                         value = relationshipText,
                         onValueChange = { relationshipText = it.take(12_000) },
                         label = { Text(if (creatingPromise) "What was promised?" else "How has this relationship changed?") },
