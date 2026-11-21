@@ -82,7 +82,8 @@ jobs:
             --tests com.example.AppNavigationTest \
             --tests com.example.SettingsFunctionalTest \
             --tests com.example.AppearanceRepositoryTest \
-            --tests com.example.ElsewhereThemeBannerTest
+            --tests com.example.ElsewhereThemeBannerTest \
+            --tests com.example.ChatPdfExportContractTest
 
       - name: Verify Worlds archives and existing RP lifecycle together
         run: |
