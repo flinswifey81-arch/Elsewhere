@@ -46,4 +46,29 @@ class ScenarioEditorTest {
         assertEquals("A city on the sea", saved?.setting)
         assertEquals(4, saved?.npcs?.size)
     }
+
+    @Test @Config(qualifiers = "w360dp-h800dp")
+    fun activePlaythroughEditorUsesCorrectScopeAndSaveAction() {
+        var saved: ScenarioDefinition? = null
+        compose.setContent {
+            var draft by remember {
+                mutableStateOf(ScenarioDefinition(title = "Ongoing story", premise = "First premise"))
+            }
+            AppTheme {
+                ScenarioEditor(
+                    draft, { draft = it }, { saved = draft }, {},
+                    editingActiveSession = true
+                )
+            }
+        }
+        compose.onNodeWithText("Editing this playthrough only.", substring = true).assertExists()
+        compose.onNode(hasScrollAction()).performScrollToNode(hasText("Premise / Scene Setup"))
+        compose.onNodeWithText("Premise / Scene Setup").performTextClearance()
+        compose.onNodeWithText("Premise / Scene Setup").performTextInput("The scene has progressed.")
+        compose.onNode(hasScrollAction()).performScrollToNode(hasText("Save playthrough"))
+        compose.onNodeWithText("Save playthrough").assertIsEnabled().performClick()
+        assertEquals("The scene has progressed.", saved?.premise)
+        compose.onAllNodesWithText("Save scenario").assertCountEquals(0)
+    }
+
 }
