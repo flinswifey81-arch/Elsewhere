@@ -610,6 +610,19 @@ fun ChatDetailScreen(
                             )
                         }
 
+                        if (
+                            state.chatSummary.chat.chatType == ChatType.SOLO &&
+                            state.soloSpotlightCharacters.count { it.isActive } > 1 &&
+                            !state.partialStopped
+                        ) {
+                            SoloSpotlightControls(
+                                characters = state.soloSpotlightCharacters,
+                                selectedId = state.selectedSoloSpotlightId,
+                                isGenerating = state.isGenerating,
+                                onSelect = viewModel::selectSoloSpotlight
+                            )
+                        }
+
                         if (isHistoryOnly) {
                             HistoryOnlyChatNotice()
                         } else if (state.partialStopped) {
@@ -871,6 +884,55 @@ private fun HistoryOnlyChatNotice() {
             style = MaterialTheme.typography.bodySmall,
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
         )
+    }
+}
+
+/** In a Solo story, the selected Character writes the NEXT reply, not past turns. */
+@Composable
+internal fun SoloSpotlightControls(
+    characters: List<GroupCharacterState>,
+    selectedId: String?,
+    isGenerating: Boolean,
+    onSelect: (String) -> Unit
+) {
+    val active = characters.filter { it.isActive }.sortedBy { it.sortPosition }
+    val selected = active.firstOrNull { it.character.characterId == selectedId }
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        modifier = Modifier.fillMaxWidth().testTag("solo_spotlight_controls")
+    ) {
+        Column(Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) {
+            TextButton(
+                onClick = { expanded = !expanded },
+                modifier = Modifier.fillMaxWidth().testTag("solo_spotlight_toggle")
+            ) {
+                Text("Character spotlight: ${selected?.character?.displayName ?: "Select"}")
+            }
+            if (expanded) {
+                Text(
+                    "Choose who answers the next turn. Earlier messages, NPC state " +
+                        "and story memories stay in this same chat.",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                Row(
+                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    active.forEach { member ->
+                        FilterChip(
+                            selected = member.character.characterId == selectedId,
+                            onClick = { onSelect(member.character.characterId) },
+                            enabled = !isGenerating,
+                            label = { Text(member.character.displayName) },
+                            modifier = Modifier.testTag(
+                                "solo_spotlight_select_${member.character.characterId}"
+                            )
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 
