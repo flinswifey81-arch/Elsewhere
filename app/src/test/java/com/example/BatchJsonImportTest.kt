@@ -3,6 +3,7 @@ package com.example
 import com.example.ui.screens.processBatchImports
 import com.example.ui.screens.stageDuplicateJsonImports
 import com.example.domain.repository.DuplicateIdException
+import com.example.domain.repository.LorebookDuplicateIdException
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -114,6 +115,33 @@ class BatchJsonImportTest {
         assertEquals(1, summary.failureCount)
         assertTrue(summary.message("character").contains("Kept unchanged"))
         assertTrue(summary.message("character").contains("updated existing"))
+    }
+
+    @Test
+    fun matchingLorebookIdsAreStagedEvenInMultiFileSelection() = runBlocking {
+        val saved = mutableSetOf("book-original")
+        val processed = mutableListOf<String>()
+        val batch = stageDuplicateJsonImports(
+            items = listOf(
+                "new-lore.json" to "book-extra",
+                "same-lore.json" to "book-original",
+                "repeated-new-lore.json" to "book-extra"
+            ),
+            nameOf = { it.first },
+            read = { it.second },
+            importer = { id ->
+                processed += id
+                if (!saved.add(id)) throw LorebookDuplicateIdException(id)
+            },
+            duplicateId = { (it as? LorebookDuplicateIdException)?.duplicateId }
+        )
+        assertEquals(listOf("new-lore.json"), batch.completed.map { it.fileName })
+        assertEquals(
+            listOf("book-original", "book-extra"),
+            batch.duplicates.map { it.id }
+        )
+        assertEquals(setOf("book-original", "book-extra"), saved)
+        assertEquals(3, processed.size)
     }
 
 }
