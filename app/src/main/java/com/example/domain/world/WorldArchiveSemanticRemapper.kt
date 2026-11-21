@@ -1,6 +1,7 @@
 package com.example.domain.world
 
 import com.example.data.model.*
+import com.example.domain.memory.StoryActorKind
 import com.example.domain.story.StoryResponseCodec
 import com.example.domain.story.StorySegmentType
 import com.squareup.moshi.Moshi
@@ -119,6 +120,39 @@ object WorldArchiveSemanticRemapper {
             return id(resourceType, sourceId)
         }
 
+        // Remap typed fictional actors, never global-replace text or infer identity by name.
+        // Scenario NPC IDs are scenario-local and cannot be safely resolved from an actor
+        // without its owning Scenario; refuse those rather than silently mislink them.
+        fun storyActorId(kind: String, oldId: String, chatId: String): String =
+            when (kind) {
+                StoryActorKind.CHARACTER.name -> id(WorldArchiveIdKind.CHARACTER, oldId)
+                StoryActorKind.PERSONA.name -> id(WorldArchiveIdKind.PERSONA, oldId)
+                StoryActorKind.NPC.name -> id(WorldArchiveIdKind.NPC_DOSSIER, oldId)
+                StoryActorKind.WORLD_CAST.name -> id(WorldArchiveIdKind.WORLD_CAST, oldId)
+                StoryActorKind.NARRATOR.name -> {
+                    require(oldId == "narrator:$chatId") {
+                        "Cannot import an unknown narrator identity into another World"
+                    }
+                    "narrator:" + id(WorldArchiveIdKind.CHAT, chatId)
+                }
+                else -> throw IllegalArgumentException(
+                    "Story Memory actor type requires a typed World import migration"
+                )
+            }
+
+        fun sourceSpeakerId(memory: StoryMemoryEntity): String? =
+            memory.sourceSpeakerId?.let { old ->
+                when (memory.sourceSpeakerType) {
+                    SpeakerType.CHARACTER.name -> id(WorldArchiveIdKind.CHARACTER, old)
+                    SpeakerType.PERSONA.name -> id(WorldArchiveIdKind.PERSONA, old)
+                    SpeakerType.NARRATOR.name -> if (old == "narrator:${memory.chatId}") {
+                        "narrator:" + id(WorldArchiveIdKind.CHAT, memory.chatId)
+                    } else old
+                    else -> old
+                }
+            }
+
+        val storyMemoryChat = source.storyMemories.associate { it.memoryId to it.chatId }
         val freshWorldId = id(WorldArchiveIdKind.WORLD, source.worldId)
         val npcOwnerById = source.npcDossiers.associate { it.npcId to it.chatId }
         val oldNpcIds = npcOwnerById.keys
@@ -280,6 +314,54 @@ object WorldArchiveSemanticRemapper {
                     chatId = id(WorldArchiveIdKind.CHAT, it.chatId),
                     characterId = id(WorldArchiveIdKind.CHARACTER, it.characterId),
                     sourceMessageId = optional(WorldArchiveIdKind.MESSAGE, it.sourceMessageId)
+                )
+            },
+            // Restore the full, source-linked Story Memory graph. Neither a Wack nor a
+            // Character's knowledge is inferred or granted during this transform.
+            storyMemories = source.storyMemories.map { memory ->
+                memory.copy(
+                    memoryId = id(WorldArchiveIdKind.STORY_MEMORY, memory.memoryId),
+                    chatId = id(WorldArchiveIdKind.CHAT, memory.chatId),
+                    ownerId = id(WorldArchiveIdKind.CHAT, memory.ownerId),
+                    sourceMessageId = optional(WorldArchiveIdKind.MESSAGE, memory.sourceMessageId),
+                    sourceVariantGroupId = optional(
+                        WorldArchiveIdKind.VARIANT_GROUP, memory.sourceVariantGroupId
+                    ),
+                    sourceSpeakerId = sourceSpeakerId(memory),
+                    believedById = memory.believedById?.let { original ->
+                        storyActorId(requireNotNull(memory.believedByKind),
+                            original, memory.chatId)
+                    },
+                    previousStateMemoryId = optional(
+                        WorldArchiveIdKind.STORY_MEMORY, memory.previousStateMemoryId
+                    )
+                )
+            },
+            storyMemoryActors = source.storyMemoryActors.map { actor ->
+                val originalChat = requireNotNull(storyMemoryChat[actor.memoryId]) {
+                    "Story Memory actor lost its chat owner during import"
+                }
+                actor.copy(
+                    memoryId = id(WorldArchiveIdKind.STORY_MEMORY, actor.memoryId),
+                    actorId = storyActorId(actor.actorKind, actor.actorId, originalChat)
+                )
+            },
+            storyMemoryReturns = source.storyMemoryReturns.map {
+                it.copy(
+                    memoryId = id(WorldArchiveIdKind.STORY_MEMORY, it.memoryId),
+                    chatId = id(WorldArchiveIdKind.CHAT, it.chatId)
+                )
+            },
+            storyMemoryKnowledgeChanges = source.storyMemoryKnowledgeChanges.map {
+                it.copy(
+                    memoryId = id(WorldArchiveIdKind.STORY_MEMORY, it.memoryId),
+                    characterId = id(WorldArchiveIdKind.CHARACTER, it.characterId)
+                )
+            },
+            storyMemoryPerspectives = source.storyMemoryPerspectives.map {
+                it.copy(
+                    memoryId = id(WorldArchiveIdKind.STORY_MEMORY, it.memoryId),
+                    characterId = id(WorldArchiveIdKind.CHARACTER, it.characterId)
                 )
             },
             conversationSummaries = source.conversationSummaries.map {
