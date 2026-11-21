@@ -122,6 +122,12 @@ fun ContextInspectorScreen(
                         sceneText = history.takeLast(7).joinToString(" ") { it.content }.takeLast(4_000)
                     )?.selected.orEmpty()
                     val scenarioDefinition = com.example.data.model.ScenarioCodec.decode(session.definitionJson)
+                    val linkedCharacters = scenarioDefinition.npcs
+                        .mapNotNull { it.sourceCharacterId }.distinct()
+                        .mapNotNull { id ->
+                            appContainer.characterRepository.getCharacterById(id)
+                                ?.let { id to it }
+                        }.toMap()
                     val activeLore = appContainer.lorebookRepository?.resolveActiveLore(
                         chatId, history.dropLast(1), current, 24
                     ).orEmpty()
@@ -129,7 +135,8 @@ fun ContextInspectorScreen(
                     fun compileWithMemories(story: List<StoryMemoryRecord>) = scenarioCompiler.compile(
                         scenarioDefinition, persona, settings, history.dropLast(1), current,
                         summary = rollingSummary, memories = scenarioMemories, lore = activeLore,
-                        worldContext = acceptedWorldContext, storyMemories = story
+                        worldContext = acceptedWorldContext, storyMemories = story,
+                        linkedCharacters = linkedCharacters
                     )
                     val baseline = compileWithMemories(emptyList())
                     val allowed = StoryMemoryPromptBudget.select(
