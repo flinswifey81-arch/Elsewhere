@@ -117,6 +117,53 @@ class BackupRepositoryTest {
     }
 
     @Test
+    fun encryptedBackupPreservesIndependentCampaignChaptersAndRestoresOverExistingCampaigns() = runBlocking {
+        val source = environment()
+        val worldRepo = com.example.domain.repository.WorldRepository(source.database)
+        val campaignRepo = com.example.domain.repository.CampaignRepository(source.database)
+        val world = worldRepo.createWorld("Shared setting")
+        val first = campaignRepo.createCampaign(world.worldId, "First playthrough")
+        val second = campaignRepo.createCampaign(world.worldId, "Second playthrough")
+        source.database.chatDao().insertChat(ChatEntity(
+            chatId = "campaign-chat-a", displayName = "Journey A", chatType = ChatType.SOLO
+        ))
+        source.database.chatDao().insertChat(ChatEntity(
+            chatId = "campaign-chat-b", displayName = "Journey B", chatType = ChatType.GROUP
+        ))
+        val chapterA = campaignRepo.addChapter(first.campaignId, "campaign-chat-a", "First chapter")
+        campaignRepo.addChapter(second.campaignId, "campaign-chat-b", "Separate chapter")
+        campaignRepo.updateChapter(first.campaignId, chapterA.chapterId, "Revised chapter",
+            "Private story recap only for A.", true)
+        source.database.messageDao().insertMessage(MessageEntity(
+            messageId = "campaign-message-a", chatId = "campaign-chat-a",
+            speakerType = SpeakerType.CHARACTER, speakerId = "npc-a",
+            speakerDisplayNameSnapshot = "NPC", content = "An existing narrative turn.",
+            orderIndex = 1L
+        ))
+        val bytes = ByteArrayOutputStream()
+        val preview = source.repository.exportEncrypted(bytes, PASSPHRASE.toCharArray())
+        assertEquals(2, preview.campaigns)
+
+        val target = environment()
+        val targetWorld = com.example.domain.repository.WorldRepository(target.database).createWorld("Pre-restore")
+        val targetCampaign = com.example.domain.repository.CampaignRepository(target.database)
+            .createCampaign(targetWorld.worldId, "Old campaign")
+        assertNotNull(target.database.campaignDao().getCampaign(targetCampaign.campaignId))
+
+        target.repository.restoreEncrypted(ByteArrayInputStream(bytes.toByteArray()), PASSPHRASE.toCharArray())
+        assertEquals(source.database.campaignDao().getAllCampaigns(),
+            target.database.campaignDao().getAllCampaigns())
+        assertEquals(source.database.campaignDao().getAllChapters(),
+            target.database.campaignDao().getAllChapters())
+        assertEquals("Private story recap only for A.",
+            target.database.campaignDao().chapters(first.campaignId).single().recap)
+        assertTrue(target.database.campaignDao().chapters(second.campaignId)
+            .none { it.chatId == "campaign-chat-a" })
+        assertNotNull(target.database.messageDao().getMessageById("campaign-message-a"))
+        assertTrue(target.database.campaignDao().forWorld(targetWorld.worldId).isEmpty())
+    }
+
+    @Test
     fun encryptedBackupPreservesPendingAndRejectedMessageCandidatesWithoutApprovingThem() = runBlocking {
         val source = environment()
         val chatId = "review-backup"
