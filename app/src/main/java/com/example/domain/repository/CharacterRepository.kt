@@ -171,8 +171,22 @@ class CharacterRepository(
             "knowledge", "world_context", "writing_rules", "examples", "author_notes"
         )
         
-        val extensions = rootMap.filterKeys { it !in knownKeys }
-        
+        val extensions = rootMap.filterKeys { it !in knownKeys }.toMutableMap()
+        if (importAsNew) {
+            // A cloned Character must not pretend to be the original NPC.
+            extensions.remove("_elsewhere_promoted_npc_id")
+        }
+        if (replaceExisting && existing != null) {
+            // Re-importing fixed JSON preserves the original NPC ↔ Character
+            // identity even if an external editor dropped the technical field.
+            val oldOrigin = existing.extensionFieldsJson?.let { raw ->
+                runCatching { mapAdapter.fromJson(raw) }.getOrNull()
+            }?.get("_elsewhere_promoted_npc_id")
+            if (oldOrigin == characterId) {
+                extensions["_elsewhere_promoted_npc_id"] = characterId
+            }
+        }
+
         val entity = CharacterEntity(
             characterId = characterId,
             displayName = displayName,
