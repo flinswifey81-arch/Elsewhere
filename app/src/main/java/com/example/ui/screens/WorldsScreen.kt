@@ -49,7 +49,8 @@ fun WorldsScreen(
     campaignRepository: CampaignRepository? = null,
     onOpenChat: ((String) -> Unit)? = null,
     onCreateSoloEpisode: ((String) -> Unit)? = null,
-    onCreateScenarioEpisode: ((String) -> Unit)? = null
+    onCreateScenarioEpisode: ((String) -> Unit)? = null,
+    onCreateSoloCampaignChapter: ((String, String) -> Unit)? = null
 ) {
     val worlds by repository.observeWorlds().collectAsState(initial = emptyList())
     val scope = rememberCoroutineScope()
@@ -561,6 +562,13 @@ fun WorldsScreen(
                                 }
                                 if (chosenCampaignId == campaign.campaignId) {
                                     Text("Chapters (" + chapters.size + ")", style = MaterialTheme.typography.titleSmall)
+                                    if (onCreateSoloCampaignChapter != null) {
+                                        Button(onClick = {
+                                            onCreateSoloCampaignChapter(selected.worldId, campaign.campaignId)
+                                        }, modifier = Modifier.testTag("start_campaign_solo_chapter")) {
+                                            Text("New solo chapter")
+                                        }
+                                    }
                                     TextButton(onClick = {
                                         newChapterChatId = null
                                         newChapterTitle = ""
