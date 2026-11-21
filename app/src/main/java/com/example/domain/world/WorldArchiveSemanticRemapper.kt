@@ -31,6 +31,9 @@ object WorldArchiveSemanticRemapper {
     private val stringsAdapter = moshi.adapter<List<String>>(
         Types.newParameterizedType(List::class.java, String::class.java)
     )
+    private val extensionsAdapter = moshi.adapter<Map<String, Any?>>(
+        Types.newParameterizedType(Map::class.java, String::class.java, Any::class.java)
+    )
     private val knowledgeAdapter = moshi.adapter<Map<String, String>>(
         Types.newParameterizedType(Map::class.java, String::class.java, String::class.java)
     )
@@ -44,16 +47,34 @@ object WorldArchiveSemanticRemapper {
 
     fun rewrite(source: WorldArchiveStateV1, plan: WorldArchiveIdRemapPlan): RewrittenWorld {
         WorldArchiveStateCodec.validate(source)
-        // Opaque extension fields do not have a published reference schema. Passing old
-        // resource IDs through these fields would create silent broken links after import.
-        // Accept only empty extensions until an explicit typed extension migration exists.
-        fun unsupportedExtension(json: String?): Boolean =
-            json?.trim()?.let { it.isNotBlank() && it != "{}" && it != "null" } == true
-        require(source.characters.none { unsupportedExtension(it.extensionFieldsJson) } &&
-            source.personas.none { unsupportedExtension(it.extensionFieldsJson) } &&
-            source.npcDossiers.none { unsupportedExtension(it.extensionFieldsJson) } &&
-            source.npcLibraryEntries.none { unsupportedExtension(it.extensionFieldsJson) }) {
-            "World contains opaque extension data requiring a schema-aware reference migration"
+        // Only app-known extension keys have a documented reference contract.
+        // User-entered manual profile fields are plain authored text; the two
+        // Living Cast link keys below get explicit typed ID remapping.
+        fun extension(json: String?, label: String): Map<String, Any?> =
+            if (json.isNullOrBlank() || json == "null") emptyMap()
+            else decode(json, label, extensionsAdapter::fromJson)
+        fun checked(json: String?, label: String, allowed: Set<String>): Map<String, Any?> {
+            val fields = extension(json, label)
+            require(fields.keys.all { it in allowed }) {
+                "$label has unrecognized reference-bearing extension fields; " +
+                    "a type-aware migration is required."
+            }
+            return fields
+        }
+        source.characters.forEach {
+            checked(it.extensionFieldsJson, "Character extension",
+                setOf("elsewhere_manual_fields", "_elsewhere_promoted_npc_id"))
+        }
+        source.personas.forEach {
+            checked(it.extensionFieldsJson, "Persona extension",
+                setOf("elsewhere_manual_persona_fields"))
+        }
+        source.npcDossiers.forEach {
+            checked(it.extensionFieldsJson, "NPC extension",
+                setOf("_elsewhere_linked_character_id"))
+        }
+        source.npcLibraryEntries.forEach {
+            checked(it.extensionFieldsJson, "NPC Library extension", emptySet())
         }
         // A plan from another archive or namespace must never silently remap this one.
         require(WorldArchiveIdPlanner.plan(source, plan.namespace).mappings == plan.mappings) {
@@ -66,6 +87,37 @@ object WorldArchiveSemanticRemapper {
         fun keyedMap(json: String, label: String, kind: WorldArchiveIdKind): String {
             val original = decode(json, label, knowledgeAdapter::fromJson)
             return knowledgeAdapter.toJson(original.mapKeys { (old, _) -> id(kind, old) })
+        }
+        val sourceCharacterIds = source.characters.mapTo(mutableSetOf()) {
+            it.characterId
+        }
+        val sourceNpcIds = source.npcDossiers.mapTo(mutableSetOf()) { it.npcId }
+        fun characterExtension(row: CharacterEntity): String? {
+            val fields = checked(row.extensionFieldsJson, "Character extension",
+                setOf("elsewhere_manual_fields", "_elsewhere_promoted_npc_id")).toMutableMap()
+            val origin = fields.remove("_elsewhere_promoted_npc_id") as? String
+            if (origin == row.characterId && origin in sourceNpcIds) {
+                require(id(WorldArchiveIdKind.CHARACTER, origin) ==
+                    id(WorldArchiveIdKind.NPC_DOSSIER, origin)) {
+                    "Promoted Character/NPC imported identities must stay aligned."
+                }
+                fields["_elsewhere_promoted_npc_id"] =
+                    id(WorldArchiveIdKind.CHARACTER, origin)
+            }
+            return fields.takeIf { it.isNotEmpty() }?.let(extensionsAdapter::toJson)
+        }
+        fun npcExtension(row: NpcDossierEntity): String? {
+            val fields = checked(row.extensionFieldsJson, "NPC extension",
+                setOf("_elsewhere_linked_character_id")).toMutableMap()
+            val linked = fields["_elsewhere_linked_character_id"] as? String
+            if (linked != null) {
+                require(linked in sourceCharacterIds) {
+                    "Linked Character is missing from the selected World archive."
+                }
+                fields["_elsewhere_linked_character_id"] =
+                    id(WorldArchiveIdKind.CHARACTER, linked)
+            }
+            return fields.takeIf { it.isNotEmpty() }?.let(extensionsAdapter::toJson)
         }
         fun scenarioJson(json: String, scenarioId: String): String {
             val original = ScenarioCodec.decode(json)
@@ -260,7 +312,10 @@ object WorldArchiveSemanticRemapper {
                 )
             },
             characters = source.characters.map {
-                it.copy(characterId = id(WorldArchiveIdKind.CHARACTER, it.characterId))
+                it.copy(
+                    characterId = id(WorldArchiveIdKind.CHARACTER, it.characterId),
+                    extensionFieldsJson = characterExtension(it)
+                )
             },
             personas = source.personas.map {
                 it.copy(personaId = id(WorldArchiveIdKind.PERSONA, it.personaId))
@@ -419,6 +474,7 @@ object WorldArchiveSemanticRemapper {
                 it.copy(
                     npcId = id(WorldArchiveIdKind.NPC_DOSSIER, it.npcId),
                     chatId = id(WorldArchiveIdKind.CHAT, it.chatId),
+                    extensionFieldsJson = npcExtension(it),
                     personaRelationshipsJson = keyedMap(it.personaRelationshipsJson,
                         "NPC Persona relationships", WorldArchiveIdKind.PERSONA),
                     characterKnowledgeJson = keyedMap(it.characterKnowledgeJson,
