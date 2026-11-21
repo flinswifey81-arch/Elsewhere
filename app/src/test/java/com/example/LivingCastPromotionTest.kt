@@ -199,6 +199,73 @@ class LivingCastPromotionTest {
         assertEquals("scenario-npc", npc.getProjectedDossiers(scenarioId).single().npcId)
     }
 
+
+    @Test fun promotedNpcRelationshipFollowsSelectedVariantWithoutDuplicatingCharacter() = runBlocking {
+        createCharacter("main-bot", "Primary")
+        createPersona()
+        val chatId = chats.createSoloChat("Variant Story", "player", "main-bot")
+        npc.saveManual(dossier(chatId))
+        val selected = MessageEntity(
+            messageId = "npc-branch-a", chatId = chatId,
+            speakerType = SpeakerType.CHARACTER, speakerId = "main-bot",
+            speakerDisplayNameSnapshot = "Primary",
+            content = "Mara entrusted the key to the player.", orderIndex = 6L,
+            variantGroupId = "npc-branch", isPrimaryVariant = true
+        )
+        val alternative = selected.copy(
+            messageId = "npc-branch-b",
+            content = "Mara decided the key was not safe with the player.",
+            isPrimaryVariant = false
+        )
+        db.messageDao().insertMessage(selected)
+        db.messageDao().insertMessage(alternative)
+        npc.applyStructuredUpdates(
+            chatId, selected.messageId, selected.variantGroupId,
+            sourceRevision = 0, isApplied = true,
+            updates = listOf(com.example.domain.npc.NpcStructuredUpdate(
+                "recurring-npc", null, null, null, null, null,
+                "TRUST_FROM_SELECTED_BRANCH_ONLY", null, null
+            )),
+            activePersonaId = "player"
+        )
+        npc.applyStructuredUpdates(
+            chatId, alternative.messageId, alternative.variantGroupId,
+            sourceRevision = 0, isApplied = false,
+            updates = listOf(com.example.domain.npc.NpcStructuredUpdate(
+                "recurring-npc", null, null, null, null, null,
+                "DOUBT_FROM_ALTERNATE_BRANCH_ONLY", null, null
+            )),
+            activePersonaId = "player"
+        )
+
+        val result = npc.promoteNpcToCharacter(chatId, "recurring-npc")
+        assertEquals("recurring-npc", result.characterId)
+        chats.selectSoloSpotlight(chatId, "recurring-npc")
+        fun relationship(): String = runBlocking {
+            npc.promotedSpeakerRelationshipContext(
+                chatId, "recurring-npc", "player"
+            ).orEmpty()
+        }
+        assertTrue(relationship().contains("TRUST_FROM_SELECTED_BRANCH_ONLY"))
+        assertFalse(relationship().contains("DOUBT_FROM_ALTERNATE_BRANCH_ONLY"))
+
+        npc.selectVariant("npc-branch", alternative.messageId)
+        assertTrue(relationship().contains("DOUBT_FROM_ALTERNATE_BRANCH_ONLY"))
+        assertFalse(relationship().contains("TRUST_FROM_SELECTED_BRANCH_ONLY"))
+        assertEquals("recurring-npc", npc.getProjectedDossiers(chatId).single().npcId)
+        assertEquals("recurring-npc", chats.getParticipantsForChatOnce(chatId).first().characterId)
+
+        npc.selectVariant("npc-branch", selected.messageId)
+        assertTrue(relationship().contains("TRUST_FROM_SELECTED_BRANCH_ONLY"))
+        assertFalse(relationship().contains("DOUBT_FROM_ALTERNATE_BRANCH_ONLY"))
+        assertEquals(2, db.messageDao().getMessagesForChat(chatId).first().size)
+        assertEquals(2, chats.getParticipantsForChatOnce(chatId).size)
+        assertEquals(2, db.backupDao().getCharacters().size)
+        val exported = chars.exportCharacterJson("recurring-npc")
+        assertFalse(exported.contains("TRUST_FROM_SELECTED_BRANCH_ONLY"))
+        assertFalse(exported.contains("DOUBT_FROM_ALTERNATE_BRANCH_ONLY"))
+    }
+
     @Test fun promotionCopiesNpcPortraitWithoutDeletingTheNpcOriginal() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
         val photos = ProfileImageRepository(context, coordinator)
