@@ -6,8 +6,6 @@ import com.example.data.model.CampaignChapterEntity
 import com.example.data.model.CampaignEntity
 import com.example.data.model.WorldMembershipEntity
 import com.example.data.model.WorldResourceType
-import java.util.UUID
-
 /**
  * Local Campaign organization only. No paid provider calls, automatic chapter-memory
  * sharing, World-canon promotion, or changes to saved messages / variants.
@@ -32,7 +30,7 @@ class CampaignRepository(
                 require(name.isNotBlank() && name.length <= 200) {
                     "Campaign title must contain 1–200 characters."
                 }
-                CampaignEntity(worldId = worldId, title = name).also(dao::insertCampaign)
+                CampaignEntity(worldId = worldId, title = name).also { dao.insertCampaign(it) }
             }
         }
 
@@ -80,7 +78,7 @@ class CampaignRepository(
                     chatId = chatId,
                     ordinal = ordinal + 1,
                     title = chapterTitle
-                ).also(dao::insertChapter)
+                ).also { dao.insertChapter(it) }
             }
         }
 
