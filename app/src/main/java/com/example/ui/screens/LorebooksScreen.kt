@@ -57,6 +57,7 @@ fun LorebooksScreen(
     var pasteJson by remember { mutableStateOf("") }
     var pendingImportJson by remember { mutableStateOf<String?>(null) }
     var importPreview by remember { mutableStateOf<LorebookImportPreview?>(null) }
+    var confirmLorebookReplace by remember { mutableStateOf(false) }
     var pendingDelete by remember { mutableStateOf<LorebookEntity?>(null) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var noticeMessage by remember { mutableStateOf<String?>(null) }
@@ -222,7 +223,7 @@ fun LorebooksScreen(
         )
     }
 
-    importPreview?.let { preview ->
+    if (!confirmLorebookReplace) importPreview?.let { preview ->
         val json = pendingImportJson
         AlertDialog(
             onDismissRequest = {
@@ -296,19 +297,9 @@ fun LorebooksScreen(
                         }) { Text("New Copy") }
                         if (preview.duplicateLorebookId && preview.conflictingEntryIds.isEmpty()) {
                             TextButton(
-                                onClick = {
-                                    if (json != null) {
-                                        scope.launch {
-                                            runCatching { repository.importJson(json, LorebookImportMode.REPLACE_EXISTING) }
-                                                .onSuccess { noticeMessage = "Existing Lorebook replaced." }
-                                                .onFailure { errorMessage = it.message ?: "Import failed." }
-                                            importPreview = null
-                                            pendingImportJson = null
-                                        }
-                                    }
-                                },
+                                onClick = { if (json != null) confirmLorebookReplace = true },
                                 colors = elsewhereDestructiveButtonColors()
-                            ) { Text("Replace") }
+                            ) { Text("Review Replacement") }
                         }
                     } else {
                         TextButton(onClick = {
@@ -330,6 +321,49 @@ fun LorebooksScreen(
                     importPreview = null
                     pendingImportJson = null
                 }) { Text("Cancel") }
+            }
+        )
+    }
+
+    if (confirmLorebookReplace) {
+        val preview = importPreview
+        val json = pendingImportJson
+        AlertDialog(
+            onDismissRequest = { confirmLorebookReplace = false },
+            title = { Text("Replace existing Lorebook JSON?") },
+            text = {
+                Text(
+                    "The saved Lorebook with ID ${preview?.lorebook?.lorebookId.orEmpty()} " +
+                        "will be updated in place. Its existing chat attachments, " +
+                        "matching entry IDs and their chat-specific overrides are preserved. " +
+                        "Entries omitted from the replacement JSON—and their overrides—" +
+                        "will be removed. No chat messages will be deleted. " +
+                        "This cannot be undone without your own backup."
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    modifier = Modifier.testTag("confirm_replace_lorebook_json"),
+                    onClick = {
+                        if (preview != null && json != null) scope.launch {
+                            try {
+                                repository.importJson(json, LorebookImportMode.REPLACE_EXISTING)
+                                noticeMessage = "Existing Lorebook JSON updated without removing chat attachments."
+                                importPreview = null
+                                pendingImportJson = null
+                            } catch (failure: Exception) {
+                                errorMessage = failure.message ?: "Lorebook update failed."
+                            } finally {
+                                confirmLorebookReplace = false
+                            }
+                        }
+                    }
+                ) { Text("Replace Lorebook JSON") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmLorebookReplace = false }) {
+                    Text("Keep existing")
+                }
             }
         )
     }
