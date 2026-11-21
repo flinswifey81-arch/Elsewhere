@@ -389,7 +389,21 @@ fun ElsewhereApp(
                     onNavigateToLorebooks = { navController.navigate("chat_lorebooks/$chatId") },
                     onNavigateToStoryMemories = { navController.navigate("chat_story_memories/$chatId") },
                     onNavigateToNpcBank = { navController.navigate("chat_npc_bank/$chatId") },
+                    onNavigateToScenarioSessionEditor = {
+                        navController.navigate("chat_scenario_editor/${Uri.encode(chatId)}")
+                    },
                     onNavigateToSettings = { navController.navigate("chat_settings/$chatId") },
+                )
+            }
+            composable(
+                "chat_scenario_editor/{chatId}",
+                arguments = listOf(navArgument("chatId") { type = NavType.StringType })
+            ) { backStackEntry ->
+                val chatId = backStackEntry.arguments?.getString("chatId").orEmpty()
+                ScenarioSessionEditorScreen(
+                    chatId = chatId,
+                    container = container,
+                    onNavigateBack = { navController.popBackStack() }
                 )
             }
             composable(
