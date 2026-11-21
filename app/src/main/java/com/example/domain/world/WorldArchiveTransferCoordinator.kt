@@ -44,6 +44,7 @@ class WorldArchiveTransferCoordinator(
         val chats: Int,
         val messages: Int,
         val alternatives: Int,
+        val storyMemories: Int,
         val characters: Int,
         val personas: Int,
         val scenarios: Int,
@@ -199,6 +200,11 @@ class WorldArchiveTransferCoordinator(
                 chatSettings = dao.getChatSettings(),
                 generationMetadata = dao.getGenerationMetadata(),
                 roleplayMemories = dao.getRoleplayMemories(),
+                storyMemories = database.storyMemoryDao().getAll(),
+                storyMemoryActors = database.storyMemoryDao().getAllActors(),
+                storyMemoryReturns = database.storyMemoryDao().getAllReturns(),
+                storyMemoryKnowledgeChanges = database.storyMemoryDao().getAllKnowledgeChanges(),
+                storyMemoryPerspectives = database.storyMemoryDao().getAllPerspectives(),
                 conversationSummaries = dao.getConversationSummaries(),
                 lorebooks = dao.getLorebooks(),
                 lorebookEntries = dao.getLorebookEntries(),
@@ -244,6 +250,7 @@ class WorldArchiveTransferCoordinator(
             chats = state.chats.size,
             messages = state.messages.size,
             alternatives = state.messages.count { !it.isPrimaryVariant },
+            storyMemories = state.storyMemories.size,
             characters = state.characters.size,
             personas = state.personas.size,
             scenarios = state.scenarios.size,
@@ -254,7 +261,8 @@ class WorldArchiveTransferCoordinator(
                 state.personas.any { !it.privateNotesJson.isNullOrBlank() } ||
                 state.npcDossiers.any { it.secrets.isNotBlank() || it.authorNotes.isNotBlank() } ||
                 state.npcLibraryEntries.any { it.secrets.isNotBlank() || it.authorNotes.isNotBlank() } ||
-                state.lorebookEntries.any { it.notes.isNotBlank() },
+                state.lorebookEntries.any { it.notes.isNotBlank() } ||
+                state.storyMemories.isNotEmpty(),
             containsUnsentDrafts = state.chatSettings.any { !it.draftMessage.isNullOrBlank() } ||
                 state.messageAttachments.any { it.messageId == null },
             fingerprint = MessageDigest.getInstance("SHA-256").digest(bytes).hex()
