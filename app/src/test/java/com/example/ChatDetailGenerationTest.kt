@@ -2443,6 +2443,81 @@ class ChatDetailGenerationTest {
         harness.viewModel.discardPartial()
     }
 
+    @Test
+    fun promotedNpcSpotlightSwitchesRealProviderResponderWithoutRestartingStory() = runBlocking {
+        val provider = RecordingStreamingProvider()
+        val harness = createHarness(
+            provider, ResponseLengthProfile.NORMAL, npcBankEnabledInitially = true
+        )
+        val npcId = "stable-promoted-npc"
+        harness.npcRepository.saveManual(
+            NpcDossier(
+                npcId = npcId, chatId = harness.chatId,
+                displayName = "Mara the Archivist",
+                aliases = listOf("Archivist"),
+                role = "Keeper of the passage",
+                appearance = "Copper braided hair",
+                personality = "PROMOTED_PERSONALITY_SENTINEL",
+                relationshipToPersona = "PROMOTED_RELATIONSHIP_PRIVATE",
+                personaRelationships = emptyMap(),
+                characterKnowledge = emptyMap(),
+                goals = "PROMOTED_GOAL_SENTINEL",
+                secrets = "PROMOTED_SECRET_MUST_NOT_BECOME_GLOBAL",
+                authorNotes = "PROMOTED_PRIVATE_AUTHOR_NOTE",
+                keepInScene = true,
+                isManualBase = true,
+                createdAt = 1L,
+                updatedAt = 1L,
+                sceneMode = "HERE"
+            )
+        )
+        val promoted = harness.npcRepository.promoteNpcToCharacter(harness.chatId, npcId)
+        assertEquals(npcId, promoted.characterId)
+        assertTrue(promoted.created)
+
+        harness.viewModel.onDraftChanged("Original character responds first.")
+        harness.viewModel.sendMessage()
+        awaitCompletedTurn(harness.viewModel, 2) { provider.requests.size }
+        assertEquals("character-1",
+            harness.messageRepository.getMessagesForChatOnce(harness.chatId).last().speakerId)
+
+        harness.chatRepository.selectSoloSpotlight(harness.chatId, npcId)
+        withTimeout(15_000) {
+            harness.viewModel.uiState.first {
+                it is ChatUiState.Success && it.selectedSoloSpotlightId == npcId
+            }
+        }
+        harness.viewModel.onDraftChanged("Archivist, please answer.")
+        harness.viewModel.sendMessage()
+        awaitCompletedTurn(harness.viewModel, 4) { provider.requests.size }
+        val selectedPrompt = provider.requests.last().first { it.role == Role.SYSTEM }.content
+        assertTrue(selectedPrompt.contains("PROMOTED_PERSONALITY_SENTINEL"))
+        assertTrue(selectedPrompt.contains("PROMOTED_GOAL_SENTINEL"))
+        assertFalse(selectedPrompt.contains("PROMOTED_PRIVATE_AUTHOR_NOTE"))
+        assertFalse(selectedPrompt.contains("PROMOTED_RELATIONSHIP_PRIVATE"))
+        assertFalse(selectedPrompt.contains("PROMOTED_SECRET_MUST_NOT_BECOME_GLOBAL"))
+        val transcript = harness.messageRepository.getMessagesForChatOnce(harness.chatId)
+        assertEquals("character-1", transcript[1].speakerId)
+        assertEquals(npcId, transcript[3].speakerId)
+        assertEquals(2, provider.requests.size)
+
+        harness.chatRepository.selectSoloSpotlight(harness.chatId, "character-1")
+        withTimeout(15_000) {
+            harness.viewModel.uiState.first {
+                it is ChatUiState.Success &&
+                    it.selectedSoloSpotlightId == "character-1"
+            }
+        }
+        harness.viewModel.onDraftChanged("Original character, welcome back.")
+        harness.viewModel.sendMessage()
+        awaitCompletedTurn(harness.viewModel, 6) { provider.requests.size }
+        assertEquals("character-1",
+            harness.messageRepository.getMessagesForChatOnce(harness.chatId).last().speakerId)
+        assertEquals(3, provider.requests.size)
+        assertEquals(npcId,
+            harness.npcRepository.getProjectedDossiers(harness.chatId).single().npcId)
+    }
+
     private data class Harness(
         val chatId: String,
         val viewModel: ChatDetailViewModel,
