@@ -24,12 +24,17 @@ import androidx.compose.ui.unit.dp
 import com.example.data.model.WorldCastEntity
 import com.example.data.model.WorldContinuityEventEntity
 import com.example.data.model.WorldEntity
+import com.example.data.model.CampaignEntity
+import com.example.data.model.CampaignChapterEntity
+import com.example.data.model.ChatEntity
+import com.example.domain.repository.CampaignRepository
 import com.example.domain.repository.WorldRepository
 import com.example.domain.repository.ChatRepository
 import com.example.ui.components.elsewhereCardBorder
 import com.example.ui.components.elsewhereTextFieldColors
 import com.example.ui.components.elsewhereTopAppBarColors
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.first
 
 /**
  * Manual Worlds editor with limited World-definition JSON import/export.
@@ -41,6 +46,7 @@ fun WorldsScreen(
     repository: WorldRepository,
     archiveTransfer: WorldArchiveTransferCoordinator? = null,
     chatRepository: ChatRepository? = null,
+    campaignRepository: CampaignRepository? = null,
     onOpenChat: ((String) -> Unit)? = null,
     onCreateSoloEpisode: ((String) -> Unit)? = null,
     onCreateScenarioEpisode: ((String) -> Unit)? = null
@@ -60,6 +66,22 @@ fun WorldsScreen(
     var refreshVersion by remember { mutableIntStateOf(0) }
     var cast by remember { mutableStateOf<List<WorldCastEntity>>(emptyList()) }
     var events by remember { mutableStateOf<List<WorldContinuityEventEntity>>(emptyList()) }
+    var campaigns by remember { mutableStateOf<List<CampaignEntity>>(emptyList()) }
+    var chapters by remember { mutableStateOf<List<CampaignChapterEntity>>(emptyList()) }
+    var availableChats by remember { mutableStateOf<List<ChatEntity>>(emptyList()) }
+    var chosenCampaignId by remember { mutableStateOf<String?>(null) }
+    val chosenCampaign = campaigns.firstOrNull { it.campaignId == chosenCampaignId }
+    var newCampaignOpen by remember { mutableStateOf(false) }
+    var newCampaignTitle by remember { mutableStateOf("") }
+    var deletingCampaign by remember { mutableStateOf<CampaignEntity?>(null) }
+    var newChapterOpen by remember { mutableStateOf(false) }
+    var newChapterTitle by remember { mutableStateOf("") }
+    var newChapterChatId by remember { mutableStateOf<String?>(null) }
+    var chatPickerOpen by remember { mutableStateOf(false) }
+    var editingChapter by remember { mutableStateOf<CampaignChapterEntity?>(null) }
+    var chapterEditTitle by remember { mutableStateOf("") }
+    var chapterEditRecap by remember { mutableStateOf("") }
+    var chapterEditComplete by remember { mutableStateOf(false) }
 
     val context = LocalContext.current
     var showImportJson by remember { mutableStateOf(false) }
@@ -114,15 +136,23 @@ fun WorldsScreen(
         }
     }
 
-    LaunchedEffect(selectedId, refreshVersion) {
+    LaunchedEffect(selectedId, chosenCampaignId, refreshVersion) {
         val id = selectedId
         if (id == null) {
             cast = emptyList()
             events = emptyList()
+            campaigns = emptyList()
+            chapters = emptyList()
+            availableChats = emptyList()
         } else {
             try {
                 cast = repository.getCast(id)
                 events = repository.getEvents(id)
+                campaigns = campaignRepository?.forWorld(id).orEmpty()
+                chapters = chosenCampaignId?.takeIf { chosen ->
+                    campaigns.any { it.campaignId == chosen }
+                }?.let { campaignRepository?.chapters(it) }.orEmpty()
+                availableChats = chatRepository?.getAllChats()?.first().orEmpty()
             } catch (failure: Exception) {
                 error = failure.message ?: "Unable to load World details."
             }
@@ -143,6 +173,122 @@ fun WorldsScreen(
                 busy = false
             }
         }
+    }
+
+    if (newCampaignOpen && selected != null && campaignRepository != null) AlertDialog(
+        onDismissRequest = { if (!busy) newCampaignOpen = false },
+        title = { Text("Create Campaign") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Campaigns are separate stories inside this World. Their private events and recaps never become shared World Canon automatically.")
+                OutlinedTextField(
+                    newCampaignTitle, { newCampaignTitle = it.take(200) },
+                    label = { Text("Campaign name") },
+                    modifier = Modifier.testTag("campaign_title_field")
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(enabled = !busy && newCampaignTitle.isNotBlank(), onClick = {
+                submit {
+                    val created = campaignRepository.createCampaign(selected.worldId, newCampaignTitle)
+                    chosenCampaignId = created.campaignId
+                    newCampaignTitle = ""
+                    newCampaignOpen = false
+                }
+            }, modifier = Modifier.testTag("save_campaign")) { Text("Create") }
+        },
+        dismissButton = { TextButton(onClick = { newCampaignOpen = false }) { Text("Cancel") } }
+    )
+
+    deletingCampaign?.let { target ->
+        if (campaignRepository != null) AlertDialog(
+            onDismissRequest = { if (!busy) deletingCampaign = null },
+            title = { Text("Delete Campaign organization?") },
+            text = { Text("This removes Campaign and chapter links and their local recaps. It does NOT delete any chat, message, variant, or chat memory. This cannot be undone.") },
+            confirmButton = {
+                TextButton(enabled = !busy, onClick = {
+                    submit {
+                        campaignRepository.deleteCampaign(target.campaignId)
+                        if (chosenCampaignId == target.campaignId) chosenCampaignId = null
+                        deletingCampaign = null
+                    }
+                }) { Text("Delete Campaign") }
+            },
+            dismissButton = { TextButton(onClick = { deletingCampaign = null }) { Text("Cancel") } }
+        )
+    }
+
+    if (newChapterOpen && chosenCampaign != null && campaignRepository != null) AlertDialog(
+        onDismissRequest = { if (!busy) newChapterOpen = false },
+        title = { Text("Link chat as chapter") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Link an existing conversation without copying its messages. A chat can belong to only one Campaign.")
+                Box {
+                    OutlinedButton(onClick = { chatPickerOpen = true }) {
+                        Text(availableChats.firstOrNull { it.chatId == newChapterChatId }?.displayName ?: "Choose chat")
+                    }
+                    DropdownMenu(expanded = chatPickerOpen, onDismissRequest = { chatPickerOpen = false }) {
+                        availableChats.forEach { chat ->
+                            DropdownMenuItem(text = { Text(chat.displayName) }, onClick = {
+                                newChapterChatId = chat.chatId
+                                if (newChapterTitle.isBlank()) newChapterTitle = chat.displayName.take(200)
+                                chatPickerOpen = false
+                            })
+                        }
+                    }
+                }
+                OutlinedTextField(newChapterTitle, { newChapterTitle = it.take(200) },
+                    label = { Text("Chapter title") }, modifier = Modifier.testTag("campaign_chapter_title"))
+            }
+        },
+        confirmButton = {
+            TextButton(enabled = !busy && newChapterChatId != null && newChapterTitle.isNotBlank(),
+                onClick = {
+                    submit {
+                        campaignRepository.addChapter(chosenCampaign.campaignId,
+                            requireNotNull(newChapterChatId), newChapterTitle)
+                        newChapterOpen = false
+                        newChapterTitle = ""
+                        newChapterChatId = null
+                    }
+                }, modifier = Modifier.testTag("save_campaign_chapter")
+            ) { Text("Link Chapter") }
+        },
+        dismissButton = { TextButton(onClick = { newChapterOpen = false }) { Text("Cancel") } }
+    )
+
+    editingChapter?.let { chapter ->
+        if (campaignRepository != null) AlertDialog(
+            onDismissRequest = { if (!busy) editingChapter = null },
+            title = { Text("Chapter recap") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(chapterEditTitle, { chapterEditTitle = it.take(200) },
+                        label = { Text("Chapter title") })
+                    OutlinedTextField(chapterEditRecap, { chapterEditRecap = it.take(12_000) },
+                        label = { Text("Private recap") }, minLines = 3, maxLines = 8,
+                        modifier = Modifier.testTag("campaign_chapter_recap"))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(checked = chapterEditComplete, onCheckedChange = { chapterEditComplete = it })
+                        Text("Chapter complete")
+                    }
+                    Text("These are player-authored notes. They are not automatically sent to the model or added to shared World Canon.",
+                        style = MaterialTheme.typography.bodySmall)
+                }
+            },
+            confirmButton = {
+                TextButton(enabled = !busy && chapterEditTitle.isNotBlank(), onClick = {
+                    submit {
+                        campaignRepository.updateChapter(chapter.campaignId, chapter.chapterId,
+                            chapterEditTitle, chapterEditRecap, chapterEditComplete)
+                        editingChapter = null
+                    }
+                }, modifier = Modifier.testTag("save_campaign_recap")) { Text("Save") }
+            },
+            dismissButton = { TextButton(onClick = { editingChapter = null }) { Text("Cancel") } }
+        )
     }
 
     confirmPlaintextWorldExport?.let { world ->
@@ -277,7 +423,7 @@ fun WorldsScreen(
         AlertDialog(
             onDismissRequest = { if (!busy) deletingWorld = null },
             title = { Text("Delete World?") },
-            text = { Text("Delete " + world.title + " and its World Cast and continuity? Linked chats, Characters, Personas, Scenarios and Lorebooks survive. This cannot be undone.") },
+            text = { Text("Delete " + world.title + " and its World Cast and continuity? Linked chats, Characters, Personas, Scenarios and Lorebooks survive. A World with Campaigns cannot be deleted until its Campaigns are explicitly removed. This cannot be undone.") },
             confirmButton = {
                 TextButton(enabled = !busy, onClick = {
                     submit {
@@ -384,6 +530,65 @@ fun WorldsScreen(
                             WorldArchiveControls(archiveTransfer, selected, onImported = { selectedId = it })
                         }
                         Text("World Definition JSON excludes episode history. Encrypted World archives can include linked chat history and files.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+                if (campaignRepository != null) {
+                    item(key = "campaign_header") {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            HorizontalDivider()
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("Campaigns (" + campaigns.size + ")", style = MaterialTheme.typography.titleLarge,
+                                    modifier = Modifier.weight(1f))
+                                TextButton(onClick = {
+                                    newCampaignTitle = ""
+                                    newCampaignOpen = true
+                                }, modifier = Modifier.testTag("create_campaign")) { Text("New") }
+                            }
+                            Text("Campaigns isolate independent playthroughs. Chapter recaps are private notes; sharing them with another Campaign or World Canon requires explicit future review.",
+                                style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                    items(campaigns, key = { "campaign_" + it.campaignId }) { campaign ->
+                        Card(modifier = Modifier.fillMaxWidth(), border = elsewhereCardBorder()) {
+                            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(campaign.title, style = MaterialTheme.typography.titleMedium)
+                                TextButton(onClick = {
+                                    chosenCampaignId = if (chosenCampaignId == campaign.campaignId) null else campaign.campaignId
+                                }, modifier = Modifier.testTag("open_campaign_" + campaign.campaignId)) {
+                                    Text(if (chosenCampaignId == campaign.campaignId) "Hide chapters" else "View chapters")
+                                }
+                                if (chosenCampaignId == campaign.campaignId) {
+                                    Text("Chapters (" + chapters.size + ")", style = MaterialTheme.typography.titleSmall)
+                                    TextButton(onClick = {
+                                        newChapterChatId = null
+                                        newChapterTitle = ""
+                                        newChapterOpen = true
+                                    }, modifier = Modifier.testTag("add_campaign_chapter")) { Text("Link an existing chat") }
+                                    chapters.forEach { chapter ->
+                                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                            Text("Chapter " + chapter.ordinal + ": " + chapter.title)
+                                            if (chapter.recap.isNotBlank()) Text(chapter.recap,
+                                                style = MaterialTheme.typography.bodySmall, maxLines = 3)
+                                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                                TextButton(onClick = { onOpenChat?.invoke(chapter.chatId) }) { Text("Open chat") }
+                                                TextButton(onClick = {
+                                                    editingChapter = chapter
+                                                    chapterEditTitle = chapter.title
+                                                    chapterEditRecap = chapter.recap
+                                                    chapterEditComplete = chapter.state == "COMPLETE"
+                                                }) { Text("Edit recap") }
+                                            }
+                                        }
+                                    }
+                                    TextButton(onClick = { deletingCampaign = campaign }) { Text("Delete Campaign") }
+                                }
+                            }
+                        }
+                    }
+                    item(key = "campaign_portability_note") {
+                        Text("Until Campaign-aware World archives are implemented, use whole-app encrypted backup to preserve Campaigns. World archives refuse a lossy Campaign export.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
