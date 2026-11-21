@@ -23,6 +23,7 @@ class ScenarioRepository(
             require(chatId.isNotBlank()) { "The active chat ID is missing." }
             definition.validate()
             database.withTransaction {
+                validateLinkedCharacters(definition)
                 val chat = requireNotNull(database.chatDao().getChatById(chatId)) {
                     "This chat no longer exists."
                 }
@@ -43,13 +44,20 @@ class ScenarioRepository(
     suspend fun save(id: String, definition: ScenarioDefinition) = coordinator.withMutation {
         require(id.isNotBlank()) { "Scenario identifier is required." }
         definition.validate()
-        val old = get(id)
-        database.scenarioDao().save(ScenarioEntity(id, ScenarioCodec.encode(definition), old?.createdAt ?: System.currentTimeMillis()))
+        database.withTransaction {
+            validateLinkedCharacters(definition)
+            val old = get(id)
+            database.scenarioDao().save(ScenarioEntity(
+                id, ScenarioCodec.encode(definition),
+                old?.createdAt ?: System.currentTimeMillis()
+            ))
+        }
     }
     suspend fun start(scenarioId: String, personaId: String, worldId: String? = null): String = coordinator.withMutation {
         database.withTransaction {
             val scenario = requireNotNull(get(scenarioId)) { "Scenario is unavailable." }
             val definition = ScenarioCodec.decode(scenario.definitionJson).also { it.validate() }
+            validateLinkedCharacters(definition)
             requireNotNull(database.personaDao().getPersonaById(personaId)) { "Select an existing persona." }
             if (worldId != null) requireNotNull(database.worldDao().getWorld(worldId)) {
                 "Selected World is unavailable."
@@ -76,6 +84,18 @@ class ScenarioRepository(
             chat.chatId
         }
     }
+    /**
+     * A linked Character is a real stable ID, never a guessed name. Reject broken
+     * references before saving or starting; nothing copies another chat's history.
+     */
+    private suspend fun validateLinkedCharacters(definition: ScenarioDefinition) {
+        for (id in definition.npcs.mapNotNull { it.sourceCharacterId }.distinct()) {
+            require(id.isNotBlank() && database.characterDao().getCharacterById(id) != null) {
+                "A linked Scenario NPC Character no longer exists. Reassign or unlink it."
+            }
+        }
+    }
+
     /** Bounded shared World baseline for Scenario narration. */
     suspend fun worldContextForChat(chatId: String): String? {
         val memberships = database.worldDao().getMembershipsForResource(WorldResourceType.CHAT.name, chatId)
