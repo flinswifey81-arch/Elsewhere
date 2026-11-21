@@ -81,18 +81,17 @@ jobs:
           test -s "$ELSEWHERE_V15_FIXTURE_PATH"
           test -s app/build/outputs/apk/debug/app-debug.apk
 
-      - name: Create EMULATOR-ONLY version 4 candidate and instrumentation test
+      - name: Verify prepared 1.6.0 candidate version and stage test instrumentation
         run: |
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
-          path = Path('app/build.gradle.kts')
-          original = path.read_text()
-          old = '    versionCode = 3\n    versionName = "1.5.2"'
-          qa = '    versionCode = 4\n    versionName = "1.5.3-qa-emulator"'
-          assert original.count(old) == 1, "Unexpected production version definition; do not patch blindly"
-          path.write_text(original.replace(old, qa))
-          print("EMULATOR_VERSION_ONLY: temporary runner checkout changed from 3 to 4; GitHub source remains 3")
+          source = Path("app/build.gradle.kts").read_text()
+          assert source.count("    versionCode = 4\n    versionName = \"1.6.0\"") == 1, (
+              "Emulator must test the same 1.6.0 (4) version configured for release"
+          )
+          print("QA_VERSION_MATCH: real source version 1.6.0 (4); "
+                "emulator uses DEBUG-only signer and disposable synthetic data")
           PY
           mkdir -p app/src/androidTest/java/com/example
           cp qa/device-upgrade/UpgradeRehearsalInstrumentedTest.kt \
