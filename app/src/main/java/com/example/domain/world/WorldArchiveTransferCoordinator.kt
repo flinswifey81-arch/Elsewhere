@@ -187,6 +187,12 @@ class WorldArchiveTransferCoordinator(
     private suspend fun captureWorld(worldId: String): Source {
         val dao = database.backupDao()
         val payload = database.withTransaction {
+            // Until Campaign-aware encrypted World transfer and semantic ID
+            // remapping exist, refuse rather than silently exporting only the
+            // World and dropping its separate playthrough organization.
+            require(database.campaignDao().forWorld(worldId).isEmpty()) {
+                "This World contains Campaigns. Encrypted World archives cannot carry them yet; use whole-app encrypted backup."
+            }
             BackupPayload(
                 characters = dao.getCharacters(),
                 personas = dao.getPersonas(),
