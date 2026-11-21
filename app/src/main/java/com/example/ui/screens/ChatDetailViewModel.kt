@@ -61,6 +61,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -147,6 +148,9 @@ sealed class ChatUiState {
         val availableGroupCharacters: List<CharacterEntity> = emptyList(),
         val groupParticipantsLoaded: Boolean = false,
         val selectedGroupCharacterId: String? = null,
+        /** Reordered participants persist the Solo spotlight without a schema change. */
+        val soloSpotlightCharacters: List<GroupCharacterState> = emptyList(),
+        val selectedSoloSpotlightId: String? = null,
         val generationCharacterId: String? = null,
         val isGenerating: Boolean = false,
         val streamingContent: String? = null,
@@ -293,6 +297,35 @@ class ChatDetailViewModel(
                 chatRepository.getChatSettingsFlow(chatId).filterNotNull().collect { latestSettings ->
                     currentChatSettings = latestSettings
                     updateSuccessState { it.copy(chatSettings = latestSettings) }
+                }
+            }
+
+            if (summary.chat.chatType == ChatType.SOLO) {
+                launch {
+                    combine(
+                        chatRepository.getParticipantsForChat(chatId),
+                        characterRepository.getAllCharacters()
+                    ) { participants, _ -> participants }
+                        .collect { participants ->
+                            val ordered = participants.sortedWith(
+                                compareBy<com.example.data.model.ChatParticipantEntity> {
+                                    it.sortPosition
+                                }.thenBy { it.joinedAt }
+                            )
+                            val characters = ordered.mapNotNull { participant ->
+                                characterRepository.getCharacterById(participant.characterId)?.let {
+                                    GroupCharacterState(it, participant.isActive, participant.sortPosition)
+                                }
+                            }
+                            updateSuccessState {
+                                it.copy(
+                                    soloSpotlightCharacters = characters,
+                                    selectedSoloSpotlightId = characters.firstOrNull {
+                                        member -> member.isActive
+                                    }?.character?.characterId
+                                )
+                            }
+                        }
                 }
             }
 
@@ -811,6 +844,26 @@ class ChatDetailViewModel(
             }
         } finally {
             generationStartInProgress = false
+        }
+    }
+
+    fun selectSoloSpotlight(characterId: String) {
+        val state = _uiState.value as? ChatUiState.Success ?: return
+        if (state.chatSummary.chat.chatType != ChatType.SOLO ||
+            state.isGenerating || generationStartInProgress ||
+            sendInProgress || inChatToolInProgress
+        ) return
+        if (state.soloSpotlightCharacters.none {
+                it.isActive && it.character.characterId == characterId
+            }) return
+        viewModelScope.launch {
+            runCatching { chatRepository.selectSoloSpotlight(chatId, characterId) }
+                .onFailure { error ->
+                    updateSuccessState {
+                        it.copy(generationError =
+                            error.message ?: "Unable to change the current Character spotlight.")
+                    }
+                }
         }
     }
 
@@ -1444,7 +1497,18 @@ class ChatDetailViewModel(
         val summary = chatSummary ?: return null
         val settings = chatRepository.getEffectiveChatSettings(chatId) ?: currentChatSettings ?: return null
         if (summary.chat.chatType == ChatType.SCENARIO) return prepareScenario(currentMessage, history, isContinuation)
-        val resolvedCharacterId = characterId ?: summary.characters.firstOrNull()?.characterId ?: return null
+        // A SOLO spotlight uses the persisted participant ordering. The
+        // original transcript, Wack and Story Memory ownership never move.
+        // Explicit regeneration speaker IDs still take precedence.
+        val resolvedCharacterId = characterId
+            ?: chatRepository.getParticipantsForChatOnce(chatId)
+                .filter { it.isActive }
+                .minWithOrNull(compareBy<com.example.data.model.ChatParticipantEntity> {
+                    it.sortPosition
+                }.thenBy { it.joinedAt })
+                ?.characterId
+            ?: summary.characters.firstOrNull()?.characterId
+            ?: return null
         val fullCharacter = characterRepository.getCharacterById(resolvedCharacterId) ?: return null
         val relevantPersonaMessage = currentMessage.takeIf { it.speakerType == SpeakerType.PERSONA }
             ?: history.lastOrNull { it.speakerType == SpeakerType.PERSONA }
@@ -1521,7 +1585,12 @@ class ChatDetailViewModel(
         val recentScene = com.example.domain.compiler.RecentPrimaryMessageWindow.take(
             history, if (currentMessage.isPrimaryVariant) 23 else 24
         ) + currentMessage
-        val sceneCast = NpcSceneCastResolver.resolve(projectedNpcDossiers, recentScene)
+        // Promoted Character and NPC share a stable ID; never render the
+        // responding Character again as an independent supporting NPC.
+        val sceneCast = NpcSceneCastResolver.resolve(
+            projectedNpcDossiers.filterNot { it.npcId == fullCharacter.characterId },
+            recentScene
+        )
         val presentNpcs = sceneCast.filter { it.presence == NpcScenePresence.PRESENT }.map { it.dossier }
         // NPC Bank stores continuity; the active Scene Cast controls whether we need speaker splitting.
         // Without any present NPC, ordinary Solo prose stays untouched.
