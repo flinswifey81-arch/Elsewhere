@@ -101,12 +101,23 @@ fun StoryMemoriesScreen(
     }
     LaunchedEffect(chatId, repository) {
         try {
+            // Load a one-shot Room snapshot before the reactive collector.
+            // On some Android/Robolectric schedulers the initial invalidation
+            // emission may arrive late even though the query is ready. Keeping
+            // the UI behind that emission leaves the player on a spinner.
+            val initial = repository.listForChat(chatId)
+            memories = initial
+            loading = false
             repository.observe(chatId).collect { current ->
                 memories = current
+                // The list must remain usable even if supplemental history
+                // and knowledge queries take longer than the primary read.
+                loading = false
                 relationshipEntries = repository.getRelationshipHistory(chatId)
                 promiseEntries = repository.getPromiseHistory(chatId)
-                knowers = current.associate { it.memoryId to repository.getCharacterKnowers(chatId, it.memoryId) }
-                loading = false
+                knowers = current.associate {
+                    it.memoryId to repository.getCharacterKnowers(chatId, it.memoryId)
+                }
             }
         } catch (failure: Exception) {
             error = failure.message ?: "Unable to load saved story memories."
