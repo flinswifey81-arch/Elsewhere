@@ -168,7 +168,9 @@ internal fun ProfileJsonImportWorkflow(
                         "Replace ONLY this $type card's JSON definition? Its ID, " +
                             "chat associations, existing messages, story memories, " +
                             "and local avatar will be kept. The new card text will " +
-                            "be used for future responses. Existing messages are not rewritten."
+                            "be used for future responses. Existing messages are not rewritten. " +
+                            "The previous card wording is replaced, so export the old JSON first " +
+                            "if you might want to revert it."
                     )
                     Text(
                         "Each duplicate is reviewed separately. Nothing is overwritten " +
