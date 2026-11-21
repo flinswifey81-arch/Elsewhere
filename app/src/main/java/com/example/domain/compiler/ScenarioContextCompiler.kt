@@ -21,7 +21,8 @@ class ScenarioContextCompiler {
         continuation: Boolean = false,
         recentMessageLimit: Int = 24,
         worldContext: String? = null,
-        storyMemories: List<StoryMemoryRecord> = emptyList()
+        storyMemories: List<StoryMemoryRecord> = emptyList(),
+        linkedCharacters: Map<String, CharacterEntity> = emptyMap()
     ): List<RoleplayMessage> {
         val instructions = buildString {
             appendLine("You are the collaborative narrator of an open-ended roleplay scenario. Portray the world and multiple distinct NPCs in ONE response, with clear names for NPC dialogue when helpful. Introduce new characters naturally when appropriate. Keep their voices, motivations, relationships and knowledge distinct. Hidden information is not automatically known to every NPC.")
@@ -39,6 +40,33 @@ class ScenarioContextCompiler {
             scenario.npcs.forEach { npc ->
                 section("CREATOR-DEFINED NPC: ${npc.name}", buildString {
                     fun field(label: String, value: String) { if (value.isNotBlank()) appendLine("$label: $value") }
+                    npc.sourceCharacterId?.let { characterId ->
+                        val linked = requireNotNull(linkedCharacters[characterId]) {
+                            "Scenario NPC ${npc.name} links an unavailable Character."
+                        }
+                        require(linked.characterId == characterId) {
+                            "Scenario NPC Character identity does not match the reviewed link."
+                        }
+                        appendLine("LINKED CHARACTER IDENTITY: ${linked.characterName}")
+                        appendLine("Use this Character's authored voice/identity as the NPC's baseline. " +
+                            "The Scenario-specific NPC fields below override context-specific portrayal. " +
+                            "Do not import that Character's other chats, memories, private notes or " +
+                            "unrelated World continuity. No knowledge or secrets transfer automatically.")
+                        field("Linked identity", linked.identityJson.orEmpty())
+                        field("Linked appearance", linked.appearanceJson.orEmpty())
+                        field("Linked personality", linked.personalityJson.orEmpty())
+                        field("Linked voice", linked.voiceJson.orEmpty())
+                        field("Linked behavior", linked.behaviorJson.orEmpty())
+                        field("Linked backstory", linked.backstoryJson.orEmpty())
+                        field("Linked writing style", linked.writingRulesJson.orEmpty())
+                        com.example.data.model.ManualCharacterFieldsCodec.readStored(linked)?.let { manual ->
+                            field("Linked manual personality", manual.personality)
+                            field("Linked manual tone", manual.tone)
+                            field("Linked manual appearance", manual.appearance)
+                            field("Linked manual short backstory", manual.shortBackstory)
+                            field("Linked manual conversational goals", manual.conversationalGoals)
+                        }
+                    }
                     field("Appearance", npc.appearance); field("Personality", npc.personality)
                     field("Background", npc.background); field("Motivations", npc.motivations)
                     field("Relationships", npc.relationships); field("Narrative role", npc.narrativeRole)
