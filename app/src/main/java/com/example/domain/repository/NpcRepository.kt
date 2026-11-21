@@ -764,6 +764,9 @@ class NpcRepository(
     ): String? = withContext(Dispatchers.IO) {
         if (afterOrderIndex != null) return@withContext null
         val base = dao.getDossier(characterId)?.takeIf { it.chatId == chatId }
+            ?: dao.getDossiers(chatId).firstOrNull {
+                linkedCharacterId(it) == characterId
+            }
             ?: return@withContext null
         val card = database.characterDao().getCharacterById(characterId)
             ?: return@withContext null
