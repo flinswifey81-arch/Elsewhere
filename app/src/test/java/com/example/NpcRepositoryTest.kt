@@ -111,6 +111,22 @@ class NpcRepositoryTest {
     }
 
     @Test
+    fun narratorWithoutObservingCharacterRetainsPresentUnlinkedNpcAndRespectsAway() = runBlocking {
+        repository.saveManual(dossier().copy(sceneMode = "HERE"))
+        val visible = repository.relevantContext(
+            chatId = "chat",
+            recentMessages = emptyList(),
+            observerCharacterId = null
+        ).orEmpty()
+        assertTrue("A narrator with no observer still needs present NPCs",
+            visible.contains("[NPC id=npc]"))
+        assertTrue(visible.contains("Name: Mara"))
+        repository.setSceneMode("npc", com.example.data.model.NpcSceneMode.AWAY)
+        assertTrue("Away NPCs must not be reintroduced to satisfy null-observer context",
+            repository.relevantContext("chat", emptyList(), observerCharacterId = null).isNullOrBlank())
+    }
+
+    @Test
     fun expandedSoloEnsembleContextIncludesAllFiveNpcProfiles() = runBlocking {
         (1..5).forEach { index ->
             repository.saveManual(
