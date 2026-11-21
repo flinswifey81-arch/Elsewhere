@@ -23,6 +23,7 @@ enum class WorldArchiveIdKind {
     CHAT,
     MESSAGE,
     MEMORY,
+    STORY_MEMORY,
     VARIANT_GROUP,
     RELATIONSHIP,
     LOREBOOK,
@@ -75,8 +76,21 @@ object WorldArchiveIdPlanner {
         require(namespace.length in 16..256 && namespace.none { it.code < 33 }) {
             "Import needs a unique, durable operation namespace"
         }
-        val messages = state.messages.map { it.messageId }.toSet()
-        val variantGroups = state.messages.map { it.variantGroupId }.toSet()
+        // Deleted source messages and superseded memory predecessors may be retained
+        // as historical provenance. Give their ORPHAN references fresh identities too,
+        // without manufacturing any missing Room rows or turning them eligible.
+        val messages = (
+            state.messages.map { it.messageId } +
+                state.storyMemories.mapNotNull { it.sourceMessageId }
+        ).toSet()
+        val variantGroups = (
+            state.messages.map { it.variantGroupId } +
+                state.storyMemories.mapNotNull { it.sourceVariantGroupId }
+        ).toSet()
+        val storyMemoryIds = (
+            state.storyMemories.map { it.memoryId } +
+                state.storyMemories.mapNotNull { it.previousStateMemoryId }
+        ).toSet()
         val scenarioNpcIds = (
             state.scenarios.flatMap { scenario ->
                 ScenarioCodec.decode(scenario.definitionJson).npcs.map { npc ->
@@ -93,13 +107,22 @@ object WorldArchiveIdPlanner {
             WorldArchiveIdKind.WORLD to setOf(state.worldId),
             WorldArchiveIdKind.WORLD_CAST to state.cast.map { it.worldCharacterId }.toSet(),
             WorldArchiveIdKind.CONTINUITY_EVENT to state.continuity.map { it.eventId }.toSet(),
-            WorldArchiveIdKind.CHARACTER to state.characters.map { it.characterId }.toSet(),
-            WorldArchiveIdKind.PERSONA to state.personas.map { it.personaId }.toSet(),
+            WorldArchiveIdKind.CHARACTER to (
+                state.characters.map { it.characterId } +
+                    state.storyMemories.filter { it.sourceSpeakerType == "CHARACTER" }
+                        .mapNotNull { it.sourceSpeakerId }
+            ).toSet(),
+            WorldArchiveIdKind.PERSONA to (
+                state.personas.map { it.personaId } +
+                    state.storyMemories.filter { it.sourceSpeakerType == "PERSONA" }
+                        .mapNotNull { it.sourceSpeakerId }
+            ).toSet(),
             WorldArchiveIdKind.SCENARIO to state.scenarios.map { it.scenarioId }.toSet(),
             WorldArchiveIdKind.SCENARIO_NPC to scenarioNpcIds,
             WorldArchiveIdKind.CHAT to state.chats.map { it.chatId }.toSet(),
             WorldArchiveIdKind.MESSAGE to messages,
             WorldArchiveIdKind.MEMORY to state.roleplayMemories.map { it.memoryId }.toSet(),
+            WorldArchiveIdKind.STORY_MEMORY to storyMemoryIds,
             WorldArchiveIdKind.RELATIONSHIP to state.relationships.map { it.relationshipId }.toSet(),
             WorldArchiveIdKind.LOREBOOK to state.lorebooks.map { it.lorebookId }.toSet(),
             WorldArchiveIdKind.LOREBOOK_ENTRY to state.lorebookEntries.map { it.entryId }.toSet(),
@@ -127,9 +150,15 @@ object WorldArchiveIdPlanner {
 
         val remappedMessages = requireNotNull(mappings[WorldArchiveIdKind.MESSAGE])
         // Compute this once: a large World can contain tens of thousands of variants.
-        val selfNamedVariantGroups = state.messages.asSequence()
-            .filter { it.messageId == it.variantGroupId }
-            .map { it.variantGroupId }.toSet()
+        val selfNamedVariantGroups = (
+            state.messages.asSequence()
+                .filter { it.messageId == it.variantGroupId }
+                .map { it.variantGroupId } +
+                state.storyMemories.asSequence()
+                    .filter { it.sourceMessageId != null &&
+                        it.sourceMessageId == it.sourceVariantGroupId }
+                    .mapNotNull { it.sourceVariantGroupId }
+        ).toSet()
         val variantMap = variantGroups.sorted().associateWith { original ->
             // Only alias to the mapped message when that message really belongs to this
             // variant group. An unrelated message ID with the same text is not its parent.
