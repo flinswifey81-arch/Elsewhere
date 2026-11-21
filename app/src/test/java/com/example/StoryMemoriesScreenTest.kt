@@ -402,8 +402,14 @@ class StoryMemoriesScreenTest {
                 StoryMemoriesScreen("ui-story", repository, chats, onNavigateBack = {})
             }
         }
-        composeRule.waitUntil(15_000) {
-            composeRule.onAllNodesWithTag("scan_story_candidates")
+        // The scan control lives in the list header, which is composed only
+        // after the initial Room Flow emission changes loading to false.
+        // On Robolectric the first waitUntil poll may not advance a pending
+        // LaunchedEffect; flush Compose startup before observing the real list.
+        // Keep the full UI assertion: this must fail if loading never finishes.
+        composeRule.waitForIdle()
+        composeRule.waitUntil(45_000) {
+            composeRule.onAllNodesWithTag("story_memories_list")
                 .fetchSemanticsNodes().isNotEmpty()
         }
         composeRule.onNodeWithTag("scan_story_candidates")
