@@ -86,7 +86,8 @@ class FullSchemaV15ToV21MigrationTest {
                 AppDatabase.MIGRATION_17_18,
                 migration18To19,
                 AppDatabase.MIGRATION_19_20,
-                AppDatabase.MIGRATION_20_21
+                AppDatabase.MIGRATION_20_21,
+                AppDatabase.MIGRATION_21_22
             )
             .allowMainThreadQueries().build()
     }
@@ -323,7 +324,7 @@ class FullSchemaV15ToV21MigrationTest {
         println(
             "ROOM15_TO_21_NATIVE_ROLLBACK_PASS legacyTables=${before.tables.size} " +
                 "legacyRows=${before.tables.values.sumOf { it.rowDigests.size }} " +
-                "originalVersion=15 retryVersion=21 providerCalls=0"
+                "originalVersion=15 retryVersion=$APP_DATABASE_VERSION providerCalls=0"
         )
     }
 }
