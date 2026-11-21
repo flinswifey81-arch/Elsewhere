@@ -26,81 +26,28 @@ class WorldRepository(
     )
 
     /**
-     * Portable World **definition** import. Safe first phase: only World metadata,
-     * reviewed cast and accepted continuity. Never silently drops linked resources.
-     * This does not import playthrough history. Existing resources/worlds are untouched.
+     * Complete, authored World Definition bundle import. All embedded resources
+     * are validated and re-ID'd before a SINGLE atomic Room transaction.
+     * Existing app Characters, Personas, Scenarios and Lorebooks never change.
+     * Chats, attachments and actual playthrough history belong to the separately
+     * encrypted World archive, NOT this shareable plaintext definition format.
      */
     suspend fun importDefinition(json: String): WorldEntity {
         val document = WorldDefinitionCodec.parse(json)
-        require(document.resources.lorebooks.isEmpty() &&
-            document.resources.characters.isEmpty() &&
-            document.resources.personas.isEmpty() &&
-            document.resources.scenarios.isEmpty() &&
-            document.links.castRoles.isEmpty() &&
-            document.world.defaultLorebookIds.isEmpty()
-        ) { "Embedded resources and role links require the upcoming full World importer." }
-        require(document.continuity.all { it.sourceChatId == null }) {
-            "World definition cannot import references to external chats."
-        }
-        val supportedProfileKeys = setOf("identity", "appearance", "personality", "voice",
-            "backstory", "motivations", "knowledge_limits", "role")
-        require(document.resources.worldCast.all { it.profile.keys.all(supportedProfileKeys::contains) }) {
-            "A World character contains unsupported profile fields."
-        }
-
+        val plan = WorldDefinitionBundleResources(database, jsonCodec).prepare(document)
         return coordinator.withMutation {
             database.withTransaction {
-                val castIds = document.resources.worldCast.associate {
-                    it.worldCharacterId to UUID.randomUUID().toString()
+                dao.insertWorld(plan.world)
+                plan.characters.forEach { database.characterDao().insertCharacter(it) }
+                plan.personas.forEach { database.personaDao().insertPersona(it) }
+                plan.scenarios.forEach { database.scenarioDao().save(it) }
+                plan.lorebooks.forEach { book ->
+                    database.lorebookDao().saveDefinition(book.lorebook, book.entries)
                 }
-                val remappedLinks = document.links.copy(
-                    relationships = document.links.relationships.map { relation ->
-                        relation.copy(
-                            fromWorldCharacterId = requireNotNull(castIds[relation.fromWorldCharacterId]),
-                            toWorldCharacterId = requireNotNull(castIds[relation.toWorldCharacterId])
-                        )
-                    }
-                )
-                val world = WorldEntity(
-                    title = document.world.title,
-                    description = document.world.description,
-                    settingSummary = document.world.settingSummary,
-                    worldRules = document.world.worldRules,
-                    genreTagsJson = stringsAdapter.toJson(document.world.genreTags),
-                    defaultLorebookIdsJson = stringsAdapter.toJson(emptyList()),
-                    linksJson = worldLinksAdapter.toJson(remappedLinks)
-                )
-                dao.insertWorld(world)
-                for (person in document.resources.worldCast) {
-                    dao.insertCastMember(WorldCastEntity(
-                        worldCharacterId = requireNotNull(castIds[person.worldCharacterId]),
-                        worldId = world.worldId,
-                        name = person.name,
-                        aliasesJson = stringsAdapter.toJson(person.aliases),
-                        identity = person.profile["identity"].orEmpty(),
-                        appearance = person.profile["appearance"].orEmpty(),
-                        personality = person.profile["personality"].orEmpty(),
-                        voice = person.profile["voice"].orEmpty(),
-                        backstory = person.profile["backstory"].orEmpty(),
-                        motivations = person.profile["motivations"].orEmpty(),
-                        knowledgeLimits = person.profile["knowledge_limits"].orEmpty(),
-                        role = person.profile["role"].orEmpty(),
-                        provenanceKind = "import",
-                        lockedFieldsJson = stringsAdapter.toJson(person.lockedFields)
-                    ))
-                }
-                for (event in document.continuity) {
-                    dao.insertEvent(WorldContinuityEventEntity(
-                        worldId = world.worldId,
-                        title = event.title,
-                        facts = event.facts,
-                        status = "ACCEPTED",
-                        relatedCastIdsJson = stringsAdapter.toJson(
-                            event.relatedWorldCharacterIds.map { requireNotNull(castIds[it]) }
-                        )
-                    ))
-                }
-                world
+                if (plan.cast.isNotEmpty()) dao.insertCast(plan.cast)
+                if (plan.continuity.isNotEmpty()) dao.insertEvents(plan.continuity)
+                if (plan.memberships.isNotEmpty()) dao.insertMemberships(plan.memberships)
+                plan.world
             }
         }
     }
