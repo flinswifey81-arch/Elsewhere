@@ -846,9 +846,14 @@ class NpcRepository(
             // A promoted NPC and the active Character share an ID; do not
             // introduce that identity again as a separate supporting actor.
             val dossiers = project(bases, updates)
-                .filterNot {
-                    it.npcId == observerCharacterId ||
-                        it.linkedCharacterId == observerCharacterId
+                .filterNot { dossier ->
+                    // Null means there is no responding Character to exclude.
+                    // An ordinary NPC's unlinked character ID is also null:
+                    // comparing those nulls would silently remove the entire Bank
+                    // for narrator and other observer-less generation paths.
+                    observerCharacterId != null &&
+                        (dossier.npcId == observerCharacterId ||
+                            dossier.linkedCharacterId == observerCharacterId)
                 }
             if (dossiers.isEmpty()) return@withContext null
             val recentText = recentMessages.filter { it.isPrimaryVariant }.takeLast(4)
