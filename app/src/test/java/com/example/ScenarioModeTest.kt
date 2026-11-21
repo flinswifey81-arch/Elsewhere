@@ -115,6 +115,75 @@ class ScenarioModeTest {
     private suspend fun awaitMessages(vm: ChatDetailViewModel, count: Int) = withTimeout(15000) {
         vm.uiState.first { it is ChatUiState.Success && it.messages.size == count && !it.isGenerating }
     }
+    @Test fun linkedNpcUsesExistingCharacterPortrayalInActualProviderRequestButNotPrivateKnowledge() = runBlocking {
+        val cards = CharacterRepository(db.characterDao(), moshi)
+        val linkedId = cards.importCharacterJson(
+            """{"schema_version":1,"character_id":"varka-linked","display_name":"Varka","character_name":"Varka","aliases":[],"voice":{"tone":"VOICE_LINK_SENTINEL"},"personality":{"summary":"PERSONALITY_LINK_SENTINEL"},"knowledge":{"private":"DONT_LEAK_KNOWLEDGE"},"author_notes":{"secret":"DONT_LEAK_AUTHOR_NOTES"}}"""
+        )
+        val provider = RecordingProvider()
+        val source = ScenarioDefinition(
+            title = "Forest Meeting", premise = "A peaceful gathering", openingMessage = "",
+            npcs = listOf(ScenarioNpc(
+                npcId = "scene-captain", name = "The Captain",
+                sourceCharacterId = linkedId, personality = "SCENE_PORTRAYAL_OVERRIDE"
+            ))
+        )
+        val (id, vm) = model(provider, source)
+        assertEquals(linkedId, ScenarioCodec.decode(
+            requireNotNull(scenarios.session(id)).definitionJson
+        ).npcs.single().sourceCharacterId)
+        vm.onDraftChanged("Hello, Captain."); vm.sendMessage()
+        awaitMessages(vm, 2)
+        assertEquals(1, provider.requests.size)
+        val prompt = provider.requests.single().first().content
+        listOf("VOICE_LINK_SENTINEL", "PERSONALITY_LINK_SENTINEL",
+            "SCENE_PORTRAYAL_OVERRIDE", "The Captain"
+        ).forEach { assertTrue(it, prompt.contains(it)) }
+        assertFalse(prompt.contains("DONT_LEAK_KNOWLEDGE"))
+        assertFalse(prompt.contains("DONT_LEAK_AUTHOR_NOTES"))
+        assertFalse(prompt.contains("other chat memories"))
+
+        // Updating the local Scenario session affects ONLY future generation.
+        scenarios.updateActiveSession(id, source.copy(instructions = "NEW_SCENE_DIRECTIVE"))
+        vm.onDraftChanged("What happens next?"); vm.sendMessage()
+        awaitMessages(vm, 4)
+        assertEquals(2, provider.requests.size)
+        assertTrue(provider.requests.last().first().content.contains("NEW_SCENE_DIRECTIVE"))
+        assertFalse(provider.requests.first().first().content.contains("NEW_SCENE_DIRECTIVE"))
+    }
+
+    @Test fun unavailableLinkedCharacterRejectsSaveAndBlocksPaidNarration() = runBlocking {
+        val notFound = ScenarioDefinition(
+            title = "Broken link", premise = "No fake identities",
+            openingMessage = "",
+            npcs = listOf(ScenarioNpc(
+                name = "Captain", sourceCharacterId = "deleted-character"
+            ))
+        )
+        assertTrue(runCatching { scenarios.save("broken", notFound) }.isFailure)
+        assertNull(scenarios.get("broken"))
+
+        val cards = CharacterRepository(db.characterDao(), moshi)
+        val id = cards.importCharacterJson(
+            """{"schema_version":1,"character_id":"temporary-captain","display_name":"Captain","name":"Captain","aliases":[]}"""
+        )
+        val good = notFound.copy(npcs = listOf(notFound.npcs.single().copy(
+            sourceCharacterId = id
+        )))
+        val provider = RecordingProvider()
+        val (chatId, vm) = model(provider, good)
+        db.characterDao().deleteCharacterById(id)
+        vm.onDraftChanged("Are you there?"); vm.sendMessage()
+        withTimeout(15000) {
+            vm.uiState.first {
+                it is ChatUiState.Success &&
+                    it.generationError?.contains("no longer exists") == true
+            }
+        }
+        assertTrue("A deleted linked Character must never trigger paid calls",
+            provider.requests.isEmpty())
+    }
+
     @Test fun scenarioWithoutOpeningMessageWaitsForPlayerAndUsesOneRequest() = runBlocking {
         val provider = RecordingProvider()
         val (id, vm) = model(provider, definition().copy(openingMessage = ""))
