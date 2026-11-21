@@ -106,12 +106,11 @@ class ScenarioEditorTest {
         compose.onNodeWithText("Recurring NPCs (1) · Edit").performClick()
         compose.onNode(hasScrollAction()).performScrollToNode(hasText("Link Character"))
         compose.onNodeWithText("Link Character").performClick()
+        compose.onNode(hasScrollAction()).performScrollToNode(hasText("Captain Varka"))
         compose.onNodeWithText("Captain Varka").performClick()
-        compose.waitForIdle()
         assertEquals("stable-character-123", chosenId)
         compose.onNode(hasScrollAction()).performScrollToNode(hasText("Unlink Character"))
         compose.onNodeWithText("Unlink Character").performClick()
-        compose.waitForIdle()
         assertNull(chosenId)
     }
 
