@@ -574,6 +574,71 @@ class WorldArchiveHistoryTest {
         assertEquals(absent.content, mapped.storyMemories.single().content)
     }
 
+    @Test
+    fun structuredSourceHashFollowsRemappedSpeakerWithoutRevivingInvalidMemories() {
+        val encoded = StoryResponseCodec.encode(StoryResponse(segments = listOf(
+            StorySegment(
+                StorySegmentType.CHARACTER, "Varka remembers the promise.",
+                character.characterId, "Varka"
+            )
+        )))
+        val structured = reply.copy(content = encoded)
+        val good = StoryMemoryEntity(
+            memoryId = "structured-memory", chatId = chat.chatId, ownerId = chat.chatId,
+            content = "The promise was remembered.", sourceOrderIndex = structured.orderIndex,
+            originKind = "MESSAGE", sourceMessageId = structured.messageId,
+            sourceVariantGroupId = structured.variantGroupId,
+            sourceSpeakerType = structured.speakerType.name,
+            sourceSpeakerId = structured.speakerId,
+            sourceCreatedAtEpochMillis = structured.createdAt,
+            sourceSha256 = com.example.domain.memory.StoryMemoryEligibilityPolicy.sha256(encoded)
+        )
+        val invalid = good.copy(
+            memoryId = "already-stale-memory", sourceSha256 = "0".repeat(64)
+        )
+        val baseline = state().copy(
+            messages = listOf(playerTurn, structured, alternate),
+            storyMemories = listOf(good, invalid),
+            storyMemoryActors = listOf(
+                StoryMemoryActorEntity(good.memoryId, "CHARACTER", character.characterId,
+                    "RELATIONSHIP_FROM"),
+                StoryMemoryActorEntity(good.memoryId, "PERSONA", persona.personaId,
+                    "PROMISE_TO")
+            )
+        )
+        val transformed = WorldArchiveSemanticRemapper.rewrite(
+            baseline, WorldArchiveIdPlanner.plan(baseline, "v2-remap-hash-session-12345")
+        ).state
+        val rewrittenSource = transformed.messages.single {
+            it.isPrimaryVariant && it.speakerType == SpeakerType.CHARACTER
+        }
+        assertNotEquals(encoded, rewrittenSource.content)
+        val eligible = transformed.storyMemories.single {
+            it.content == "The promise was remembered." &&
+                it.sourceSha256 != "0".repeat(64)
+        }
+        assertEquals(
+            com.example.domain.memory.StoryMemoryEligibilityPolicy.sha256(
+                rewrittenSource.content
+            ), eligible.sourceSha256
+        )
+        assertEquals("0".repeat(64), transformed.storyMemories.single {
+            it.memoryId != eligible.memoryId
+        }.sourceSha256)
+        assertEquals(
+            setOf("RELATIONSHIP_FROM", "PROMISE_TO"),
+            transformed.storyMemoryActors.map { it.relation }.toSet()
+        )
+        assertEquals(transformed.characters.single().characterId,
+            transformed.storyMemoryActors.single {
+                it.relation == "RELATIONSHIP_FROM"
+            }.actorId)
+        assertEquals(transformed.personas.single().personaId,
+            transformed.storyMemoryActors.single {
+                it.relation == "PROMISE_TO"
+            }.actorId)
+    }
+
     private fun sourcePayload() = BackupPayload(
         characters = listOf(character), personas = listOf(persona),
         chats = listOf(chat),
