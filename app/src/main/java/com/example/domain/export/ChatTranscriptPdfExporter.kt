@@ -60,13 +60,16 @@ class ChatTranscriptPdfExporter(private val messages: MessageRepository) {
         try {
             var nextTurn = range.first
             while (nextTurn <= range.last) {
+                val expectedPageSize = minOf(128, range.last - nextTurn + 1)
                 val batch = messages.getSelectedHistoryForwardPage(
                     chatId = chatId,
                     resetBoundary = null, // The saved, visible story includes pre-Wack turns.
                     offset = nextTurn - 1,
-                    pageSize = minOf(128, range.last - nextTurn + 1)
+                    pageSize = expectedPageSize
                 )
-                check(batch.isNotEmpty()) { "Saved chat changed during PDF export. Try again." }
+                check(batch.size == expectedPageSize) {
+                    "Saved chat changed during PDF export. Try again."
+                }
                 for (message in batch) {
                     check(message.isPrimaryVariant && message.chatId == chatId) {
                         "Saved chat selection changed during PDF export. Try again."
