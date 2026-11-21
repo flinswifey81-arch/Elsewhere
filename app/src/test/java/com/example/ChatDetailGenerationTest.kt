@@ -2494,7 +2494,9 @@ class ChatDetailGenerationTest {
         assertTrue(selectedPrompt.contains("PROMOTED_PERSONALITY_SENTINEL"))
         assertTrue(selectedPrompt.contains("PROMOTED_GOAL_SENTINEL"))
         assertFalse(selectedPrompt.contains("PROMOTED_PRIVATE_AUTHOR_NOTE"))
-        assertFalse(selectedPrompt.contains("PROMOTED_RELATIONSHIP_PRIVATE"))
+        // Its own chat-local relationship is allowed in this turn, but is NOT
+        // exported as globally reusable Character knowledge.
+        assertTrue(selectedPrompt.contains("PROMOTED_RELATIONSHIP_PRIVATE"))
         assertFalse(selectedPrompt.contains("PROMOTED_SECRET_MUST_NOT_BECOME_GLOBAL"))
         val transcript = harness.messageRepository.getMessagesForChatOnce(harness.chatId)
         assertEquals("character-1", transcript[1].speakerId)
