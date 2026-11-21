@@ -207,6 +207,48 @@ internal fun ScenarioEditor(definition: ScenarioDefinition, onChange: (ScenarioD
                     TextButton(onClick = { onChange(definition.copy(npcs = definition.npcs.filterNot { it.npcId == npc.npcId })) }) { Text("Remove NPC") }
                 } }
             }
+            // Keep Character selection inside the existing lazy editor instead of
+            // creating a nested, scrolling AlertDialog. The dialog caused an
+            // infinite-idle loop in Robolectric when tapping a Character choice.
+            val targetNpcId = linkingNpcId
+            if (targetNpcId != null) {
+                item(key = "linked_character_search") {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            "Link an existing Character — uses its authored identity and " +
+                                "portrayal, not its other chats or private memories.",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        OutlinedTextField(
+                            value = linkSearch,
+                            onValueChange = { linkSearch = it.take(100) },
+                            label = { Text("Search Character cards") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true
+                        )
+                        TextButton(onClick = { linkingNpcId = null }) { Text("Cancel linking") }
+                    }
+                }
+                val choices = availableCharacters.filter {
+                    !it.isArchived && it.displayName.contains(linkSearch, ignoreCase = true)
+                }.sortedBy { it.displayName.lowercase() }
+                items(choices.take(40), key = { "link_choice_" + it.characterId }) { character ->
+                    TextButton(
+                        onClick = {
+                            onChange(definition.copy(npcs = definition.npcs.map { npc ->
+                                if (npc.npcId == targetNpcId) {
+                                    npc.copy(sourceCharacterId = character.characterId)
+                                } else npc
+                            }))
+                            linkingNpcId = null
+                        }
+                    ) { Text(character.displayName) }
+                }
+                if (choices.isEmpty()) item { Text("No matching active Character cards.") }
+                if (choices.size > 40) item {
+                    Text("Showing first 40 matches. Narrow the search to see more.")
+                }
+            }
             item { OutlinedButton(onClick = { onChange(definition.copy(npcs = definition.npcs + ScenarioNpc())) }) { Text("Add NPC") } }
         }
         item { error?.let { Text(it, color = MaterialTheme.colorScheme.error) } }
@@ -218,52 +260,7 @@ internal fun ScenarioEditor(definition: ScenarioDefinition, onChange: (ScenarioD
         } }
         item { Spacer(Modifier.height(24.dp)) }
     }
-    val targetNpcId = linkingNpcId
-    if (targetNpcId != null) {
-        AlertDialog(
-            onDismissRequest = { linkingNpcId = null },
-            title = { Text("Link an existing Character") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        "Uses the same Character identity and authored portrayal. " +
-                            "Does not copy its other chats, private memories or NPC scene state.",
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                    OutlinedTextField(
-                        value = linkSearch,
-                        onValueChange = { linkSearch = it.take(100) },
-                        label = { Text("Search Character cards") },
-                        singleLine = true
-                    )
-                    val choices = availableCharacters.filter {
-                        !it.isArchived && it.displayName.contains(linkSearch, ignoreCase = true)
-                    }.sortedBy { it.displayName.lowercase() }
-                    LazyColumn(
-                        modifier = Modifier.fillMaxWidth().heightIn(max = 280.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        items(choices, key = { it.characterId }) { character ->
-                            TextButton(
-                                onClick = {
-                                    onChange(definition.copy(npcs = definition.npcs.map { npc ->
-                                        if (npc.npcId == targetNpcId)
-                                            npc.copy(sourceCharacterId = character.characterId)
-                                        else npc
-                                    }))
-                                    linkingNpcId = null
-                                }
-                            ) { Text(character.displayName) }
-                        }
-                        if (choices.isEmpty()) item { Text("No matching active Character cards.") }
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { linkingNpcId = null }) { Text("Cancel") }
-            }
-        )
-    }
+
 }
 
 @Composable
