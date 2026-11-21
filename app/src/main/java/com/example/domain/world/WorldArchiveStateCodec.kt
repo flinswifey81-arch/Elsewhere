@@ -1,6 +1,12 @@
 package com.example.domain.world
 
 import com.example.data.model.*
+import com.example.domain.memory.StoryActorKind
+import com.example.domain.memory.StoryCharacterPerspective
+import com.example.domain.memory.StoryMemoryClaim
+import com.example.domain.memory.StoryMemoryLifecycle
+import com.example.domain.memory.StoryMemoryReview
+import com.example.domain.memory.StoryMemoryVisibility
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.Types
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
@@ -238,6 +244,97 @@ object WorldArchiveStateCodec {
                 (memory.sourceMessageId == null ||
                     messageById[memory.sourceMessageId]?.chatId == memory.chatId)
         }) { "Memory references a missing or unrelated message or Character" }
+
+        // Memory V2's graph is optional in old archives, but new archives must
+        // preserve every related permission and historic restoration record.
+        val storyMemories = ids(state.storyMemories, "Story Memories") { it.memoryId }
+        val memoryById = state.storyMemories.associateBy { it.memoryId }
+        requireScoped(state.storyMemories, chats, "Story Memories") { it.chatId }
+        require(state.storyMemories.all { memory ->
+            memory.ownerId == memory.chatId && memory.scope == "CHAT" &&
+                memory.content.isNotBlank() && memory.content.length <= 12_000 &&
+                memory.claim in StoryMemoryClaim.entries.map { it.name } &&
+                memory.visibility in StoryMemoryVisibility.entries.map { it.name } &&
+                memory.review in StoryMemoryReview.entries.map { it.name } &&
+                memory.lifecycle in StoryMemoryLifecycle.entries.map { it.name } &&
+                (memory.previousStateMemoryId == null ||
+                    memoryById[memory.previousStateMemoryId]?.chatId.let {
+                        it == null || it == memory.chatId
+                    }) &&
+                (memory.sourceSha256 == null ||
+                    memory.sourceSha256.matches(sha256Pattern)) &&
+                (memory.originKind == "MANUAL" || (
+                    memory.originKind == "MESSAGE" &&
+                        memory.sourceMessageId != null &&
+                        memory.sourceVariantGroupId != null &&
+                        memory.sourceSpeakerType in SpeakerType.entries.map { it.name } &&
+                        !memory.sourceSpeakerId.isNullOrBlank() &&
+                        memory.sourceCreatedAtEpochMillis != null
+                )) &&
+                (memory.sourceMessageId == null ||
+                    messageById[memory.sourceMessageId]?.let {
+                        it.chatId == memory.chatId &&
+                            it.variantGroupId == memory.sourceVariantGroupId
+                    } ?: true)
+        }) { "A Story Memory has invalid chat scope, source or state" }
+        // A deleted source is still an important historical reference. Preserve its
+        // provenance; prompt eligibility independently rejects SOURCE_MISSING.
+        fun actorOwned(kind: String, actorId: String, memoryId: String): Boolean {
+            val owner = memoryById[memoryId]?.chatId ?: return false
+            return when (kind) {
+                StoryActorKind.CHARACTER.name -> actorId in characters
+                StoryActorKind.PERSONA.name -> actorId in personas
+                StoryActorKind.NPC.name -> state.npcDossiers.any {
+                    it.npcId == actorId && it.chatId == owner
+                }
+                StoryActorKind.WORLD_CAST.name -> actorId in cast
+                StoryActorKind.NARRATOR.name -> actorId == "narrator:$owner"
+                // Scenario NPCs are scoped by Scenario; an unqualified ID is ambiguous.
+                else -> false
+            }
+        }
+        require(state.storyMemories.all { memory ->
+            (memory.believedById == null && memory.believedByKind == null) ||
+                (memory.believedById != null && memory.believedByKind != null &&
+                    actorOwned(memory.believedByKind, memory.believedById, memory.memoryId))
+        }) { "A Story Memory belief references an unarchived actor" }
+        requireUniqueComposite(state.storyMemoryActors, "Story Memory actors") {
+            "${it.memoryId}|${it.actorKind}|${it.actorId}|${it.relation}"
+        }
+        require(state.storyMemoryActors.all { actor ->
+            actor.memoryId in storyMemories &&
+                actor.relation in setOf("KNOWS", "MENTIONED") &&
+                (actor.relation != "KNOWS" || actor.actorKind == StoryActorKind.CHARACTER.name) &&
+                actorOwned(actor.actorKind, actor.actorId, actor.memoryId)
+        }) { "A Story Memory actor or knowledge grant is outside this World" }
+        requireUniqueComposite(state.storyMemoryReturns, "Story Memory Wack returns") {
+            "${it.memoryId}|${it.resetBoundaryOrderIndex}"
+        }
+        require(state.storyMemoryReturns.all { item ->
+            val owner = memoryById[item.memoryId]
+            owner != null && owner.chatId == item.chatId &&
+                item.branchId == owner.branchId &&
+                item.initiatedByUser &&
+                item.approvedAtOrderIndex > item.resetBoundaryOrderIndex &&
+                owner.sourceOrderIndex <= item.resetBoundaryOrderIndex
+        }) { "Story Memory restoration lacks its owner or explicit Wack approval" }
+        requireUniqueComposite(state.storyMemoryKnowledgeChanges, "Story Memory knowledge history") {
+            "${it.memoryId}|${it.revision}|${it.characterId}"
+        }
+        require(state.storyMemoryKnowledgeChanges.all { item ->
+            item.memoryId in storyMemories &&
+                item.characterId in characters && item.revision > 0 &&
+                item.change in setOf("GRANTED", "REVOKED")
+        }) { "Story Memory knowledge history has an invalid Character or revision" }
+        requireUniqueComposite(state.storyMemoryPerspectives, "Story Memory perspectives") {
+            "${it.memoryId}|${it.characterId}|${it.revision}"
+        }
+        require(state.storyMemoryPerspectives.all { item ->
+            item.memoryId in storyMemories &&
+                item.characterId in characters && item.revision > 0 &&
+                item.stance in StoryCharacterPerspective.entries.map { it.name } &&
+                item.contentSha256.matches(sha256Pattern)
+        }) { "Story Memory perspective is malformed or refers to another World" }
 
         require(state.relationships.all { relation ->
             relation.sourceCharacterId in characters &&
