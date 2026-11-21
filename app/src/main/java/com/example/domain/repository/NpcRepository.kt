@@ -522,15 +522,29 @@ class NpcRepository(
     ) = dataCoordinator.withMutation {
         withContext(Dispatchers.IO) {
             database.withTransaction {
+                val previous = messageDao.getMessageById(message.messageId)
+                val previouslyNamedSpeakers = StoryResponseCodec.decode(previous?.content.orEmpty())
+                    ?.segments.orEmpty()
+                    .filter { it.type == StorySegmentType.NPC }
+                    .mapNotNull { it.speakerName?.trim()?.lowercase(Locale.ROOT) }
+                    .toSet()
                 messageDao.updateMessage(message)
                 if (metadata != null) messageDao.insertGenerationMetadata(metadata)
+                // Continue rewrites one stored response with its appended segments.
+                // Discover ONLY new structured NPC speakers, never speakers that
+                // were already present in the older portion of that response.
+                val newSpeakers = if (
+                    message.isPrimaryVariant && dao.getSettings(message.chatId)?.isEnabled == true
+                ) {
+                    missingSpeakerDiscoveryUpdates(message, updates, previouslyNamedSpeakers)
+                } else emptyList()
                 val metadataReport = applyStructuredUpdatesInTransaction(
                     chatId = message.chatId,
                     sourceMessageId = message.messageId,
                     variantGroupId = message.variantGroupId,
                     sourceRevision = dao.nextSourceRevision(message.messageId),
                     isApplied = message.isPrimaryVariant,
-                    updates = updates,
+                    updates = updates + newSpeakers,
                     activePersonaId = activePersonaId,
                     skipInvalidUpdates = skipInvalidNpcMetadata
                 )
@@ -549,7 +563,8 @@ class NpcRepository(
      */
     private suspend fun missingSpeakerDiscoveryUpdates(
         message: MessageEntity,
-        metadataUpdates: List<NpcStructuredUpdate>
+        metadataUpdates: List<NpcStructuredUpdate>,
+        ignoredSpeakerNames: Set<String> = emptySet()
     ): List<NpcStructuredUpdate> {
         val story = StoryResponseCodec.decode(message.content) ?: return emptyList()
         val projected = project(dao.getDossiers(message.chatId), dao.getUpdates(message.chatId))
@@ -562,6 +577,7 @@ class NpcRepository(
                 }?.let { name -> name to it.speakerId }
             }
             .distinctBy { (name, _) -> name.lowercase(Locale.ROOT) }
+            .filterNot { (name, _) -> name.lowercase(Locale.ROOT) in ignoredSpeakerNames }
             .filterNot { (name, speakerId) ->
                 projected.any { it.npcId == speakerId && matchesNameOrAlias(it, name) } ||
                     projected.any { matchesNameOrAlias(it, name) } ||
