@@ -553,7 +553,7 @@ fun ChatDetailScreen(
                                             coroutineScope.launch {
                                                 runCatching { archive.saveFromMessage(chatId, messageId) }
                                                     .onSuccess {
-                                                        snackbarHostState.showSnackbar("Saved to Story Memories (retrieval not yet enabled)")
+                                                        snackbarHostState.showSnackbar("Saved to Story Memories")
                                                     }
                                                     .onFailure {
                                                         snackbarHostState.showSnackbar(it.message ?: "Unable to save Story Memory")
