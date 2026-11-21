@@ -187,6 +187,43 @@ class LivingCastPromotionTest {
         assertEquals("scenario-npc", npc.getProjectedDossiers(scenarioId).single().npcId)
     }
 
+    @Test fun promotionCopiesNpcPortraitWithoutDeletingTheNpcOriginal() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val photos = ProfileImageRepository(context, coordinator)
+        val withPhotos = NpcRepository(db, moshi, coordinator, photos)
+        createCharacter("main-bot", "Primary")
+        createPersona()
+        val chatId = chats.createSoloChat("Portrait Story", "player", "main-bot")
+        val id = "portrait-npc-${System.nanoTime()}"
+        withPhotos.saveManual(dossier(chatId, id))
+        val bitmap = android.graphics.Bitmap.createBitmap(
+            4, 4, android.graphics.Bitmap.Config.ARGB_8888
+        )
+        val source = java.io.File(context.cacheDir, "portrait-source-$id.png")
+        try {
+            bitmap.eraseColor(android.graphics.Color.BLUE)
+            source.outputStream().use {
+                bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
+            }
+            photos.replaceImage(ProfileImageKind.NPC, id, android.net.Uri.fromFile(source))
+            val original = requireNotNull(photos.resolveImage(ProfileImageKind.NPC, id))
+            val before = original.readBytes()
+            withPhotos.promoteNpcToCharacter(chatId, id)
+            val copy = requireNotNull(photos.resolveImage(ProfileImageKind.CHARACTER, id))
+            assertTrue(copy.exists())
+            assertTrue(original.exists())
+            assertArrayEquals(before, copy.readBytes())
+            assertArrayEquals(before, original.readBytes())
+            photos.removeImage(ProfileImageKind.CHARACTER, id)
+            assertTrue(photos.resolveImage(ProfileImageKind.NPC, id)?.exists() == true)
+        } finally {
+            bitmap.recycle()
+            source.delete()
+            photos.removeImage(ProfileImageKind.NPC, id)
+            photos.removeImage(ProfileImageKind.CHARACTER, id)
+        }
+    }
+
     @Test fun crossChatNpcPromotionAndUnrelatedIdentityCollisionFailClosed() = runBlocking {
         createCharacter("main-bot", "Primary")
         createPersona()
