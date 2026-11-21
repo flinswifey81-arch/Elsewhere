@@ -46,4 +46,72 @@ class ScenarioEditorTest {
         assertEquals("A city on the sea", saved?.setting)
         assertEquals(4, saved?.npcs?.size)
     }
+
+    @Test @Config(qualifiers = "w360dp-h800dp")
+    fun activePlaythroughEditorUsesCorrectScopeAndSaveAction() {
+        var saved: ScenarioDefinition? = null
+        compose.setContent {
+            var draft by remember {
+                mutableStateOf(ScenarioDefinition(title = "Ongoing story", premise = "First premise"))
+            }
+            AppTheme {
+                ScenarioEditor(
+                    draft, { draft = it }, { saved = draft }, {},
+                    editingActiveSession = true
+                )
+            }
+        }
+        compose.onNodeWithText("Editing this playthrough only.", substring = true).assertExists()
+        compose.onNode(hasScrollAction()).performScrollToNode(hasText("Premise / Scene Setup"))
+        compose.onNodeWithText("Premise / Scene Setup").performTextClearance()
+        compose.onNodeWithText("Premise / Scene Setup").performTextInput("The scene has progressed.")
+        compose.onNode(hasScrollAction()).performScrollToNode(hasText("Save playthrough"))
+        compose.onNodeWithText("Save playthrough").assertIsEnabled().performClick()
+        assertEquals("The scene has progressed.", saved?.premise)
+        compose.onAllNodesWithText("Save scenario").assertCountEquals(0)
+    }
+
+
+    @Test @Config(qualifiers = "w360dp-h800dp")
+    fun scenarioNpcCanLinkAndUnlinkARealCharacterByStableId() {
+        val existing = CharacterEntity(
+            characterId = "stable-character-123", displayName = "Captain Varka",
+            characterName = "Varka", aliases = emptyList(), importSchemaVersion = 1,
+            identityJson = null, appearanceJson = null, personalityJson = null,
+            voiceJson = null, behaviorJson = null, backstoryJson = null,
+            knowledgeJson = null, worldContextJson = null, writingRulesJson = null,
+            examplesJson = null, authorNotesJson = null, extensionFieldsJson = null
+        )
+        var chosenId: String? = null
+        compose.setContent {
+            var draft by remember {
+                mutableStateOf(ScenarioDefinition(
+                    title = "Forest", premise = "A camp",
+                    npcs = listOf(ScenarioNpc(npcId = "forest-npc", name = "The Captain"))
+                ))
+            }
+            AppTheme {
+                ScenarioEditor(
+                    definition = draft,
+                    onChange = {
+                        draft = it
+                        chosenId = draft.npcs.single().sourceCharacterId
+                    },
+                    onSave = {},
+                    onCancel = {},
+                    availableCharacters = listOf(existing)
+                )
+            }
+        }
+        compose.onNodeWithText("Recurring NPCs (1) · Edit").performClick()
+        compose.onNode(hasScrollAction()).performScrollToNode(hasText("Link Character"))
+        compose.onNodeWithText("Link Character").performClick()
+        compose.onNode(hasScrollAction()).performScrollToNode(hasText("Captain Varka"))
+        compose.onNodeWithText("Captain Varka").performClick()
+        assertEquals("stable-character-123", chosenId)
+        compose.onNode(hasScrollAction()).performScrollToNode(hasText("Unlink Character"))
+        compose.onNodeWithText("Unlink Character").performClick()
+        assertNull(chosenId)
+    }
+
 }

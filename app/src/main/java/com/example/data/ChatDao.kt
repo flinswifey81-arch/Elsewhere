@@ -60,6 +60,10 @@ interface ChatDao {
     @Query("DELETE FROM conversation_summaries WHERE chatId = :chatId")
     suspend fun deleteSummaryForChat(chatId: String)
 
+    /** Touching a chat must not write a stale ChatEntity over a newer Wack. */
+    @Query("UPDATE chats SET updatedAt = :updatedAt WHERE chatId = :chatId")
+    suspend fun updateChatTimestamp(chatId: String, updatedAt: Long): Int
+
     @Query("UPDATE chats SET contextResetOrderIndex = :boundary, updatedAt = :updatedAt WHERE chatId = :chatId")
     suspend fun setContextResetBoundary(chatId: String, boundary: Long, updatedAt: Long)
 
@@ -174,6 +178,30 @@ interface ChatDao {
                 sortPosition = nextPosition
             )
         )
+    }
+
+    /**
+     * Solo spotlight is the first active participant by persisted sortPosition.
+     * Reorder actual participant rows; never mutate the chat's type or history.
+     */
+    @Transaction
+    suspend fun selectSoloSpotlight(chatId: String, characterId: String) {
+        require(getChatById(chatId)?.chatType == com.example.data.model.ChatType.SOLO) {
+            "Spotlight selection is only available in ordinary Solo chats."
+        }
+        val participants = getParticipantsForChatOnce(chatId)
+        require(participants.any { it.characterId == characterId && it.isActive }) {
+            "This Character is not an active participant in the chat."
+        }
+        val reordered = participants.sortedWith(
+            compareBy<ChatParticipantEntity> { it.characterId != characterId }
+                .thenBy { it.sortPosition }.thenBy { it.joinedAt }
+        )
+        reordered.forEachIndexed { index, participant ->
+            if (participant.sortPosition != index) {
+                updateChatParticipant(participant.copy(sortPosition = index))
+            }
+        }
     }
 
     @Transaction

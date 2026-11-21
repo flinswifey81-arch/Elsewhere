@@ -65,6 +65,7 @@ fun WorldsScreen(
     var showImportJson by remember { mutableStateOf(false) }
     var importJsonText by remember { mutableStateOf("") }
     var pendingExportJson by remember { mutableStateOf<String?>(null) }
+    var confirmPlaintextWorldExport by remember { mutableStateOf<WorldEntity?>(null) }
     var notice by remember { mutableStateOf<String?>(null) }
     val exportLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/json")
@@ -76,7 +77,10 @@ fun WorldsScreen(
                 runCatching {
                     context.contentResolver.openOutputStream(uri)?.bufferedWriter()?.use { it.write(json) }
                         ?: throw IllegalStateException("Unable to open the selected export location.")
-                }.onSuccess { notice = "World definition saved. Chats, episodes, images and draft events are NOT in this JSON." }
+                }.onSuccess {
+                    notice = "World Definition JSON saved. This is an unencrypted file; " +
+                        "chat history, attachments, drafts, and unaccepted continuity are excluded."
+                }
                     .onFailure { error = it.message ?: "Unable to save World JSON." }
             }
         }
@@ -141,12 +145,45 @@ fun WorldsScreen(
         }
     }
 
+    confirmPlaintextWorldExport?.let { world ->
+        AlertDialog(
+            onDismissRequest = { if (!busy) confirmPlaintextWorldExport = null },
+            title = { Text("Export unencrypted World Definition?") },
+            text = {
+                Text(
+                    "This JSON includes the World and its linked Character cards, Persona cards, " +
+                        "Scenarios, Lorebooks and accepted continuity. Embedded private notes and " +
+                        "author notes may be included. It is NOT encrypted. Save it somewhere " +
+                        "you trust, or use the encrypted World archive for private transfers. " +
+                        "Chat histories and attachments are not included."
+                )
+            },
+            confirmButton = {
+                TextButton(enabled = !busy, onClick = {
+                    confirmPlaintextWorldExport = null
+                    submit {
+                        val json = repository.exportDefinition(world.worldId)
+                        pendingExportJson = json
+                        exportLauncher.launch(
+                            world.title.replace(Regex("[^A-Za-z0-9_-]"), "_") + ".world.json"
+                        )
+                    }
+                }) { Text("Export World JSON") }
+            },
+            dismissButton = {
+                TextButton(enabled = !busy, onClick = {
+                    confirmPlaintextWorldExport = null
+                }) { Text("Cancel") }
+            }
+        )
+    }
+
     if (showImportJson) AlertDialog(
         onDismissRequest = { if (!busy) showImportJson = false },
         title = { Text("Import World Definition JSON") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Creates a separate World. Includes setting, cast, relationships and accepted continuity. This is not an episode/chat-history restore.",
+                Text("Creates a separate World with linked Character and Persona cards, Scenarios, Lorebooks, cast and accepted continuity. All embedded resources get new IDs; existing cards remain unchanged. Chat history is NOT included.",
                     style = MaterialTheme.typography.bodySmall)
                 OutlinedTextField(
                     value = importJsonText,
@@ -157,7 +194,7 @@ fun WorldsScreen(
                     colors = elsewhereTextFieldColors(),
                     enabled = !busy
                 )
-                Text("Embedded Character/Persona cards, Scenarios and Lorebooks are not supported by this first importer.",
+                Text("Check the source of the JSON before importing. Private fields in embedded cards are stored locally in the imported World.",
                     style = MaterialTheme.typography.bodySmall)
             }
         },
@@ -323,13 +360,7 @@ fun WorldsScreen(
                             TextButton(onClick = { deletingWorld = selected }) { Text("Delete") }
                         }
                         OutlinedButton(enabled = !busy, modifier = Modifier.testTag("export_world_definition"),
-                            onClick = {
-                                submit {
-                                    val json = repository.exportDefinition(selected.worldId)
-                                    pendingExportJson = json
-                                    exportLauncher.launch(selected.title.replace(Regex("[^A-Za-z0-9_-]"), "_") + ".world.json")
-                                }
-                            }
+                            onClick = { confirmPlaintextWorldExport = selected }
                         ) { Text("Export World Definition JSON") }
                         if (chatRepository != null) {
                             if (onCreateSoloEpisode != null) {

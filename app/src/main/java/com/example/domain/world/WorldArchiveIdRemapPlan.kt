@@ -1,6 +1,8 @@
 package com.example.domain.world
 
 import com.example.data.model.ScenarioCodec
+import com.squareup.moshi.Moshi
+import com.squareup.moshi.Types
 import java.nio.charset.StandardCharsets
 import java.util.UUID
 
@@ -23,6 +25,7 @@ enum class WorldArchiveIdKind {
     CHAT,
     MESSAGE,
     MEMORY,
+    STORY_MEMORY,
     VARIANT_GROUP,
     RELATIONSHIP,
     LOREBOOK,
@@ -66,6 +69,14 @@ data class WorldArchiveIdRemapPlan(
  * after validation; it must never do global text search-and-replace in RP prose.
  */
 object WorldArchiveIdPlanner {
+    private val extensionAdapter = Moshi.Builder().build().adapter<Map<String, Any?>>(
+        Types.newParameterizedType(Map::class.java, String::class.java, Any::class.java)
+    )
+
+    private fun origin(json: String?): String? =
+        json?.let { runCatching { extensionAdapter.fromJson(it) }.getOrNull() }
+            ?.get("_elsewhere_promoted_npc_id") as? String
+
     fun plan(
         state: WorldArchiveStateV1,
         namespace: String,
@@ -75,8 +86,21 @@ object WorldArchiveIdPlanner {
         require(namespace.length in 16..256 && namespace.none { it.code < 33 }) {
             "Import needs a unique, durable operation namespace"
         }
-        val messages = state.messages.map { it.messageId }.toSet()
-        val variantGroups = state.messages.map { it.variantGroupId }.toSet()
+        // Deleted source messages and superseded memory predecessors may be retained
+        // as historical provenance. Give their ORPHAN references fresh identities too,
+        // without manufacturing any missing Room rows or turning them eligible.
+        val messages = (
+            state.messages.map { it.messageId } +
+                state.storyMemories.mapNotNull { it.sourceMessageId }
+        ).toSet()
+        val variantGroups = (
+            state.messages.map { it.variantGroupId } +
+                state.storyMemories.mapNotNull { it.sourceVariantGroupId }
+        ).toSet()
+        val storyMemoryIds = (
+            state.storyMemories.map { it.memoryId } +
+                state.storyMemories.mapNotNull { it.previousStateMemoryId }
+        ).toSet()
         val scenarioNpcIds = (
             state.scenarios.flatMap { scenario ->
                 ScenarioCodec.decode(scenario.definitionJson).npcs.map { npc ->
@@ -93,13 +117,22 @@ object WorldArchiveIdPlanner {
             WorldArchiveIdKind.WORLD to setOf(state.worldId),
             WorldArchiveIdKind.WORLD_CAST to state.cast.map { it.worldCharacterId }.toSet(),
             WorldArchiveIdKind.CONTINUITY_EVENT to state.continuity.map { it.eventId }.toSet(),
-            WorldArchiveIdKind.CHARACTER to state.characters.map { it.characterId }.toSet(),
-            WorldArchiveIdKind.PERSONA to state.personas.map { it.personaId }.toSet(),
+            WorldArchiveIdKind.CHARACTER to (
+                state.characters.map { it.characterId } +
+                    state.storyMemories.filter { it.sourceSpeakerType == "CHARACTER" }
+                        .mapNotNull { it.sourceSpeakerId }
+            ).toSet(),
+            WorldArchiveIdKind.PERSONA to (
+                state.personas.map { it.personaId } +
+                    state.storyMemories.filter { it.sourceSpeakerType == "PERSONA" }
+                        .mapNotNull { it.sourceSpeakerId }
+            ).toSet(),
             WorldArchiveIdKind.SCENARIO to state.scenarios.map { it.scenarioId }.toSet(),
             WorldArchiveIdKind.SCENARIO_NPC to scenarioNpcIds,
             WorldArchiveIdKind.CHAT to state.chats.map { it.chatId }.toSet(),
             WorldArchiveIdKind.MESSAGE to messages,
             WorldArchiveIdKind.MEMORY to state.roleplayMemories.map { it.memoryId }.toSet(),
+            WorldArchiveIdKind.STORY_MEMORY to storyMemoryIds,
             WorldArchiveIdKind.RELATIONSHIP to state.relationships.map { it.relationshipId }.toSet(),
             WorldArchiveIdKind.LOREBOOK to state.lorebooks.map { it.lorebookId }.toSet(),
             WorldArchiveIdKind.LOREBOOK_ENTRY to state.lorebookEntries.map { it.entryId }.toSet(),
@@ -125,11 +158,41 @@ object WorldArchiveIdPlanner {
             mappings[kind] = mapped
         }
 
+        // An NPC promoted to a Character is ONE underlying identity with the
+        // same source ID, explicitly attested by app-authored origin metadata.
+        // Give BOTH imported tables the identical new ID so the link survives
+        // without introducing a duplicate person.
+        val promotedIds = state.characters.filter { character ->
+            origin(character.extensionFieldsJson) == character.characterId &&
+                state.npcDossiers.any { it.npcId == character.characterId }
+        }.map { it.characterId }.toSet()
+        if (promotedIds.isNotEmpty()) {
+            val originalNpc = requireNotNull(mappings[WorldArchiveIdKind.NPC_DOSSIER])
+            val originalCharacters = requireNotNull(mappings[WorldArchiveIdKind.CHARACTER])
+            val aligned = originalNpc.toMutableMap()
+            promotedIds.forEach { source ->
+                aligned[source] = originalCharacters.getValue(source)
+            }
+            require(aligned.values.toSet().size == aligned.size) {
+                "Promoted Character/NPC identity collision in World import"
+            }
+            require(aligned.values.none {
+                it in reservedIds[WorldArchiveIdKind.NPC_DOSSIER].orEmpty()
+            }) { "Promoted NPC identity would overwrite a destination NPC" }
+            mappings[WorldArchiveIdKind.NPC_DOSSIER] = aligned
+        }
+
         val remappedMessages = requireNotNull(mappings[WorldArchiveIdKind.MESSAGE])
         // Compute this once: a large World can contain tens of thousands of variants.
-        val selfNamedVariantGroups = state.messages.asSequence()
-            .filter { it.messageId == it.variantGroupId }
-            .map { it.variantGroupId }.toSet()
+        val selfNamedVariantGroups = (
+            state.messages.asSequence()
+                .filter { it.messageId == it.variantGroupId }
+                .map { it.variantGroupId } +
+                state.storyMemories.asSequence()
+                    .filter { it.sourceMessageId != null &&
+                        it.sourceMessageId == it.sourceVariantGroupId }
+                    .mapNotNull { it.sourceVariantGroupId }
+        ).toSet()
         val variantMap = variantGroups.sorted().associateWith { original ->
             // Only alias to the mapped message when that message really belongs to this
             // variant group. An unrelated message ID with the same text is not its parent.
@@ -152,8 +215,11 @@ object WorldArchiveIdPlanner {
                 val previous = ownerOf.putIfAbsent(fresh, kind to old)
                 if (previous != null) {
                     require(
-                        kind == WorldArchiveIdKind.VARIANT_GROUP &&
-                            previous == (WorldArchiveIdKind.MESSAGE to old)
+                        (kind == WorldArchiveIdKind.VARIANT_GROUP &&
+                            previous == (WorldArchiveIdKind.MESSAGE to old)) ||
+                        (kind == WorldArchiveIdKind.NPC_DOSSIER &&
+                            previous == (WorldArchiveIdKind.CHARACTER to old) &&
+                            old in promotedIds)
                     ) { "Two independent World archive resources would share an imported identity" }
                 }
             }

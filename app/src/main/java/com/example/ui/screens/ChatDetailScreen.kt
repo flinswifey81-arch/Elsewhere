@@ -28,6 +28,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.MenuBook
+import androidx.compose.material.icons.filled.Bookmarks
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Settings
@@ -67,6 +68,8 @@ import com.example.ui.components.elsewhereTopAppBarColors
 import com.example.ui.theme.LocalElsewhereSemanticColors
 import com.example.domain.repository.ProfileImageKind
 import com.example.domain.repository.ProfileImageRepository
+import com.example.domain.export.ChatPdfTurnRange
+import com.example.domain.export.ChatTranscriptPdfExporter
 import com.example.data.model.NpcDossier
 import com.example.domain.npc.NpcSpeakerPortraitResolver
 import com.example.domain.story.StoryResponse
@@ -77,6 +80,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -91,7 +95,9 @@ fun ChatDetailScreen(
     onNavigateToSettings: () -> Unit = {},
     onNavigateToInspector: (String?) -> Unit = {},
     onNavigateToLorebooks: () -> Unit = {},
+    onNavigateToStoryMemories: () -> Unit = {},
     onNavigateToNpcBank: () -> Unit = {},
+    onNavigateToScenarioSessionEditor: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     // Navigation ordinarily destroys a screen-scoped ViewModel on exit. Use one application-
@@ -120,7 +126,8 @@ fun ChatDetailScreen(
             scenarioRepository = appContainer.scenarioRepository,
             npcRepository = appContainer.npcRepository,
             npcOutputParser = appContainer.npcOutputParser,
-            generationLifecycle = appContainer.generationNotifications
+            generationLifecycle = appContainer.generationNotifications,
+            storyMemoryRepository = appContainer.storyMemoryRepository
         )
     )
 
@@ -160,6 +167,46 @@ fun ChatDetailScreen(
     val coroutineScope = rememberCoroutineScope()
     var showDeleteChatConfirm by remember { mutableStateOf(false) }
     var showChatToolsMenu by remember { mutableStateOf(false) }
+    val pdfExporter = remember(appContainer.messageRepository) {
+        ChatTranscriptPdfExporter(appContainer.messageRepository)
+    }
+    var showPdfExport by remember { mutableStateOf(false) }
+    var pdfCountLoading by remember { mutableStateOf(false) }
+    var pdfInProgress by remember { mutableStateOf(false) }
+    var pdfTurnCount by remember { mutableIntStateOf(0) }
+    var pdfFirstTurn by rememberSaveable(chatId) { mutableStateOf("1") }
+    var pdfLastTurn by rememberSaveable(chatId) { mutableStateOf("") }
+    var pendingPdfRange by remember { mutableStateOf<ChatPdfTurnRange?>(null) }
+    val pdfSaveLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/pdf")
+    ) { uri ->
+        val requested = pendingPdfRange
+        pendingPdfRange = null
+        if (uri != null && requested != null) {
+            coroutineScope.launch {
+                pdfInProgress = true
+                try {
+                    val title = (uiState as? ChatUiState.Success)
+                        ?.chatSummary?.chat?.displayName ?: "Chat"
+                    val result = withContext(Dispatchers.IO) {
+                        val stream = context.contentResolver.openOutputStream(uri, "wt")
+                            ?: error("Cannot write to the selected PDF file.")
+                        stream.use { pdfExporter.export(chatId, title, requested, it) }
+                    }
+                    snackbarHostState.showSnackbar(
+                        "PDF saved: " + result.turns + " turns, " + result.pages + " pages"
+                    )
+                } catch (failure: Exception) {
+                    snackbarHostState.showSnackbar(
+                        "PDF export failed: " + (failure.message ?: "Unknown error")
+                    )
+                } finally {
+                    pdfInProgress = false
+                }
+            }
+        }
+    }
+
     var showChatMenu by remember { mutableStateOf(false) }
     var showWackConfirm by remember { mutableStateOf(false) }
     val imagePicker = rememberLauncherForActivityResult(
@@ -173,6 +220,80 @@ fun ChatDetailScreen(
             retainedStores?.forget(chatId)
             onChatDeleted()
         }
+    }
+
+    if (showPdfExport) {
+        val first = pdfFirstTurn.toIntOrNull()
+        val last = pdfLastTurn.toIntOrNull()
+        val validRange = !pdfCountLoading && !pdfInProgress &&
+            first != null && last != null && first >= 1 &&
+            last >= first && last <= pdfTurnCount
+        AlertDialog(
+            onDismissRequest = { if (!pdfInProgress) showPdfExport = false },
+            title = { Text("Download chat as PDF") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        if (pdfCountLoading) "Counting selected story turns…"
+                        else "Selected story turns: " + pdfTurnCount,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Text(
+                        "Saves the selected message variants in story order. " +
+                            "Your older transcript, including pre-Wack messages, is preserved. " +
+                            "Unselected regenerations and unsent drafts are excluded.",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            value = pdfFirstTurn,
+                            onValueChange = { pdfFirstTurn = it.filter(Char::isDigit).take(8) },
+                            label = { Text("First turn") },
+                            singleLine = true,
+                            modifier = Modifier.weight(1f).testTag("pdf_export_first_turn")
+                        )
+                        OutlinedTextField(
+                            value = pdfLastTurn,
+                            onValueChange = { pdfLastTurn = it.filter(Char::isDigit).take(8) },
+                            label = { Text("Last turn") },
+                            singleLine = true,
+                            modifier = Modifier.weight(1f).testTag("pdf_export_last_turn")
+                        )
+                    }
+                    TextButton(
+                        enabled = !pdfCountLoading && pdfTurnCount > 0,
+                        onClick = {
+                            pdfFirstTurn = "1"
+                            pdfLastTurn = pdfTurnCount.toString()
+                        }
+                    ) { Text("Entire chat") }
+                    Text(
+                        "PDFs are not encrypted. Save private roleplays in a location you trust.",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = validRange,
+                    modifier = Modifier.testTag("pdf_export_save"),
+                    onClick = {
+                        pendingPdfRange = ChatPdfTurnRange(
+                            requireNotNull(first), requireNotNull(last)
+                        )
+                        showPdfExport = false
+                        val chatName = (uiState as? ChatUiState.Success)
+                            ?.chatSummary?.chat?.displayName.orEmpty()
+                            .replace(Regex("[^A-Za-z0-9_-]"), "_")
+                            .take(70).ifBlank { "Elsewhere_Chat" }
+                        pdfSaveLauncher.launch(chatName + ".pdf")
+                    }
+                ) { Text("Save PDF") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showPdfExport = false }) { Text("Cancel") }
+            }
+        )
     }
 
     Scaffold(
@@ -209,6 +330,32 @@ fun ChatDetailScreen(
                             expanded = showChatToolsMenu,
                             onDismissRequest = { showChatToolsMenu = false }
                         ) {
+                            DropdownMenuItem(
+                                text = { Text("Download chat as PDF") },
+                                enabled = toolActionsEnabled && !pdfInProgress,
+                                modifier = Modifier.testTag("download_chat_pdf"),
+                                onClick = {
+                                    showChatToolsMenu = false
+                                    showPdfExport = true
+                                    pdfCountLoading = true
+                                    coroutineScope.launch {
+                                        runCatching { pdfExporter.selectedTurnCount(chatId) }
+                                            .onSuccess { count ->
+                                                pdfTurnCount = count
+                                                pdfFirstTurn = "1"
+                                                pdfLastTurn = count.toString()
+                                            }
+                                            .onFailure {
+                                                pdfTurnCount = 0
+                                                snackbarHostState.showSnackbar(
+                                                    "Could not read chat length: " +
+                                                        (it.message ?: "Unknown error")
+                                                )
+                                            }
+                                        pdfCountLoading = false
+                                    }
+                                }
+                            )
                             DropdownMenuItem(
                                 text = {
                                     Text("Update Memory Now")
@@ -248,6 +395,11 @@ fun ChatDetailScreen(
                                 }
                             )
                             DropdownMenuItem(
+                                text = { Text("Story Memories") },
+                                leadingIcon = { Icon(Icons.Filled.Bookmarks, contentDescription = null) },
+                                onClick = { showChatMenu = false; onNavigateToStoryMemories() }
+                            )
+                            DropdownMenuItem(
                                 text = { Text("Chat Lorebooks") },
                                 leadingIcon = { Icon(Icons.Filled.MenuBook, contentDescription = null) },
                                 onClick = { showChatMenu = false; onNavigateToLorebooks() }
@@ -257,6 +409,19 @@ fun ChatDetailScreen(
                                 leadingIcon = { Icon(Icons.Filled.Groups, contentDescription = null) },
                                 onClick = { showChatMenu = false; onNavigateToNpcBank() }
                             )
+                            if ((uiState as? ChatUiState.Success)?.chatSummary?.chat?.chatType == ChatType.SCENARIO) {
+                                val current = uiState as? ChatUiState.Success
+                                DropdownMenuItem(
+                                    text = { Text("Edit this Scenario playthrough") },
+                                    modifier = Modifier.testTag("edit_active_scenario_playthrough"),
+                                    enabled = current != null && current.historyLoaded &&
+                                        !current.isGenerating && !current.partialStopped,
+                                    onClick = {
+                                        showChatMenu = false
+                                        onNavigateToScenarioSessionEditor()
+                                    }
+                                )
+                            }
                             DropdownMenuItem(
                                 text = { Text("Chat Settings") },
                                 leadingIcon = { Icon(Icons.Filled.Settings, contentDescription = null) },
@@ -319,16 +484,44 @@ fun ChatDetailScreen(
                             }
                         }
                         val hasStreamingItem = state.isGenerating || state.partialStopped
+                        val hasEarlierControl = state.hasEarlierHistory ||
+                            state.isLoadingEarlierHistory
                         AutoScrollingChatColumn(
                             conversationKey = chatId,
                             historyLoaded = state.historyLoaded,
-                            itemCount = state.groupedMessages.size + if (hasStreamingItem) 1 else 0,
+                            itemCount = state.groupedMessages.size +
+                                (if (hasStreamingItem) 1 else 0) +
+                                (if (hasEarlierControl) 1 else 0),
                             isStreaming = hasStreamingItem,
+                            hasEarlierHistory = state.hasEarlierHistory,
+                            isLoadingEarlierHistory = state.isLoadingEarlierHistory,
+                            onLoadEarlier = viewModel::loadEarlierMessages,
+                            onReturnedToLatest = viewModel::returnToLatestMessages,
                             streamContentKey = state.streamingContent,
                             modifier = Modifier
                                 .weight(1f)
                                 .fillMaxWidth()
                         ) {
+                            if (hasEarlierControl) {
+                                item(key = "load-earlier-messages") {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.Center
+                                    ) {
+                                        TextButton(
+                                            enabled = state.hasEarlierHistory &&
+                                                !state.isLoadingEarlierHistory,
+                                            onClick = viewModel::loadEarlierMessages
+                                        ) {
+                                            Text(
+                                                if (state.isLoadingEarlierHistory)
+                                                    "Loading earlier messages…"
+                                                else "Load earlier messages"
+                                            )
+                                        }
+                                    }
+                                }
+                            }
                             items(state.groupedMessages, key = { it.primaryMessage.messageId }) { group ->
                                 MessageBubble(
                                     group = group,
@@ -355,7 +548,20 @@ fun ChatDetailScreen(
                                     },
                                     onEdit = { id, content -> viewModel.editMessage(id, content) },
                                     onDelete = { viewModel.deleteMessage(it) },
-                                    onShowMetadata = { viewModel.showGenerationDetails(it) }
+                                    onShowMetadata = { viewModel.showGenerationDetails(it) },
+                                    onSaveMemory = appContainer.storyMemoryRepository?.let { archive ->
+                                        { messageId: String ->
+                                            coroutineScope.launch {
+                                                runCatching { archive.saveFromMessage(chatId, messageId) }
+                                                    .onSuccess {
+                                                        snackbarHostState.showSnackbar("Saved to Story Memories")
+                                                    }
+                                                    .onFailure {
+                                                        snackbarHostState.showSnackbar(it.message ?: "Unable to save Story Memory")
+                                                    }
+                                            }
+                                        }
+                                    }
                                 )
                             }
                             
@@ -402,6 +608,19 @@ fun ChatDetailScreen(
                                 onMove = viewModel::moveGroupCharacter,
                                 onRemove = viewModel::removeGroupCharacter,
                                 onAdd = viewModel::addGroupCharacter
+                            )
+                        }
+
+                        if (
+                            state.chatSummary.chat.chatType == ChatType.SOLO &&
+                            state.soloSpotlightCharacters.count { it.isActive } > 1 &&
+                            !state.partialStopped
+                        ) {
+                            SoloSpotlightControls(
+                                characters = state.soloSpotlightCharacters,
+                                selectedId = state.selectedSoloSpotlightId,
+                                isGenerating = state.isGenerating,
+                                onSelect = viewModel::selectSoloSpotlight
                             )
                         }
 
@@ -669,6 +888,55 @@ private fun HistoryOnlyChatNotice() {
     }
 }
 
+/** In a Solo story, the selected Character writes the NEXT reply, not past turns. */
+@Composable
+internal fun SoloSpotlightControls(
+    characters: List<GroupCharacterState>,
+    selectedId: String?,
+    isGenerating: Boolean,
+    onSelect: (String) -> Unit
+) {
+    val active = characters.filter { it.isActive }.sortedBy { it.sortPosition }
+    val selected = active.firstOrNull { it.character.characterId == selectedId }
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        modifier = Modifier.fillMaxWidth().testTag("solo_spotlight_controls")
+    ) {
+        Column(Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) {
+            TextButton(
+                onClick = { expanded = !expanded },
+                modifier = Modifier.fillMaxWidth().testTag("solo_spotlight_toggle")
+            ) {
+                Text("Character spotlight: ${selected?.character?.displayName ?: "Select"}")
+            }
+            if (expanded) {
+                Text(
+                    "Choose who answers the next turn. Earlier messages, NPC state " +
+                        "and story memories stay in this same chat.",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                Row(
+                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    active.forEach { member ->
+                        FilterChip(
+                            selected = member.character.characterId == selectedId,
+                            onClick = { onSelect(member.character.characterId) },
+                            enabled = !isGenerating,
+                            label = { Text(member.character.displayName) },
+                            modifier = Modifier.testTag(
+                                "solo_spotlight_select_${member.character.characterId}"
+                            )
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
 @Composable
 internal fun GroupCharacterControls(
     characters: List<GroupCharacterState>,
@@ -860,6 +1128,10 @@ internal fun AutoScrollingChatColumn(
     isStreaming: Boolean,
     streamContentKey: String?,
     modifier: Modifier = Modifier,
+    hasEarlierHistory: Boolean = false,
+    isLoadingEarlierHistory: Boolean = false,
+    onLoadEarlier: (() -> Unit)? = null,
+    onReturnedToLatest: (() -> Unit)? = null,
     listState: LazyListState = rememberLazyListState(),
     content: LazyListScope.() -> Unit
 ) {
@@ -882,6 +1154,34 @@ internal fun AutoScrollingChatColumn(
             false
         } else {
             listState.isNearBottom(nearBottomThresholdPx)
+        }
+    }
+
+    // Scrollback triggers only after a user-driven scroll reaches the older
+    // edge. Loading a page prepends stable keyed items, preserving their
+    // visible anchor instead of jumping the reader to the latest reply.
+    LaunchedEffect(
+        conversationKey, historyLoaded, initialScrollComplete,
+        hasEarlierHistory, isLoadingEarlierHistory
+    ) {
+        if (!historyLoaded || !initialScrollComplete || !hasEarlierHistory ||
+            isLoadingEarlierHistory) return@LaunchedEffect
+        snapshotFlow {
+            listState.isScrollInProgress && listState.firstVisibleItemIndex <= 2
+        }.distinctUntilChanged().collect { nearTop ->
+            if (nearTop) onLoadEarlier?.invoke()
+        }
+    }
+
+    // Once the reader has returned to the live end, older loaded pages can
+    // be released from ViewModel memory. They remain in Room for scrollback.
+    LaunchedEffect(conversationKey, historyLoaded, initialScrollComplete) {
+        if (!historyLoaded || !initialScrollComplete) return@LaunchedEffect
+        snapshotFlow {
+            !listState.isScrollInProgress &&
+                listState.isNearBottom(nearBottomThresholdPx)
+        }.distinctUntilChanged().collect { atLatest ->
+            if (atLatest) onReturnedToLatest?.invoke()
         }
     }
 
@@ -945,7 +1245,8 @@ fun MessageBubble(
     onCopy: (String) -> Unit,
     onEdit: (String, String) -> Unit,
     onDelete: (String) -> Unit,
-    onShowMetadata: (String) -> Unit
+    onShowMetadata: (String) -> Unit,
+    onSaveMemory: ((String) -> Unit)? = null
 ) {
     val message = group.primaryMessage
     val isUser = message.speakerType == SpeakerType.PERSONA
@@ -975,7 +1276,8 @@ fun MessageBubble(
             onCopy = onCopy,
             onEdit = onEdit,
             onDelete = onDelete,
-            onShowMetadata = onShowMetadata
+            onShowMetadata = onShowMetadata,
+            onSaveMemory = onSaveMemory
         )
         return
     }
@@ -1033,6 +1335,7 @@ fun MessageBubble(
                     onRegenerate = if (isUser) null else ({ onRegenerate(message.messageId) }),
                     onContinue = if (isUser) null else ({ onContinue(message.messageId) }),
                     onShowMetadata = if (isUser) null else ({ onShowMetadata(message.messageId) }),
+                    onSaveMemory = onSaveMemory?.let { action -> { action(message.messageId) } },
                     mutationsEnabled = mutationsEnabled
                 )
             }
@@ -1200,7 +1503,8 @@ private fun EnsembleMessageBubble(
     onCopy: (String) -> Unit,
     onEdit: (String, String) -> Unit,
     onDelete: (String) -> Unit,
-    onShowMetadata: (String) -> Unit
+    onShowMetadata: (String) -> Unit,
+    onSaveMemory: ((String) -> Unit)? = null
 ) {
     val message = group.primaryMessage
     var showMenu by remember { mutableStateOf(false) }
@@ -1243,6 +1547,7 @@ private fun EnsembleMessageBubble(
                     onRegenerate = { onRegenerate(message.messageId) },
                     onContinue = { onContinue(message.messageId) },
                     onShowMetadata = { onShowMetadata(message.messageId) },
+                    onSaveMemory = onSaveMemory?.let { action -> { action(message.messageId) } },
                     mutationsEnabled = mutationsEnabled
                 )
             }
@@ -1479,7 +1784,8 @@ fun MessageMenu(
     onRegenerate: (() -> Unit)?,
     onContinue: (() -> Unit)?,
     onShowMetadata: (() -> Unit)?,
-    mutationsEnabled: Boolean = true
+    mutationsEnabled: Boolean = true,
+    onSaveMemory: (() -> Unit)? = null
 ) {
     DropdownMenu(
         expanded = expanded,
@@ -1489,6 +1795,13 @@ fun MessageMenu(
             text = { Text("Copy") },
             onClick = { onDismiss(); onCopy() }
         )
+        if (onSaveMemory != null) {
+            DropdownMenuItem(
+                text = { Text("Save as Story Memory") },
+                onClick = { onDismiss(); onSaveMemory() },
+                enabled = mutationsEnabled
+            )
+        }
         DropdownMenuItem(
             text = { Text("Edit") },
             onClick = { onDismiss(); onEdit() },

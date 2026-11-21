@@ -1,0 +1,143 @@
+name: Native Room v15 to v21 Upgrade and Rollback QA
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'qa/v15-v21/**'
+      - 'docs/NATIVE_V15_ENCRYPTED_BACKUP_RECOVERY_QA_2026-11-20.md'
+      - 'app/src/test/java/com/example/FullSchemaV15ToV21MigrationTest.kt'
+      - 'app/src/test/java/com/example/domain/backup/NativeV15EncryptedRestoreAcceptanceTest.kt'
+      - 'app/src/main/java/com/example/data/**'
+      - '.github/workflows/native-v15-v21-upgrade.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-full-schema-upgrade:
+    name: Native v15 schema, complete v21 migration, rollback and retry
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      ELSEWHERE_V15_FIXTURE_PATH: /tmp/elsewhere-native-v15-synthetic.db
+      ELSEWHERE_V15_ENCRYPTED_PATH: /tmp/native-v15-encrypted-synthetic.ewbak
+      ELSEWHERE_REQUIRE_V15_ENCRYPTED: '1'
+      ELSEWHERE_REQUIRE_V15_FIXTURE: '1'
+    steps:
+      - name: Check out current proposed v21 code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check out pinned ORIGINAL Room v15 source in separate folder
+        uses: actions/checkout@v4
+        with:
+          ref: b2295d69877ba003e6473c8a40e1f7a514c560f7
+          path: pinned-original-v15
+          persist-credentials: false
+      - name: Verify pinned source and generated fixture test isolation
+        run: |
+          test "$(git -C pinned-original-v15 rev-parse HEAD)" = b2295d69877ba003e6473c8a40e1f7a514c560f7
+          grep -q 'const val APP_DATABASE_VERSION = 15' pinned-original-v15/app/src/main/java/com/example/data/AppDatabase.kt
+          mkdir -p pinned-original-v15/app/src/test/java/com/example
+          cp qa/v15-v21/FullV15RoomFixtureExportTest.kt pinned-original-v15/app/src/test/java/com/example/
+          cp qa/v15-v21/OriginalV15EncryptedBackupExportTest.kt pinned-original-v15/app/src/test/java/com/example/
+          echo "Using exact committed Room v15 source snapshot; fixture source is copied into ephemeral checkout only."
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools
+      - name: Install Android SDK
+        run: sdkmanager "platforms;android-36.1" "build-tools;36.0.0"
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Build authentic native full-schema v15 SQLite database with linked synthetic records
+        working-directory: pinned-original-v15
+        run: |
+          bash ./gradlew :app:testDebugUnitTest --no-daemon \
+            --tests com.example.FullV15RoomFixtureExportTest \
+            --tests com.example.OriginalV15EncryptedBackupExportTest
+          test -s "$ELSEWHERE_V15_FIXTURE_PATH"
+          test -s "$ELSEWHERE_V15_ENCRYPTED_PATH"
+
+      - name: Verify the exact v15 schema and seeded rows without disclosing text
+        run: |
+          python3 - <<'PY'
+          import os,sqlite3,hashlib
+          from pathlib import Path
+          file=Path(os.environ['ELSEWHERE_V15_FIXTURE_PATH'])
+          assert file.is_file() and file.stat().st_size>30000
+          db=sqlite3.connect(f"file:{file}?mode=ro",uri=True)
+          version=db.execute("PRAGMA user_version").fetchone()[0]
+          tables=[r[0] for r in db.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name!='room_master_table'"
+          )]
+          counts={t:db.execute(f'SELECT COUNT(*) FROM "{t}"').fetchone()[0] for t in tables}
+          assert version==15,version
+          assert len(tables)>=30,len(tables)
+          assert sum(v>0 for v in counts.values())>=28, counts.keys()
+          assert db.execute("PRAGMA integrity_check").fetchone()[0]=="ok"
+          db.close()
+          print("Native Room v15 fixture passed: tables=",len(tables),
+                "populatedDomains=",sum(v>0 for v in counts.values()),
+                "rows=",sum(counts.values()),
+                "sha256=",hashlib.sha256(file.read_bytes()).hexdigest(),
+                "all data synthetic; no production file")
+          PY
+
+      - name: Run true v15 to v21 Room upgrade and simulated-failure rollback tests
+        run: |
+          bash ./gradlew :app:testSandboxUnitTest --no-daemon \
+            --tests com.example.FullSchemaV15ToV21MigrationTest \
+            --tests com.example.domain.backup.NativeV15EncryptedRestoreAcceptanceTest
+
+      - name: Require both migration tests to execute without skips or failures
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          from xml.etree import ElementTree as ET
+          target=Path('app/build/test-results/testSandboxUnitTest/TEST-com.example.FullSchemaV15ToV21MigrationTest.xml')
+          assert target.is_file(), "Missing v15→v21 acceptance report"
+          root=ET.parse(target).getroot()
+          tests=list(root.iter('testcase'))
+          names={t.get('name') for t in tests}
+          assert names=={
+            'realRoom15CompleteSchemaUpgradesTo21WithoutChangingAnyOldRows',
+            'interruptedMigrationRollsBackAllChangesAndCanRetryFromOriginalV15'
+          }, names
+          for test in tests:
+            assert not any(test.findall(kind) for kind in ('skipped','failure','error')),test.get('name')
+          encrypted=Path('app/build/test-results/testSandboxUnitTest/TEST-com.example.domain.backup.NativeV15EncryptedRestoreAcceptanceTest.xml')
+          assert encrypted.is_file(), "Missing original-v15 encrypted-archive restore report"
+          restored=list(ET.parse(encrypted).getroot().iter('testcase'))
+          assert {c.get('name') for c in restored}=={
+            'genuineV15CiphertextInspectAndRestorePreservesHistoryAndBinaryImages',
+            'wrongPasswordTamperAndChangedAfterInspectionNeverReplaceExistingData',
+            'genuineV15EncryptedRestoreFailureAfterDatabaseReplacementRecoversExactPreviousData',
+            'genuineV15EncryptedRestoreFailureAfterProfileReplacementRecoversExactPreviousData'
+          }
+          assert all(not any(c.findall(k) for k in ('skipped','failure','error')) for c in restored)
+          print("ORIGINAL_V15_ENCRYPTED_TO_V21_RESTORE_PASS: 4 executed, 0 skipped, 0 failed; no model calls.")
+          print("NATIVE_V15_TO_V21_ACCEPTANCE_PASS: 2 executed, 0 skipped, 0 failed; no model calls.")
+          PY
+      - name: Show failure summaries without private transcript contents
+        if: failure()
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          from xml.etree import ElementTree as ET
+          for base in [Path('app/build/test-results/testSandboxUnitTest'),
+                       Path('pinned-original-v15/app/build/test-results/testSandboxUnitTest')]:
+            for file in base.glob('TEST-*.xml'):
+              for test in ET.parse(file).getroot().iter('testcase'):
+                if test.find('failure') is not None or test.find('error') is not None:
+                  print("FAIL",test.get('classname'),test.get('name'))
+          PY

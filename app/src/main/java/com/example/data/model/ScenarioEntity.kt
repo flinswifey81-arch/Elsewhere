@@ -21,7 +21,8 @@ data class ScenarioNpc(
     val relationships: String = "",
     val narrativeRole: String = "",
     val instructions: String = "",
-    // Reserved stable reference for future library selection; never mutates a Character.
+    // Stable link to an existing Character card for authored portrayal, not a copy.
+    // Local NPC fields remain role-specific; no other chat memory or knowledge migrates.
     val sourceCharacterId: String? = null
 )
 

@@ -12,6 +12,7 @@ data class WorldArchiveImportPreview(
     val worldTitle: String,
     val chats: Int,
     val messages: Int,
+    val storyMemories: Int,
     val primaryResponses: Int,
     val alternativeVariants: Int,
     val characters: Int,
@@ -36,6 +37,7 @@ data class WorldArchiveImportPreview(
                 worldTitle = state.world.title,
                 chats = state.chats.size,
                 messages = state.messages.size,
+                storyMemories = state.storyMemories.size,
                 primaryResponses = state.messages.count { it.isPrimaryVariant },
                 alternativeVariants = state.messages.count { !it.isPrimaryVariant },
                 characters = state.characters.size,
@@ -61,7 +63,8 @@ data class WorldArchiveImportPreview(
                     state.personas.any { !it.privateNotesJson.isNullOrBlank() } ||
                     state.npcDossiers.any { it.authorNotes.isNotBlank() } ||
                     state.npcLibraryEntries.any { it.authorNotes.isNotBlank() } ||
-                    state.lorebookEntries.any { it.notes.isNotBlank() },
+                    state.lorebookEntries.any { it.notes.isNotBlank() } ||
+                    state.storyMemories.isNotEmpty(),
                 containsNpcSecrets = state.npcDossiers.any { it.secrets.isNotBlank() } ||
                     state.npcLibraryEntries.any { it.secrets.isNotBlank() }
             )

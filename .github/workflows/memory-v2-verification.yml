@@ -1,0 +1,199 @@
+name: Memory V2 Verification
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'app/src/**'
+      - 'qa/v15-v21/**'
+      - 'docs/NATIVE_V15_ENCRYPTED_BACKUP_RECOVERY_QA_2026-11-20.md'
+      - '.github/workflows/memory-v2-verification.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-memory-v2:
+    name: Compile and run memory / generation regressions
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out proposed changes
+        uses: actions/checkout@v4
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools
+      - name: Install Android SDK
+        run: sdkmanager "platforms;android-36.1" "build-tools;36.0.0"
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+      - name: Compile and run focused regressions
+        run: |
+          bash ./gradlew :app:testSandboxUnitTest --no-daemon \
+            --tests com.example.domain.PromptPreflightTest \
+            --tests com.example.domain.PromptHistoryTrimmerTest \
+            --tests com.example.domain.PromptOptionalContextFitterTest \
+            --tests com.example.domain.StoryMemoryTemporalRetrievalTest \
+            --tests com.example.domain.BoundedLegacyMemoryProvenanceTest \
+            --tests com.example.domain.BoundedGroupGenerationWindowTest \
+            --tests com.example.domain.PagedAutomaticMemoryMaintenanceTest \
+            --tests com.example.LocalGroupGenerationTest \
+            --tests com.example.domain.backup.BackupRepositoryTest \
+            --tests com.example.domain.MemoryV2RoomScaleBenchmarkTest \
+            --tests com.example.domain.RecentPrimaryMessageWindowTest \
+            --tests com.example.domain.HistoricalGenerationWindowTest \
+            --tests com.example.ChatHistoryPaginationTest \
+            --tests com.example.ChatImageMetadataPaginationTest \
+            --tests com.example.MessageAttachmentRepositoryTest \
+            --tests com.example.domain.PagedHistoricalActionTest \
+            --tests com.example.ChatAutoScrollTest \
+            --tests com.example.domain.RecentGenerationContextScanTest \
+            --tests com.example.domain.RollingSummaryTailTest \
+            --tests com.example.domain.GenerationHistoryWithCurrentTest \
+            --tests com.example.ChatTimestampWackBoundaryTest \
+            --tests com.example.domain.AutomaticMemoryManagerTest \
+            --tests com.example.NpcSceneCastResolverTest \
+            --tests com.example.domain.Stage0ContextWindowContractTest \
+            --tests com.example.domain.Stage0ContextCostAndContinuityBenchmarkTest \
+            --tests com.example.domain.ContextBudgetProbeTest \
+            --tests com.example.domain.memory.StoryMemoryEligibilityPolicyTest \
+            --tests com.example.domain.StoryMemoryStorageTest \
+            --tests com.example.StoryRelationshipStateTest \
+            --tests com.example.StoryPromiseStateTest \
+            --tests com.example.StoryKnowledgeHistoryTest \
+            --tests com.example.StoryCharacterPerspectiveTest \
+            --tests com.example.StoryCandidateReviewTest \
+            --tests com.example.StoryMemoriesScreenTest \
+            --tests com.example.AppDatabaseMigrationTest \
+            --tests com.example.ChatDetailGenerationTest \
+            --tests com.example.ScenarioModeTest
+      - name: Report synthetic long-chat benchmark metrics
+        if: always()
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          from xml.etree import ElementTree as ET
+          found = False
+          for path in Path('app/build/test-results/testSandboxUnitTest').glob('TEST-*.xml'):
+              root = ET.parse(path).getroot()
+              for output in root.iter('system-out'):
+                  for line in (output.text or '').splitlines():
+                      if 'MEMORY_V2_ROOM_BENCHMARK' in line:
+                          print(line.strip())
+                          found = True
+          if not found:
+              print('No synthetic benchmark measurements were emitted; inspect test completion.')
+          PY
+      - name: Show failed test summaries
+        if: failure()
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          from xml.etree import ElementTree as ET
+          for file in Path('app/build/test-results/testSandboxUnitTest').glob('TEST-*.xml'):
+              for case in ET.parse(file).getroot().iter('testcase'):
+                  for failure in list(case.findall('failure')) + list(case.findall('error')):
+                      print('FAIL:', case.get('classname'), case.get('name'))
+                      print(failure.get('message', ''))
+                      print((failure.text or '')[:3000])
+          PY
+
+  native-v15-to-v21:
+    name: Pinned Room v15 complete-schema migration and rollback
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      ELSEWHERE_V15_FIXTURE_PATH: /tmp/room-v15-native-qa.db
+      ELSEWHERE_V15_ENCRYPTED_PATH: /tmp/native-v15-encrypted-synthetic.ewbak
+      ELSEWHERE_REQUIRE_V15_ENCRYPTED: '1'
+      ELSEWHERE_REQUIRE_V15_FIXTURE: '1'
+    steps:
+      - name: Check out proposed v21 changes
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Pin original v15 source (never install or merge)
+        uses: actions/checkout@v4
+        with:
+          ref: b2295d69877ba003e6473c8a40e1f7a514c560f7
+          path: pinned-original-v15
+          persist-credentials: false
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools
+      - name: Install Android SDK
+        run: sdkmanager "platforms;android-36.1" "build-tools;36.0.0"
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+      - name: Compile original v15 Room and export synthetic full-schema database
+        run: |
+          test "$(git -C pinned-original-v15 rev-parse HEAD)" = b2295d69877ba003e6473c8a40e1f7a514c560f7
+          grep -q 'const val APP_DATABASE_VERSION = 15' pinned-original-v15/app/src/main/java/com/example/data/AppDatabase.kt
+          cp qa/v15-v21/FullV15RoomFixtureExportTest.kt pinned-original-v15/app/src/test/java/com/example/
+          cp qa/v15-v21/OriginalV15EncryptedBackupExportTest.kt pinned-original-v15/app/src/test/java/com/example/
+          (cd pinned-original-v15 && bash ./gradlew :app:testDebugUnitTest --no-daemon \
+            --tests com.example.FullV15RoomFixtureExportTest \
+            --tests com.example.OriginalV15EncryptedBackupExportTest)
+          test -s "$ELSEWHERE_V15_FIXTURE_PATH"
+          test -s "$ELSEWHERE_V15_ENCRYPTED_PATH"
+      - name: Reject incomplete, empty or forged-version fixtures
+        run: |
+          python3 - <<'PY'
+          import os,sqlite3
+          from pathlib import Path
+          file=Path(os.environ['ELSEWHERE_V15_FIXTURE_PATH'])
+          assert file.is_file() and file.stat().st_size>30000
+          conn=sqlite3.connect(f"file:{file}?mode=ro",uri=True)
+          assert conn.execute("PRAGMA user_version").fetchone()[0]==15
+          tables=[row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name!='room_master_table'")]
+          populated=sum(bool(conn.execute(f'SELECT 1 FROM "{t}" LIMIT 1').fetchone()) for t in tables)
+          assert len(tables)>=30 and populated>=28,(len(tables),populated)
+          assert conn.execute("PRAGMA integrity_check").fetchone()[0]=="ok"
+          print(f"ROOM15_ORIGINAL_SOURCE_FIXTURE: tables={len(tables)}, populated={populated}, synthetic_only=true")
+          conn.close()
+          PY
+      - name: Migrate with real Room v21 and prove atomic rollback after injected failure
+        run: |
+          bash ./gradlew :app:testSandboxUnitTest --no-daemon \
+            --tests com.example.FullSchemaV15ToV21MigrationTest \
+            --tests com.example.domain.backup.NativeV15EncryptedRestoreAcceptanceTest
+      - name: Require both full-schema acceptance cases to actually execute
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          from xml.etree import ElementTree as ET
+          target=Path('app/build/test-results/testSandboxUnitTest/TEST-com.example.FullSchemaV15ToV21MigrationTest.xml')
+          assert target.is_file(), "Full-schema migration result missing"
+          cases=list(ET.parse(target).getroot().iter('testcase'))
+          assert {c.get('name') for c in cases}=={
+            'realRoom15CompleteSchemaUpgradesTo21WithoutChangingAnyOldRows',
+            'interruptedMigrationRollsBackAllChangesAndCanRetryFromOriginalV15'
+          }
+          assert all(not any(c.findall(k) for k in ('failure','error','skipped')) for c in cases)
+          encrypted=Path('app/build/test-results/testSandboxUnitTest/TEST-com.example.domain.backup.NativeV15EncryptedRestoreAcceptanceTest.xml')
+          assert encrypted.is_file(), "Missing original-v15 encrypted-archive restore report"
+          restored=list(ET.parse(encrypted).getroot().iter('testcase'))
+          assert {c.get('name') for c in restored}=={
+            'genuineV15CiphertextInspectAndRestorePreservesHistoryAndBinaryImages',
+            'wrongPasswordTamperAndChangedAfterInspectionNeverReplaceExistingData',
+            'genuineV15EncryptedRestoreFailureAfterDatabaseReplacementRecoversExactPreviousData',
+            'genuineV15EncryptedRestoreFailureAfterProfileReplacementRecoversExactPreviousData'
+          }
+          assert all(not any(c.findall(k) for k in ('skipped','failure','error')) for c in restored)
+          print("ORIGINAL_V15_ENCRYPTED_TO_V21_RESTORE_PASS: 4 executed, 0 skipped, 0 failed; no model calls.")
+          print("NATIVE_ROOM15_TO_21_UPGRADE_ROLLBACK_VERIFIED: tests=2 skipped=0 failures=0")
+          PY

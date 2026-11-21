@@ -91,17 +91,27 @@ interface LorebookDao {
         }
     }
 
+    /**
+     * A same-ID JSON update MUST NOT delete/reinsert the Lorebook or retained
+     * entry IDs: doing so destroys chat-specific entry overlays via FK cascades.
+     * Only entries deliberately removed from the replacement JSON are pruned,
+     * along with those removed entries' own overlays.
+     */
     @Transaction
     suspend fun replaceImportedDefinition(lorebook: LorebookEntity, entries: List<LorebookEntryEntity>) {
-        val replacementIds = entries.mapTo(mutableSetOf()) { it.entryId }
-        getEntries(lorebook.lorebookId)
-            .map { it.entryId }
-            .filterNot(replacementIds::contains)
-            .forEach { deleteOverlaysForEntry(it) }
-        deleteEntriesForLorebook(lorebook.lorebookId)
-        val existing = getLorebook(lorebook.lorebookId)
-        if (existing == null) insertLorebook(lorebook) else updateLorebook(lorebook)
-        insertEntries(entries)
+        val original = requireNotNull(getLorebook(lorebook.lorebookId)) {
+            "The Lorebook no longer exists. Nothing was overwritten."
+        }
+        val priorEntries = getEntries(lorebook.lorebookId).associateBy { it.entryId }
+        val now = System.currentTimeMillis()
+        saveDefinition(
+            lorebook.copy(createdAt = original.createdAt, updatedAt = now),
+            entries.map { incoming ->
+                priorEntries[incoming.entryId]?.let {
+                    incoming.copy(createdAt = it.createdAt, updatedAt = now)
+                } ?: incoming
+            }
+        )
     }
 
     @Transaction

@@ -44,8 +44,10 @@ jobs:
             --tests com.example.WorldArchiveEncryptedIOTest \
             --tests com.example.WorldArchiveAdditiveRestorerTest \
             --tests com.example.WorldArchiveTransferCoordinatorTest \
+            --tests com.example.WorldArchiveMemoryV2TransferTest \
             --tests com.example.WorldDefinitionCodecTest \
             --tests com.example.WorldRepositoryTest \
+            --tests com.example.WorldDefinitionBundleTransferTest \
             --tests com.example.AppDatabaseMigrationTest
 
       # This contract gate validates archive format and migration only.

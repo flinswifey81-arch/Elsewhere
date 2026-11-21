@@ -78,7 +78,15 @@ data class BackupPayload(
     val worlds: List<WorldEntity> = emptyList(),
     val worldMemberships: List<WorldMembershipEntity> = emptyList(),
     val worldCast: List<WorldCastEntity> = emptyList(),
-    val worldContinuityEvents: List<WorldContinuityEventEntity> = emptyList()
+    val worldContinuityEvents: List<WorldContinuityEventEntity> = emptyList(),
+    // v16 addition: defaults preserve loading historical v15 backup payloads.
+    val storyMemories: List<StoryMemoryEntity> = emptyList(),
+    val storyMemoryActors: List<StoryMemoryActorEntity> = emptyList(),
+    val storyMemoryReturns: List<StoryMemoryReturnEntity> = emptyList(),
+    // v20, backward-compatible with earlier encrypted backup payloads.
+    val storyMemoryKnowledgeChanges: List<StoryMemoryKnowledgeChangeEntity> = emptyList(),
+    // v21 optional addition: older archives contain no synthetic perspectives.
+    val storyMemoryPerspectives: List<StoryMemoryPerspectiveEntity> = emptyList()
 )
 
 data class BackupPreview(

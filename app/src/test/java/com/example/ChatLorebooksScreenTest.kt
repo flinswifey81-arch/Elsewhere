@@ -161,20 +161,20 @@ class ChatLorebooksScreenTest {
         composeRule.onNodeWithTag("chat_lorebooks_list").performScrollToIndex(1)
         composeRule.onNodeWithTag("attach_lorebook_ui-book").performClick()
         // Attached books remain collapsed until the player explicitly expands one.
-        composeRule.onNodeWithTag("manual_lore_ui-entry").assertDoesNotExist()
-        composeRule.onNodeWithTag("expand_lorebook_ui-book").performClick()
+        composeRule.onNodeWithTag("manual_lore_ui-entry", useUnmergedTree = true).assertDoesNotExist()
+        composeRule.onNodeWithTag("expand_lorebook_ui-book", useUnmergedTree = true).performClick()
         composeRule.waitUntil(5_000) {
-            composeRule.onAllNodesWithTag("manual_lore_ui-entry").fetchSemanticsNodes().isNotEmpty()
+            composeRule.onAllNodesWithTag("manual_lore_ui-entry", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
         }
         composeRule.onNodeWithText("Edit Chat Current").assertExists()
         // Data refresh can render the expanded entry before the preceding attachment
         // write has released its in-flight UI lock. Wait until interaction is available.
         composeRule.waitUntil(10_000) {
             runCatching {
-                composeRule.onNodeWithTag("manual_lore_ui-entry").assertIsEnabled()
+                composeRule.onNodeWithTag("manual_lore_ui-entry", useUnmergedTree = true).assertIsEnabled()
             }.isSuccess
         }
-        composeRule.onNodeWithTag("manual_lore_ui-entry").performScrollTo().assertIsDisplayed().performClick()
+        composeRule.onNodeWithTag("manual_lore_ui-entry", useUnmergedTree = true).performScrollTo().assertIsDisplayed().performClick()
         composeRule.waitUntil(10_000) {
             runBlocking {
                 repository.getChatLorebookStates("ui-chat")
@@ -186,14 +186,14 @@ class ChatLorebooksScreenTest {
         // On failure expose the UI toggle semantics instead of swallowing assertions.
         try {
             composeRule.waitUntil(10_000) {
-                composeRule.onAllNodesWithTag("manual_lore_ui-entry")
+                composeRule.onAllNodesWithTag("manual_lore_ui-entry", useUnmergedTree = true)
                     .fetchSemanticsNodes()
                     .any { node ->
                         runCatching { node.config[SemanticsProperties.ToggleableState] }.getOrNull() == ToggleableState.On
                     }
             }
         } catch (timeout: ComposeTimeoutException) {
-            val nodes = composeRule.onAllNodesWithTag("manual_lore_ui-entry").fetchSemanticsNodes()
+            val nodes = composeRule.onAllNodesWithTag("manual_lore_ui-entry", useUnmergedTree = true).fetchSemanticsNodes()
             val displayedStates = nodes.map { node ->
                 runCatching { node.config[SemanticsProperties.ToggleableState] }.getOrNull()?.toString()
                     ?: "ToggleableState missing"
@@ -204,6 +204,6 @@ class ChatLorebooksScreenTest {
                 timeout
             )
         }
-        composeRule.onNodeWithTag("manual_lore_ui-entry").assertIsOn()
+        composeRule.onNodeWithTag("manual_lore_ui-entry", useUnmergedTree = true).assertIsOn()
     }
 }

@@ -90,7 +90,9 @@ data class NpcDossier(
     val isManualBase: Boolean,
     val createdAt: Long,
     val updatedAt: Long,
-    val sceneMode: String = "AUTO"
+    val sceneMode: String = "AUTO",
+    /** Character identity linked by chat-local NPC role metadata, not name matching. */
+    val linkedCharacterId: String? = null
 )
 
 @Entity(tableName = "npc_library_banks")

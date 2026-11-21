@@ -1,8 +1,5 @@
 package com.example.ui.screens
 
-import android.net.Uri
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -16,7 +13,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -46,13 +42,9 @@ fun CharactersScreen(
 ) {
     val characters by repository.getAllCharacters().collectAsState(initial = emptyList())
     val coroutineScope = rememberCoroutineScope()
-    val context = LocalContext.current
     
     var showImportOptions by remember { mutableStateOf(false) }
-    var showPasteDialog by remember { mutableStateOf(false) }
-    var pasteContent by remember { mutableStateOf("") }
     var importError by remember { mutableStateOf<String?>(null) }
-    var batchImportSummary by remember { mutableStateOf<BatchImportSummary?>(null) }
     var showEditor by remember { mutableStateOf(false) }
     var editingCharacter by remember { mutableStateOf<CharacterEntity?>(null) }
     var characterPendingDeletion by remember { mutableStateOf<CharacterEntity?>(null) }
@@ -60,103 +52,24 @@ fun CharactersScreen(
     var deletionNotice by remember { mutableStateOf<String?>(null) }
     var deletionSucceeded by remember { mutableStateOf(false) }
     
-    val launcher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenMultipleDocuments()
-    ) { uris: List<Uri> ->
-        if (uris.isNotEmpty()) {
-            coroutineScope.launch {
-                batchImportSummary = importJsonDocuments(context, uris) { json ->
-                    repository.importCharacterJson(json, replaceExisting = false, importAsNew = false)
-                }
-            }
-        }
-    }
-
-    if (showImportOptions) {
-        AlertDialog(
-            onDismissRequest = { showImportOptions = false },
-            title = { Text("Import Character") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(
-                        onClick = { 
-                            showImportOptions = false
-                            launcher.launch(arrayOf("application/json", "*/*"))
-                        },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text("Choose JSON Files")
-                    }
-                    Button(
-                        onClick = { 
-                            showImportOptions = false
-                            showPasteDialog = true 
-                        },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text("Paste JSON")
-                    }
-                }
-            },
-            confirmButton = {},
-            dismissButton = {
-                TextButton(onClick = { showImportOptions = false }) {
-                    Text("Cancel")
-                }
-            }
-        )
-    }
-
-    if (showPasteDialog) {
-        AlertDialog(
-            onDismissRequest = { showPasteDialog = false },
-            title = { Text("Paste JSON") },
-            text = {
-                OutlinedTextField(
-                    value = pasteContent,
-                    onValueChange = { pasteContent = it },
-                    label = { Text("JSON Content") },
-                    modifier = Modifier.fillMaxWidth().height(200.dp)
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    coroutineScope.launch {
-                        try {
-                            repository.importCharacterJson(pasteContent, replaceExisting = false, importAsNew = false)
-                            showPasteDialog = false
-                            pasteContent = ""
-                            importError = null
-                        } catch (e: Exception) {
-                            importError = e.localizedMessage ?: "Unknown error"
-                        }
-                    }
-                }) {
-                    Text("Import")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showPasteDialog = false }) {
-                    Text("Cancel")
-                }
-            }
-        )
-    }
-    
-    if (importError != null) {
+    ProfileJsonImportWorkflow(
+        type = "Character",
+        showOptions = showImportOptions,
+        onCloseOptions = { showImportOptions = false },
+        importProfile = { json, replaceExisting, importAsNew ->
+            repository.importCharacterJson(json, replaceExisting, importAsNew)
+        },
+        findExistingName = { id -> repository.getCharacterById(id)?.displayName }
+    )
+    importError?.let { message ->
         AlertDialog(
             onDismissRequest = { importError = null },
-            title = { Text("Import Error") },
-            text = { Text(importError!!) },
+            title = { Text("Character Editor Error") },
+            text = { Text(message) },
             confirmButton = {
-                TextButton(onClick = { importError = null }) {
-                    Text("OK")
-                }
+                TextButton(onClick = { importError = null }) { Text("OK") }
             }
         )
-    }
-    batchImportSummary?.let { summary ->
-        BatchImportSummaryDialog("Character Import", summary, "character") { batchImportSummary = null }
     }
 
     characterPendingDeletion?.let { character ->
@@ -311,7 +224,7 @@ fun CharactersScreen(
                         }) {
                             Text("New Character")
                         }
-                        OutlinedButton(onClick = { launcher.launch(arrayOf("application/json", "*/*")) }) {
+                        OutlinedButton(onClick = { showImportOptions = true }) {
                             Text("Choose JSON Files")
                         }
                     }

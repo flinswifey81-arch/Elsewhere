@@ -131,10 +131,16 @@ class CharacterRepository(
         val rootMap = mapAdapter.fromJson(jsonString) ?: throw IllegalArgumentException("Invalid JSON format")
         
         val nestedData = rootMap["data"] as? Map<*, *>
+        require(!replaceExisting || !importAsNew) {
+            "Cannot replace an existing Character while importing it as a new copy."
+        }
         val schemaVersion = (rootMap["schema_version"] as? Number)?.toInt() ?: 1
-        var characterId = (rootMap["character_id"] as? String)
+        val originalId = (rootMap["character_id"] as? String)
             ?: (nestedData?.get("character_id") as? String)
-            ?: UUID.randomUUID().toString()
+        if (replaceExisting) require(!originalId.isNullOrBlank()) {
+            "Replacing a Character requires its original character_id in the JSON."
+        }
+        var characterId = originalId ?: UUID.randomUUID().toString()
         val displayName = (rootMap["display_name"] as? String)
             ?: (rootMap["name"] as? String)
             ?: (nestedData?.get("display_name") as? String)
@@ -147,13 +153,16 @@ class CharacterRepository(
         
         val aliases = (rootMap["aliases"] as? List<*>)?.mapNotNull { it?.toString() } ?: emptyList()
         
-        if (importAsNew) {
-            characterId = UUID.randomUUID().toString()
-        } else if (!replaceExisting) {
-            val existing = getCharacterById(characterId)
-            if (existing != null) {
-                throw DuplicateIdException("Character ID already exists", characterId)
+        if (importAsNew) characterId = UUID.randomUUID().toString()
+        // Under the same app-data mutation lease, the existing row is looked up
+        // BEFORE a write. No REPLACE insert may ever delete its FK dependents.
+        val existing = getCharacterById(characterId)
+        if (replaceExisting) {
+            requireNotNull(existing) {
+                "The original Character no longer exists. Nothing was overwritten."
             }
+        } else if (existing != null) {
+            throw DuplicateIdException("Character ID already exists", characterId)
         }
 
         val knownKeys = setOf(
@@ -162,8 +171,21 @@ class CharacterRepository(
             "knowledge", "world_context", "writing_rules", "examples", "author_notes"
         )
         
-        val extensions = rootMap.filterKeys { it !in knownKeys }
-        
+        val extensions = rootMap.filterKeys { it !in knownKeys }.toMutableMap()
+        // The origin marker is app-owned identity metadata: an external JSON
+        // must not forge it. Only keep a previously trusted same-ID link.
+        extensions.remove("_elsewhere_promoted_npc_id")
+        if (replaceExisting && existing != null) {
+            // Re-importing fixed JSON preserves the original NPC ↔ Character
+            // identity even if an external editor dropped the technical field.
+            val oldOrigin = existing.extensionFieldsJson?.let { raw ->
+                runCatching { mapAdapter.fromJson(raw) }.getOrNull()
+            }?.get("_elsewhere_promoted_npc_id")
+            if (oldOrigin == characterId) {
+                extensions["_elsewhere_promoted_npc_id"] = characterId
+            }
+        }
+
         val entity = CharacterEntity(
             characterId = characterId,
             displayName = displayName,
@@ -184,7 +206,19 @@ class CharacterRepository(
             extensionFieldsJson = if (extensions.isNotEmpty()) moshi.adapter(Any::class.java).toJson(extensions) else null
         )
         
-        characterDao.insertCharacter(entity)
+        if (replaceExisting) {
+            val original = requireNotNull(existing)
+            // Room @Update changes the row in place; it DOES NOT execute SQLite
+            // INSERT OR REPLACE (which could cascade-delete chat participants).
+            // Preserve historical creation/archival state and local avatar assets.
+            characterDao.updateCharacter(entity.copy(
+                createdAt = original.createdAt,
+                updatedAt = System.currentTimeMillis(),
+                isArchived = original.isArchived
+            ))
+        } else {
+            characterDao.insertCharacter(entity)
+        }
         characterId
     }
 

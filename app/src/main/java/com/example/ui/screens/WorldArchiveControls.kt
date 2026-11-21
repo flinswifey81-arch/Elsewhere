@@ -209,10 +209,11 @@ fun WorldArchiveControls(
                         "${preview.alternatives} alternate variants · ${preview.attachmentCount} attachments")
                     Text("${preview.characters} Characters · ${preview.personas} Personas · " +
                         "${preview.scenarios} Scenarios · ${preview.npcDossiers} NPC dossiers")
+                    Text("${preview.storyMemories} Story Memories (including knowledge and perspectives)")
                     if (preview.containsPrivateMaterial || preview.containsUnsentDrafts) {
                         Text(
-                            "Includes private notes, NPC secrets or unsent drafts. Only include " +
-                                "these in an encrypted file you control.",
+                            "Includes Story Memories, private notes, NPC secrets or unsent drafts. " +
+                                "Only include these in an encrypted file you control.",
                             color = MaterialTheme.colorScheme.error
                         )
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -220,7 +221,7 @@ fun WorldArchiveControls(
                                 checked = includePrivate, onCheckedChange = { includePrivate = it },
                                 enabled = !busy
                             )
-                            Text("Include the private notes, secrets and drafts")
+                            Text("Include Story Memories, private notes, secrets and drafts")
                         }
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -346,10 +347,11 @@ fun WorldArchiveControls(
                         "${preview.scenarios} Scenarios · ${preview.npcRevisions} NPC revisions")
                     Text("${preview.messageAttachments} chat images · " +
                         "${preview.otherImageFiles} profile images")
+                    Text("${preview.storyMemories} Story Memories with permissions and history")
                     if (preview.containsUnsentDrafts || preview.containsPrivateNotes ||
                         preview.containsNpcSecrets) {
                         Text(
-                            "This archive contains drafts, private notes, or NPC secrets. " +
+                            "This archive contains Story Memories, drafts, private notes, or NPC secrets. " +
                                 "They will be restored into this device's private storage.",
                             color = MaterialTheme.colorScheme.error,
                             style = MaterialTheme.typography.bodySmall

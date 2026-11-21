@@ -93,9 +93,12 @@ class PersonaRepository(
         dataCoordinator.withMutation {
         val rootMap = mapAdapter.fromJson(jsonString) ?: throw IllegalArgumentException("Invalid JSON format")
         
-        val schemaVersion = (rootMap["schema_version"] as? Number)?.toInt() 
+        require(!replaceExisting || !importAsNew) {
+            "Cannot replace an existing Persona while importing it as a new copy."
+        }
+        val schemaVersion = (rootMap["schema_version"] as? Number)?.toInt()
             ?: throw IllegalArgumentException("Missing required field: schema_version")
-        var personaId = rootMap["persona_id"] as? String 
+        var personaId = rootMap["persona_id"] as? String
             ?: throw IllegalArgumentException("Missing required field: persona_id")
         val displayName = rootMap["display_name"] as? String 
             ?: throw IllegalArgumentException("Missing required field: display_name")
@@ -104,13 +107,16 @@ class PersonaRepository(
         
         val aliases = (rootMap["aliases"] as? List<*>)?.mapNotNull { it?.toString() } ?: emptyList()
         
-        if (importAsNew) {
-            personaId = UUID.randomUUID().toString()
-        } else if (!replaceExisting) {
-            val existing = getPersonaById(personaId)
-            if (existing != null) {
-                throw DuplicateIdException("Persona ID already exists", personaId)
+        if (importAsNew) personaId = UUID.randomUUID().toString()
+        // Under the same app-data mutation lease, the existing row is looked up
+        // BEFORE a write. No REPLACE insert may ever delete its FK dependents.
+        val existing = getPersonaById(personaId)
+        if (replaceExisting) {
+            requireNotNull(existing) {
+                "The original Persona no longer exists. Nothing was overwritten."
             }
+        } else if (existing != null) {
+            throw DuplicateIdException("Persona ID already exists", personaId)
         }
 
         val knownKeys = setOf(
@@ -137,7 +143,19 @@ class PersonaRepository(
             extensionFieldsJson = if (extensions.isNotEmpty()) moshi.adapter(Any::class.java).toJson(extensions) else null
         )
         
-        personaDao.insertPersona(entity)
+        if (replaceExisting) {
+            val original = requireNotNull(existing)
+            // Room @Update changes the row in place; it DOES NOT execute SQLite
+            // INSERT OR REPLACE (which could cascade-delete chat participants).
+            // Preserve historical creation/archival state and local avatar assets.
+            personaDao.updatePersona(entity.copy(
+                createdAt = original.createdAt,
+                updatedAt = System.currentTimeMillis(),
+                isArchived = original.isArchived
+            ))
+        } else {
+            personaDao.insertPersona(entity)
+        }
         personaId
     }
 

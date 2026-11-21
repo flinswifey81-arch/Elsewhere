@@ -5,6 +5,7 @@ import com.example.data.model.MemoryCategory
 import com.example.data.model.MessageEntity
 import com.example.data.model.RoleplayMemoryEntity
 import com.example.domain.repository.MemoryRepository
+import com.example.domain.repository.MessageRepository
 import com.example.domain.npc.NpcStructuredOutputParser
 import com.example.domain.story.StoryResponseCodec
 
@@ -29,6 +30,100 @@ class AutomaticMemoryManager(
         allPrimaryMessages = allPrimaryMessages
     )
 
+    /**
+     * Production completed-turn path. Prompt preparation no longer has to
+     * carry the entire transcript just for the legacy rolling summary.
+     * Read selected history newest-first in local pages until the complete
+     * retained 12k-character summary suffix is available, then feed the
+     * same deterministic updater as before. No model/API calls.
+     *
+     * Memory maintenance uses the persisted selected branch after the
+     * generated reply is saved, scoped strictly to the active Wack boundary.
+     */
+    suspend fun updateAfterCompletedTurnFromStoredHistory(
+        chatId: String,
+        characterId: String,
+        personaMessage: MessageEntity,
+        messageRepository: MessageRepository,
+        resetBoundary: Long?
+    ): AutomaticMemoryUpdateResult {
+        val messages = loadSummarySource(
+            chatId, resetBoundary, messageRepository
+        )
+        return updateAfterCompletedTurn(
+            chatId = chatId,
+            characterId = characterId,
+            personaMessage = personaMessage,
+            allPrimaryMessages = messages
+        )
+    }
+
+    internal suspend fun loadSummarySource(
+        chatId: String,
+        resetBoundary: Long?,
+        messages: MessageRepository,
+        pageSize: Int = 128
+    ): List<MessageEntity> {
+        require(pageSize in 1..256) { "Summary page size must be 1..256." }
+        val newestFirst = mutableListOf<MessageEntity>()
+        while (true) {
+            val page = messages.getSelectedHistoryReversePage(
+                chatId = chatId,
+                resetBoundary = resetBoundary,
+                offset = newestFirst.size,
+                pageSize = pageSize
+            )
+            if (page.isEmpty()) break
+            newestFirst.addAll(page)
+            // Keep the most recent turns outside the summary. The suffix is
+            // complete as soon as the older portion fills 12k characters.
+            // If it never fills, continue all the way to the start of chat.
+            if (newestFirst.size > recentMessageLimit &&
+                rollingSummaryTail(
+                    newestFirst.subList(recentMessageLimit, newestFirst.size).asReversed()
+                ).length >= MAX_SUMMARY_CHARS
+            ) break
+            if (page.size < pageSize) break
+        }
+        newestFirst.reverse()
+        return newestFirst
+    }
+
+    /**
+     * Explicit "Update Memory Now" reads the selected transcript in small,
+     * local Room pages. Unlike automatic capture, this operation deliberately
+     * inspects ALL eligible Persona turns for deterministic fact extraction,
+     * but never materializes the full archive in memory or makes model calls.
+     */
+    suspend fun updateFromStoredConversation(
+        chatId: String,
+        characterId: String,
+        messageRepository: MessageRepository,
+        resetBoundary: Long?
+    ): AutomaticMemoryUpdateResult {
+        var saved = 0
+        var offset = 0
+        while (true) {
+            val page = messageRepository.getSelectedHistoryForwardPage(
+                chatId, resetBoundary, offset, pageSize = 128
+            )
+            if (page.isEmpty()) break
+            saved += persistPersonaMemories(
+                chatId, characterId,
+                page.filter { it.speakerType == com.example.data.model.SpeakerType.PERSONA }
+            )
+            offset += page.size
+            if (page.size < 128) break
+        }
+        val summarySource = loadSummarySource(
+            chatId, resetBoundary, messageRepository
+        )
+        return AutomaticMemoryUpdateResult(
+            savedMemoryCount = saved,
+            rollingSummaryUpdated = refreshRollingSummary(chatId, summarySource)
+        )
+    }
+
     suspend fun updateFromConversation(
         chatId: String,
         characterId: String,
@@ -46,42 +141,49 @@ class AutomaticMemoryManager(
         personaMessages: List<MessageEntity>,
         allPrimaryMessages: List<MessageEntity>
     ): AutomaticMemoryUpdateResult {
-        var savedMemoryCount = 0
+        val savedMemoryCount = persistPersonaMemories(chatId, characterId, personaMessages)
+        val summaryUpdated = refreshRollingSummary(chatId, allPrimaryMessages)
+        return AutomaticMemoryUpdateResult(savedMemoryCount, summaryUpdated)
+    }
+
+    private suspend fun persistPersonaMemories(
+        chatId: String,
+        characterId: String,
+        personaMessages: Iterable<MessageEntity>
+    ): Int {
+        var saved = 0
         personaMessages.forEach { personaMessage ->
             extractExplicitMemories(personaMessage.content).forEach { (category, content) ->
-                if (
-                    repository.insertIfNew(
-                        RoleplayMemoryEntity(
-                            chatId = chatId,
-                            characterId = characterId,
-                            category = category,
-                            content = content,
-                            sourceMessageId = personaMessage.messageId
-                        )
+                if (repository.insertIfNew(
+                    RoleplayMemoryEntity(
+                        chatId = chatId,
+                        characterId = characterId,
+                        category = category,
+                        content = content,
+                        sourceMessageId = personaMessage.messageId
                     )
-                ) {
-                    savedMemoryCount++
-                }
+                )) saved++
             }
         }
+        return saved
+    }
 
+    private suspend fun refreshRollingSummary(
+        chatId: String,
+        allPrimaryMessages: List<MessageEntity>
+    ): Boolean {
         val cutoffIndex = allPrimaryMessages.size - recentMessageLimit
         if (cutoffIndex <= 0) {
-            return AutomaticMemoryUpdateResult(savedMemoryCount, rollingSummaryUpdated = false)
+            return false
         }
 
-        val olderMessages = allPrimaryMessages.take(cutoffIndex)
-        if (olderMessages.isEmpty()) {
-            return AutomaticMemoryUpdateResult(savedMemoryCount, rollingSummaryUpdated = false)
-        }
+        // A view avoids copying the entire older archive. The summary itself
+        // only retains the final 12,000 characters, so formatting 10,000 past
+        // turns and discarding nearly all of them is unnecessary.
+        val olderMessages = allPrimaryMessages.subList(0, cutoffIndex)
+        if (olderMessages.isEmpty()) return false
 
-        val combined = olderMessages.joinToString("\n") { message ->
-            val compact = StoryResponseCodec.promptTranscript(
-                NpcStructuredOutputParser.finalVisibleStoryText(message.content)
-            ).replace(Regex("\\s+"), " ").trim().take(280)
-            "${message.speakerDisplayNameSnapshot}: $compact"
-        }
-            .takeLast(MAX_SUMMARY_CHARS)
+        val combined = rollingSummaryTail(olderMessages)
 
         repository.upsertSummary(
             ConversationSummaryEntity(
@@ -90,7 +192,7 @@ class AutomaticMemoryManager(
                 summarizedThroughOrderIndex = olderMessages.maxOf { it.orderIndex }
             )
         )
-        return AutomaticMemoryUpdateResult(savedMemoryCount, rollingSummaryUpdated = true)
+        return true
     }
 
     internal fun extractExplicitMemories(text: String): List<Pair<MemoryCategory, String>> {
@@ -137,5 +239,28 @@ class AutomaticMemoryManager(
     companion object {
         const val DEFAULT_RECENT_MESSAGE_LIMIT = 24
         private const val MAX_SUMMARY_CHARS = 12_000
+
+        /**
+         * Identical to formatting every archived turn and taking the last
+         * MAX_SUMMARY_CHARS, but visits only as many trailing messages as are
+         * needed to cover the retained suffix. Earlier turns cannot change
+         * the ending once the retained text is long enough.
+         */
+        internal fun rollingSummaryTail(olderMessages: List<MessageEntity>): String {
+            val retained = ArrayDeque<String>()
+            var retainedChars = 0
+            for (index in olderMessages.indices.reversed()) {
+                val message = olderMessages[index]
+                val compact = StoryResponseCodec.promptTranscript(
+                    NpcStructuredOutputParser.finalVisibleStoryText(message.content)
+                ).replace(Regex("\\s+"), " ").trim().take(280)
+                val line = "${message.speakerDisplayNameSnapshot}: $compact"
+                val additionalChars = line.length + if (retained.isEmpty()) 0 else 1
+                retained.addFirst(line)
+                retainedChars += additionalChars
+                if (retainedChars >= MAX_SUMMARY_CHARS) break
+            }
+            return retained.joinToString("\n").takeLast(MAX_SUMMARY_CHARS)
+        }
     }
 }

@@ -117,6 +117,48 @@ class LocalGroupGenerationTest {
     }
 
     @Test
+    fun longGroupCharacterExchangeUsesBoundedHistoryWithoutLosingSelectedCharacter() = runBlocking {
+        val provider = SequentialGroupProvider(listOf("Character B arrives."))
+        val harness = createHarness(provider)
+
+        harness.messageRepository.insertMessage(
+            MessageEntity(
+                messageId = "persona-original", chatId = harness.chatId,
+                speakerType = SpeakerType.PERSONA, speakerId = "persona",
+                speakerDisplayNameSnapshot = "Persona",
+                content = "The lantern is at the distant observatory.",
+                orderIndex = 1L
+            )
+        )
+        for (index in 2..62) {
+            harness.messageRepository.insertMessage(
+                MessageEntity(
+                    messageId = "character-turn-$index", chatId = harness.chatId,
+                    speakerType = SpeakerType.CHARACTER, speakerId = "character-a",
+                    speakerDisplayNameSnapshot = "Character A",
+                    content = if (index == 2) "VERY_OLD_GROUP_MARKER"
+                        else "Character A considers scene event $index.",
+                    orderIndex = index.toLong()
+                )
+            )
+        }
+        awaitMessages(harness, 62)
+        harness.viewModel.generateGroupResponse("character-b")
+        awaitMessages(harness, 63)
+
+        assertEquals(1, provider.requests.size)
+        val request = provider.requests.single()
+        val combined = request.joinToString("\n") { it.content }
+        assertTrue(request.first().content.contains("B_ONLY_KNOWLEDGE"))
+        assertFalse(request.first().content.contains("A_ONLY_KNOWLEDGE"))
+        assertFalse(combined.contains("VERY_OLD_GROUP_MARKER"))
+        assertTrue(combined.contains("Character A considers scene event 62."))
+        assertEquals(Role.USER, request.last().role)
+        assertTrue(request.last().content.contains("as Character B"))
+        assertEquals("character-b", harness.messageRepository.getMessagesForChatOnce(harness.chatId).last().speakerId)
+    }
+
+    @Test
     fun sequentialManualRepliesUseIndependentCallsAndUpdatedSharedHistory() = runBlocking {
         val provider = SequentialGroupProvider(
             responses = listOf("A reply", "B reply"),

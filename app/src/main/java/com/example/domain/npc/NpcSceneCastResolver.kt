@@ -1,6 +1,7 @@
 package com.example.domain.npc
 
 import com.example.data.model.MessageEntity
+import com.example.domain.compiler.RecentPrimaryMessageWindow
 import com.example.data.model.NpcDossier
 import com.example.data.model.NpcSceneMode
 import com.example.data.model.SpeakerType
@@ -19,7 +20,7 @@ data class NpcSceneMember(
 /** Conservative scene presence. Remembered NPCs do not become participants by default. */
 object NpcSceneCastResolver {
     fun resolve(dossiers: List<NpcDossier>, recentMessages: List<MessageEntity>): List<NpcSceneMember> {
-        val recent = recentMessages.filter { it.isPrimaryVariant }.takeLast(24)
+        val recent = RecentPrimaryMessageWindow.take(recentMessages, 24)
             .map { message ->
                 message to StoryResponseCodec.promptTranscript(
                     NpcStructuredOutputParser.finalVisibleStoryText(message.content)

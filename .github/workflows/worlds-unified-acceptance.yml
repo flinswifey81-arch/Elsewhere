@@ -45,6 +45,11 @@ jobs:
           bash ./gradlew :app:testSandboxUnitTest --no-daemon \
             --tests com.example.AppDatabaseMigrationTest \
             --tests com.example.WorldRepositoryTest \
+            --tests com.example.WorldDefinitionBundleTransferTest \
+            --tests com.example.SameIdJsonReplaceTest \
+            --tests com.example.LorebookSameIdReplaceTest \
+            --tests com.example.BatchJsonImportTest \
+            --tests com.example.ProfileJsonImportWorkflowTest \
             --tests com.example.WorldEpisodeContextCompilerTest \
             --tests com.example.WorldDefinitionCodecTest \
             --tests com.example.WorldsScreenTest \
@@ -53,6 +58,7 @@ jobs:
             --tests com.example.WorldArchiveEncryptedIOTest \
             --tests com.example.WorldArchiveAdditiveRestorerTest \
             --tests com.example.WorldArchiveTransferCoordinatorTest \
+            --tests com.example.WorldArchiveMemoryV2TransferTest \
             --tests com.example.RetainedChatViewModelStoresTest \
             --tests com.example.ReplyNotificationPolicyTest \
             --tests com.example.NpcSceneCastResolverTest \
@@ -63,12 +69,21 @@ jobs:
             --tests com.example.domain.backup.BackupRepositoryTest \
             --tests com.example.ProfileImageRepositoryTest \
             --tests com.example.ChatMessageReadingUiTest \
+            --tests com.example.ChatPdfExportContractTest \
             --tests com.example.OpenRouterModelProviderTest \
             --tests com.example.ChatDetailGenerationTest.continueFromCharacterGreetingNeedsNoPersonaTurn \
             --tests com.example.ChatDetailGenerationTest.malformedNarratedOutputIsSavedWithoutExposingControlMarkers \
             --tests com.example.ChatDetailGenerationTest.structuredContinueAppendsToTheSameLogicalResponseWithoutRepeatingSegments \
             --tests com.example.LocalGroupGenerationTest.groupRetryRegenerateAndContinueKeepSelectedSpeakerAndNonPersistedDirectorTurn \
-            --tests com.example.ScenarioModeTest.oneRequestPortraysMultipleNpcsAndPreservesModelSettingsAndNarratorIdentity
+            --tests com.example.ScenarioModeTest.oneRequestPortraysMultipleNpcsAndPreservesModelSettingsAndNarratorIdentity \
+            --tests com.example.LivingCastPromotionTest \
+            --tests com.example.CharacterToNpcLinkTest \
+            --tests com.example.SoloSpotlightControlsTest \
+            --tests com.example.NpcBankPromotionUiTest \
+            --tests com.example.ChatDetailGenerationTest.promotedNpcSpotlightSwitchesRealProviderResponderWithoutRestartingStory \
+            --tests com.example.ChatDetailGenerationTest.linkedExistingCharacterActsAsSupportingNpcThenCanTakeSoloSpotlight \
+            --tests com.example.ScenarioActiveSessionEditTest \
+            --tests com.example.ScenarioEditorTest
 
       - name: Print focused test failures
         if: failure()
