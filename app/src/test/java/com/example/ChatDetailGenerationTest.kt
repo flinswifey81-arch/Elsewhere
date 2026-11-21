@@ -2444,6 +2444,58 @@ class ChatDetailGenerationTest {
     }
 
     @Test
+    fun linkedExistingCharacterActsAsSupportingNpcThenCanTakeSoloSpotlight() = runBlocking {
+        val provider = RecordingStreamingProvider()
+        val harness = createHarness(
+            provider, ResponseLengthProfile.NORMAL, npcBankEnabledInitially = true
+        )
+        val json = """{"schema_version":1,"character_id":"secondary",
+            "display_name":"Captain Varka","character_name":"Varka",
+            "aliases":["Captain"],
+            "personality":{"summary":"LINKED_SUPPORT_PERSONALITY"},
+            "voice":{"tone":"LINKED_SUPPORT_VOICE"},
+            "knowledge":{"private":"LINKED_FORBIDDEN_KNOWLEDGE"},
+            "author_notes":{"private":"LINKED_FORBIDDEN_NOTE"}}"""
+        val characters = CharacterRepository(
+            database.characterDao(),
+            Moshi.Builder().addLast(KotlinJsonAdapterFactory()).build(),
+            dataCoordinator = dataCoordinator
+        )
+        characters.importCharacterJson(json)
+        val newNpcId = harness.npcRepository.addExistingCharacterAsNpc(
+            harness.chatId, "secondary"
+        )
+        harness.npcRepository.setSceneMode(newNpcId, com.example.data.model.NpcSceneMode.HERE)
+        harness.viewModel.onDraftChanged("Captain, please give us a clue.")
+        harness.viewModel.sendMessage()
+        awaitCompletedTurn(harness.viewModel, 2) { provider.requests.size }
+        assertEquals("character-1", harness.messageRepository
+            .getMessagesForChatOnce(harness.chatId).last().speakerId)
+        val firstPrompt = provider.requests.last().first { it.role == Role.SYSTEM }.content
+        assertTrue(firstPrompt.contains("LINKED CHARACTER ID: secondary"))
+        assertTrue(firstPrompt.contains("LINKED_SUPPORT_PERSONALITY"))
+        assertTrue(firstPrompt.contains("LINKED_SUPPORT_VOICE"))
+        assertFalse(firstPrompt.contains("LINKED_FORBIDDEN_KNOWLEDGE"))
+        assertFalse(firstPrompt.contains("LINKED_FORBIDDEN_NOTE"))
+
+        harness.chatRepository.selectSoloSpotlight(harness.chatId, "secondary")
+        withTimeout(15_000) {
+            harness.viewModel.uiState.first {
+                it is ChatUiState.Success && it.selectedSoloSpotlightId == "secondary"
+            }
+        }
+        harness.viewModel.onDraftChanged("Captain, this is your turn.")
+        harness.viewModel.sendMessage()
+        awaitCompletedTurn(harness.viewModel, 4) { provider.requests.size }
+        val secondPrompt = provider.requests.last().first { it.role == Role.SYSTEM }.content
+        assertTrue(secondPrompt.contains("LINKED_SUPPORT_PERSONALITY"))
+        assertFalse(secondPrompt.contains("[NPC id=$newNpcId]"))
+        assertEquals("secondary", harness.messageRepository
+            .getMessagesForChatOnce(harness.chatId).last().speakerId)
+        assertEquals(2, provider.requests.size)
+    }
+
+    @Test
     fun promotedNpcSpotlightSwitchesRealProviderResponderWithoutRestartingStory() = runBlocking {
         val provider = RecordingStreamingProvider()
         val harness = createHarness(
