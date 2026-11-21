@@ -141,6 +141,20 @@ class NpcBankViewModel(
         }.onFailure { notice(it.message ?: "NPC dossier or portrait could not be deleted.") }
     }
 
+    fun promoteNpc(npcId: String) = viewModelScope.launch {
+        runCatching { repository.promoteNpcToCharacter(chatId, npcId) }
+            .onSuccess { outcome ->
+                notice(
+                    if (outcome.created) {
+                        "Character created with this NPC's same ID. Original NPC and RP remain intact."
+                    } else {
+                        "This Character is already linked. No duplicate was created."
+                    }
+                )
+            }
+            .onFailure { notice(it.message ?: "NPC could not become a Character.") }
+    }
+
     fun setKeepInScene(npcId: String, keep: Boolean) = viewModelScope.launch {
         runCatching { repository.setKeepInScene(npcId, keep) }
             .onFailure { notice(it.message ?: "NPC pin could not be changed.") }
@@ -201,12 +215,16 @@ fun NpcBankScreen(
         factory = NpcBankViewModel.Factory(chatId, repository, profileImageRepository)
     )
     val state by viewModel.uiState.collectAsState()
+    val promotedCharacterIds by repository.observePromotedCharacterIds().collectAsState(
+        initial = emptySet()
+    )
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var editing by remember { mutableStateOf<NpcDossier?>(null) }
     var showPaste by remember { mutableStateOf(false) }
     var pasteText by remember { mutableStateOf("") }
     var deleteTarget by remember { mutableStateOf<NpcDossier?>(null) }
+    var promoteTarget by remember { mutableStateOf<NpcDossier?>(null) }
     var showExportOptions by remember { mutableStateOf(false) }
     var showLibrary by remember { mutableStateOf(false) }
     var libraryImportJson by remember { mutableStateOf("") }
@@ -373,6 +391,17 @@ fun NpcBankScreen(
                                     )
                                 }
                             }
+                            if (dossier.npcId in promotedCharacterIds) {
+                                Text(
+                                    "Linked Character · same stable identity",
+                                    style = MaterialTheme.typography.labelSmall
+                                )
+                            } else {
+                                OutlinedButton(
+                                    onClick = { promoteTarget = dossier },
+                                    modifier = Modifier.testTag("promote_npc_${dossier.npcId}")
+                                ) { Text("Make Character from NPC") }
+                            }
                             if (dossier.relationshipToPersona.isNotBlank()) Text("Relationship: ${dossier.relationshipToPersona}")
                             if (dossier.goals.isNotBlank()) Text("Goals: ${dossier.goals}")
                             if (dossier.keepInScene) Text("Kept in scene", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
@@ -452,6 +481,35 @@ fun NpcBankScreen(
             onImport = viewModel::importLibrary,
             onSaveChat = viewModel::saveChatToLibrary,
             onAdd = viewModel::addFromLibrary
+        )
+    }
+    promoteTarget?.let { dossier ->
+        AlertDialog(
+            onDismissRequest = { promoteTarget = null },
+            title = { Text("Make ${dossier.displayName} a Character?") },
+            text = {
+                Text(
+                    "Create a reusable Character card using this NPC's SAME stable ID. " +
+                        "The original NPC, chat messages, selected variants and story memory " +
+                        "stay exactly where they are. Appearance, personality, role and goals " +
+                        "become a Character baseline. Story-specific relationships, " +
+                        "private notes, secrets and NPC knowledge do NOT become global " +
+                        "Character knowledge. Solo and Group chats can switch the " +
+                        "spotlight to this Character without starting a new chat."
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.promoteNpc(dossier.npcId)
+                        promoteTarget = null
+                    },
+                    modifier = Modifier.testTag("confirm_promote_npc")
+                ) { Text("Create linked Character") }
+            },
+            dismissButton = {
+                TextButton(onClick = { promoteTarget = null }) { Text("Cancel") }
+            }
         )
     }
     deleteTarget?.let { dossier ->
