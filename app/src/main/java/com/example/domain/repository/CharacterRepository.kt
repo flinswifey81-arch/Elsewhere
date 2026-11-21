@@ -172,10 +172,9 @@ class CharacterRepository(
         )
         
         val extensions = rootMap.filterKeys { it !in knownKeys }.toMutableMap()
-        if (importAsNew) {
-            // A cloned Character must not pretend to be the original NPC.
-            extensions.remove("_elsewhere_promoted_npc_id")
-        }
+        // The origin marker is app-owned identity metadata: an external JSON
+        // must not forge it. Only keep a previously trusted same-ID link.
+        extensions.remove("_elsewhere_promoted_npc_id")
         if (replaceExisting && existing != null) {
             // Re-importing fixed JSON preserves the original NPC ↔ Character
             // identity even if an external editor dropped the technical field.
