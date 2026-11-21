@@ -60,6 +60,11 @@ class StoryMemoryRepository(
 
     fun observe(chatId: String): Flow<List<StoryMemoryEntity>> = dao.observeForChat(chatId)
 
+    /** Initial snapshot so Story Memories does not depend on an asynchronous
+     * Room Flow's first emission just to leave its loading screen. Live updates
+     * still come from observe(), and both reads are strictly chat scoped. */
+    suspend fun listForChat(chatId: String): List<StoryMemoryEntity> = dao.forChat(chatId)
+
     suspend fun get(chatId: String, memoryId: String): StoryMemoryEntity? =
         dao.get(memoryId)?.takeIf { it.chatId == chatId }
 
