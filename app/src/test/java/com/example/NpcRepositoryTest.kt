@@ -581,7 +581,7 @@ class NpcRepositoryTest {
         repository.setEnabled("chat", true)
         repository.saveManual(dossier().copy(sceneMode = "HERE"))
         val originalStory = StoryResponse(
-            listOf(StorySegment(StorySegmentType.NPC, "I will guard the door.", "npc", "Mara"))
+            segments = listOf(StorySegment(StorySegmentType.NPC, "I will guard the door.", "npc", "Mara"))
         )
         val reply = MessageEntity(
             messageId = "continued-story",
@@ -596,7 +596,7 @@ class NpcRepositoryTest {
         )
         database.messageDao().insertMessage(reply)
         val continuedStory = StoryResponse(
-            originalStory.segments + StorySegment(
+            segments = originalStory.segments + StorySegment(
                 StorySegmentType.NPC, "The bridge is safe.", "model-temp-id", "Liora Fen"
             )
         )
