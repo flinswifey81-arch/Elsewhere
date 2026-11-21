@@ -1362,6 +1362,23 @@ class ChatDetailViewModel(
         ).orEmpty()
         val worldContext = scenarioRepository?.worldContextForChat(chatId)
         val scenarioDefinition = com.example.data.model.ScenarioCodec.decode(session.definitionJson)
+        // The link is a stable authored Character ID, NOT a name match and never a
+        // license to pull history or knowledge from that Character's other chats.
+        val linkedCharacters = mutableMapOf<String, com.example.data.model.CharacterEntity>()
+        for (linkedId in scenarioDefinition.npcs.mapNotNull { it.sourceCharacterId }.distinct()) {
+            val definition = characterRepository.getCharacterById(linkedId)
+            if (definition == null) {
+                val npcName = scenarioDefinition.npcs.first { it.sourceCharacterId == linkedId }.name
+                updateSuccessState {
+                    it.copy(generationError =
+                        "Scenario NPC $npcName links a Character that no longer exists. " +
+                        "Edit this playthrough to replace or unlink that Character. " +
+                        "No model request was sent.")
+                }
+                return null
+            }
+            linkedCharacters[linkedId] = definition
+        }
         val scenarioCompiler = com.example.domain.compiler.ScenarioContextCompiler()
         fun compileWithMemories(
             story: List<StoryMemoryRecord>,
@@ -1373,7 +1390,8 @@ class ChatDetailViewModel(
             memories = if (includeLegacy) legacyMemories else emptyList(),
             lore = activeLore,
             continuation = continuation, worldContext = worldContext,
-            storyMemories = story
+            storyMemories = story,
+            linkedCharacters = linkedCharacters
         )
         // Admit reviewed story memories against the protected authored baseline.
         // Generated summaries/legacy memory are lower priority and may be
