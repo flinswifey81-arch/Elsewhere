@@ -28,6 +28,10 @@ interface MessageDao {
     @Query("SELECT * FROM messages WHERE chatId = :chatId ORDER BY orderIndex ASC")
     suspend fun getMessagesForChatOnce(chatId: String): List<MessageEntity>
 
+    /** All saved, selected turns—including pre-Wack history—for the PDF picker. */
+    @Query("SELECT COUNT(*) FROM messages WHERE chatId = :chatId AND isPrimaryVariant = 1")
+    suspend fun countSelectedTurnsForPdf(chatId: String): Int
+
     /**
      * UI-only window of complete logical message groups (all regeneration
      * variants included), newest [groupLimitPlusOne] groups. The extra group
