@@ -180,12 +180,13 @@ class AppDatabaseMigrationTest {
                 AppDatabase.MIGRATION_17_18,
                 AppDatabase.MIGRATION_18_19,
                 AppDatabase.MIGRATION_19_20,
-                AppDatabase.MIGRATION_20_21
+                AppDatabase.MIGRATION_20_21,
+                AppDatabase.MIGRATION_21_22
             )
             .allowMainThreadQueries()
             .build()
         try {
-            // Opening through Room executes every migration through 21 and validates the resulting schema.
+            // Opening through Room executes every migration through 22 and validates the resulting schema.
             migrated.openHelper.writableDatabase
             assertEquals("Keep Me", migrated.chatDao().getChatById("chat-keep")?.displayName)
             assertEquals("Preserve this", migrated.messageDao().getMessagesForChatOnce("chat-keep").single().content)
@@ -201,6 +202,7 @@ class AppDatabaseMigrationTest {
             assertTrue(migrated.npcDao().getDossiers("chat-keep").isEmpty())
             assertTrue(migrated.npcDao().getLibraryBanks().isEmpty())
             assertTrue(migrated.worldDao().getWorlds().isEmpty())
+            assertTrue(migrated.campaignDao().getAllCampaigns().isEmpty())
             assertTrue(migrated.chatDao().getChatById("chat-keep")?.contextResetOrderIndex == null)
         } finally {
             migrated.close()
