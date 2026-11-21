@@ -198,21 +198,28 @@ class StoryMemoriesScreenTest {
                 StoryMemoriesScreen("ui-story", repository, chats, onNavigateBack = {})
             }
         }
-        // CI runners also execute Room/Robolectric setup concurrently.
-        // This checks that the actual UI becomes ready, not elapsed time.
+        // The button exists before the participant lookup completes but is
+        // disabled until both actors are loaded. Merely finding the node
+        // allowed a silent click on the disabled control in CI.
+        composeRule.waitForIdle()
         composeRule.waitUntil(45_000) {
-            composeRule.onAllNodesWithTag("record_relationship_change")
-                .fetchSemanticsNodes().isNotEmpty()
+            runCatching {
+                composeRule.onNodeWithTag("record_relationship_change")
+                    .assertIsEnabled()
+            }.isSuccess
         }
         composeRule.onNodeWithTag("record_relationship_change")
             .performScrollTo().assertIsDisplayed().performClick()
+        composeRule.waitForIdle()
         composeRule.waitUntil(15_000) {
-            composeRule.onAllNodesWithText("How has this relationship changed?")
-                .fetchSemanticsNodes().isNotEmpty()
+            runCatching {
+                composeRule.onNodeWithTag("relationship_state_dialog").assertExists()
+                composeRule.onNodeWithTag("relationship_state_input").assertIsEnabled()
+            }.isSuccess
         }
         composeRule.onNodeWithText("From: Mara (Persona)").assertExists()
         composeRule.onNodeWithText("To: Rowan (Character)").assertExists()
-        composeRule.onNodeWithText("How has this relationship changed?")
+        composeRule.onNodeWithTag("relationship_state_input")
             .performTextInput("Mara distrusts Rowan after the betrayal.")
         composeRule.onNodeWithText("Save relationship state").performClick()
         composeRule.waitUntil(15_000) {
@@ -224,13 +231,22 @@ class StoryMemoriesScreenTest {
         assertEquals("ACTIVE", first.memory.lifecycle)
         assertEquals("STORYTELLER_ONLY", first.memory.visibility)
         composeRule.onNodeWithText("Relationship: Mara (Persona) → Rowan (Character)").assertExists()
+        composeRule.waitUntil(15_000) {
+            runCatching {
+                composeRule.onNodeWithTag("relationship_change_${first.memory.memoryId}")
+                    .assertIsEnabled()
+            }.isSuccess
+        }
         composeRule.onNodeWithTag("relationship_change_${first.memory.memoryId}")
             .performScrollTo().assertIsDisplayed().performClick()
+        composeRule.waitForIdle()
         composeRule.waitUntil(15_000) {
-            composeRule.onAllNodesWithText("How has this relationship changed?")
-                .fetchSemanticsNodes().isNotEmpty()
+            runCatching {
+                composeRule.onNodeWithTag("relationship_state_dialog").assertExists()
+                composeRule.onNodeWithTag("relationship_state_input").assertIsEnabled()
+            }.isSuccess
         }
-        composeRule.onNodeWithText("How has this relationship changed?")
+        composeRule.onNodeWithTag("relationship_state_input")
             .performTextInput("Rowan apologized, and Mara forgives him.")
         composeRule.onNodeWithText("Save relationship state").performClick()
         composeRule.waitUntil(15_000) {
