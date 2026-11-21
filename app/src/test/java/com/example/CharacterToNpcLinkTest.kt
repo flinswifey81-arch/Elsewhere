@@ -121,6 +121,33 @@ class CharacterToNpcLinkTest {
             .map { it.characterId })
     }
 
+    @Test fun linkedSupportingCharacterIsAvailableForSoloSpotlightButNotForcedAsLead() = runBlocking {
+        player(); originalCharacter()
+        cards.importCharacterJson(
+            """{"schema_version":1,"character_id":"main","display_name":"Main",
+               "character_name":"Main","aliases":[]}"""
+        )
+        val chat = chats.createSoloChat("Existing Long RP", "player", "main")
+        val preserved = MessageEntity(
+            messageId = "old-turn", chatId = chat,
+            speakerType = SpeakerType.CHARACTER,
+            speakerId = "main", speakerDisplayNameSnapshot = "Main",
+            content = "The old story must remain.", orderIndex = 1L
+        )
+        db.messageDao().insertMessage(preserved)
+        val npcId = npc.addExistingCharacterAsNpc(chat, "existing")
+        val originalRoster = chats.getParticipantsForChatOnce(chat)
+        assertEquals(listOf("main", "existing"), originalRoster.map { it.characterId })
+        assertEquals("existing", npc.getProjectedDossiers(chat).single().linkedCharacterId)
+        assertEquals(npcId, npc.addExistingCharacterAsNpc(chat, "existing"))
+        assertEquals(2, chats.getParticipantsForChatOnce(chat).size)
+        chats.selectSoloSpotlight(chat, "existing")
+        assertEquals("existing", chats.getParticipantsForChatOnce(chat).first().characterId)
+        chats.selectSoloSpotlight(chat, "main")
+        assertEquals("main", chats.getParticipantsForChatOnce(chat).first().characterId)
+        assertEquals(listOf(preserved), db.messageDao().getMessagesForChat(chat).first())
+    }
+
     @Test fun internalLinkIsNotExportedOrReintroducedByUntrustedNpcJson() = runBlocking {
         player(); originalCharacter()
         val chatId = chats.createSoloChat("Secret Story", "player", "existing")
