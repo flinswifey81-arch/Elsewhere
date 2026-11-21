@@ -114,6 +114,7 @@ jobs:
             --tests com.example.LocalGroupGenerationTest.groupRetryRegenerateAndContinueKeepSelectedSpeakerAndNonPersistedDirectorTurn \
             --tests com.example.ScenarioModeTest.oneRequestPortraysMultipleNpcsAndPreservesModelSettingsAndNarratorIdentity \
             --tests com.example.LivingCastPromotionTest \
+            --tests com.example.CharacterToNpcLinkTest \
             --tests com.example.SoloSpotlightControlsTest \
             --tests com.example.NpcBankPromotionUiTest \
             --tests com.example.ChatDetailGenerationTest.promotedNpcSpotlightSwitchesRealProviderResponderWithoutRestartingStory \
