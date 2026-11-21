@@ -640,7 +640,7 @@ fun WorldsScreen(
                 }
                 item {
                     HorizontalDivider()
-                    Text("Linking existing Lorebooks, Scenarios and chats is a separate milestone. World fields do not yet affect model prompts.",
+                    Text("World links, Campaign chapters and approved continuity have separate ownership. Campaign recaps remain private notes and do not automatically enter the model's prompt or shared World Canon.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
