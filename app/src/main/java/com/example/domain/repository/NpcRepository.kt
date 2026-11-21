@@ -117,7 +117,7 @@ class NpcRepository(
     suspend fun addExistingCharacterAsNpc(chatId: String, characterId: String): String =
         dataCoordinator.withMutation {
             withContext(Dispatchers.IO) {
-                database.withTransaction {
+                val result = database.withTransaction {
                     requireNotNull(database.chatDao().getChatById(chatId)) {
                         "The chat no longer exists."
                     }
@@ -134,7 +134,7 @@ class NpcRepository(
                                     runCatching { mapAdapter.fromJson(ext) }.getOrNull()
                                 }?.get("_elsewhere_promoted_npc_id") == characterId)
                     }
-                    if (existing != null) return@withTransaction existing.npcId
+                    if (existing != null) return@withTransaction existing.npcId to false
                     val authored = ManualCharacterFieldsCodec.toEditableFields(character)
                     val npcId = UUID.randomUUID().toString()
                     dao.insertDossier(
@@ -154,8 +154,19 @@ class NpcRepository(
                             )
                         )
                     )
-                    npcId
+                    npcId to true
                 }
+                if (result.second) {
+                    // Copy once; subsequent imports/links never overwrite a
+                    // picture that the player edited for THIS chat's NPC.
+                    runCatching {
+                        profileImageRepository?.copyImageToKind(
+                            ProfileImageKind.CHARACTER, characterId,
+                            ProfileImageKind.NPC, result.first
+                        )
+                    }
+                }
+                result.first
             }
         }
 
@@ -188,6 +199,10 @@ class NpcRepository(
                 }
                 require(source.chatId == chatId) {
                     "This NPC belongs to a different chat."
+                }
+                require(linkedCharacterId(source) == null) {
+                    "This NPC is already linked to an existing Character. " +
+                        "Use that Character instead of creating a duplicate."
                 }
                 // Snapshot selected-variant updates after Wack. Never use a
                 // non-selected historical branch as Character base material.
