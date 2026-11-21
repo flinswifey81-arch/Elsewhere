@@ -313,6 +313,9 @@ class WorldRepository(
 
     /** World-only deletion: linked chat transcripts and source records survive. */
     suspend fun deleteWorld(worldId: String) = coordinator.withMutation {
+        require(database.campaignDao().forWorld(worldId).isEmpty()) {
+            "This World contains Campaigns. Delete or move their chapters explicitly first; chats will not be deleted."
+        }
         dao.deleteWorld(worldId)
     }
 
