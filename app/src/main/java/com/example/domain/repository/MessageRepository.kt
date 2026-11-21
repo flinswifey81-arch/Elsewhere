@@ -36,6 +36,10 @@ class MessageRepository(
     suspend fun getMessagesForChatOnce(chatId: String): List<MessageEntity> =
         messageDao.getMessagesForChatOnce(chatId)
 
+    /** Unlike chat scrollback, counts the full selected archived transcript. */
+    suspend fun countSelectedTurnsForPdf(chatId: String): Int =
+        messageDao.countSelectedTurnsForPdf(chatId)
+
     /**
      * Returns at most [maxTurns] selected messages in chronological order.
      * This is a prompt-preparation window, not a replacement for the complete
