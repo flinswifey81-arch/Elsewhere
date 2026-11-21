@@ -76,14 +76,18 @@ class ChatPdfExportInstrumentedTest {
             ParcelFileDescriptor.open(outputFile, ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor ->
                 PdfRenderer(descriptor).use { pdf ->
                     assertEquals(exported.pages, pdf.pageCount)
-                    pdf.openPage(0).use { page ->
-                        Bitmap.createBitmap(300, 420, Bitmap.Config.ARGB_8888).use { bitmap ->
-                            page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-                        }
-                    }
-                    pdf.openPage(pdf.pageCount - 1).use { page ->
-                        Bitmap.createBitmap(300, 420, Bitmap.Config.ARGB_8888).use { bitmap ->
-                            page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                    for (index in listOf(0, pdf.pageCount - 1)) {
+                        pdf.openPage(index).use { page ->
+                            val bitmap = Bitmap.createBitmap(
+                                300, 420, Bitmap.Config.ARGB_8888
+                            )
+                            try {
+                                page.render(
+                                    bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY
+                                )
+                            } finally {
+                                bitmap.recycle()
+                            }
                         }
                     }
                 }
