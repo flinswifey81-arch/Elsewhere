@@ -1,11 +1,12 @@
-name: Build Signed Elsewhere Production APK
+name: Prepare Elsewhere 1.6.0 Signed Candidate (manual, no install)
 
 on:
   workflow_dispatch:
-  # Signed production candidate from the integration branch; nothing is installed or merged.
-  push:
-    branches:
-      - integration/worlds-and-rp-lifecycle-2026-11-06
+    inputs:
+      confirm_candidate:
+        description: 'Type PREPARE_1_6_0 to prepare a private signed APK candidate; does NOT install or publish'
+        required: true
+        type: string
 
 concurrency:
   group: elsewhere-production-candidate-${{ github.ref }}
@@ -18,9 +19,19 @@ jobs:
   build-release-apk:
     name: Test integrated production features, build and verify signed APK
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 90
 
     steps:
+      - name: Require explicit owner-requested 1.6.0 candidate build
+        env:
+          CONFIRM_CANDIDATE: ${{ inputs.confirm_candidate }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_EVENT_NAME" = "workflow_dispatch"
+          test "$GITHUB_REF_NAME" = "work/memory-v2-stabilization-2026-11-18"
+          test "$CONFIRM_CANDIDATE" = "PREPARE_1_6_0"
+          echo "Manual 1.6.0 candidate approved for build on draft integration ref; no installation or publication."
+
       - name: Check out selected branch
         uses: actions/checkout@v4
         with:
@@ -45,10 +56,23 @@ jobs:
         with:
           cache-read-only: true
 
-      - name: Verify production identity, app-data migrations and full-backup compatibility
+      - name: Verify real source version and APK identity gate before any signing-secret access
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s qa/apk-identity -p 'test_*.py' -v
+          python3 - <<'PY'
+          from pathlib import Path
+          gradle = Path("app/build.gradle.kts").read_text()
+          assert gradle.count('    versionCode = 4\n    versionName = "1.6.0"') == 1, (
+              "Candidate must be versionCode 4 and versionName 1.6.0"
+          )
+          assert 'applicationIdSuffix = ".v15"' in gradle, "Production package suffix must remain .v15"
+          print("RELEASE_SOURCE_VERSION_PRECHECK_PASS: 1.6.0 (4), stable installed package identity")
+          PY
+
+      - name: Verify app-data migrations and encrypted backup compatibility
         run: |
           bash ./gradlew :app:testDebugUnitTest --no-daemon \
-            --tests com.example.ProductionIdentityTest \
             --tests com.example.AppDatabaseMigrationTest \
             --tests com.example.domain.backup.BackupRepositoryTest
 
@@ -115,9 +139,9 @@ jobs:
           apk_path="app/build/outputs/apk/release/app-release.apk"
           build_tools="$ANDROID_HOME/build-tools/36.0.0"
           expected_package="com.aistudio.elsewhere.abwzy.v15"
-          expected_version_code="3"
-          expected_version_name="1.5.2"
-          # Baseline signer from verified v1.5 and v1.5.1 production APKs.
+          expected_version_code="4"
+          expected_version_name="1.6.0"
+          # Frozen historical production signing certificate; never accept a new key.
           expected_legacy_signer="7c1fa02f0732d179d509d5333afa40933743e3c5dc8b70ef0aff2607c1e759f5"
 
           actual_package="$($build_tools/aapt dump badging "$apk_path" | sed -n "s/^package: name='\([^']*\)'.*/\1/p")"
@@ -155,11 +179,22 @@ jobs:
             exit 1
           fi
 
+          # Parse the FINISHED APK with Android tools; don't trust Gradle values.
+          # Enforces frozen historical signer, v2/v3 signature, non-debuggable,
+          # increased version, stable package ID and native library packaging.
+          python3 qa/apk-identity/verify_apk_identity.py \
+            --apk "$apk_path" \
+            --aapt "$build_tools/aapt" \
+            --apksigner "$build_tools/apksigner" \
+            --mode production-update
+
           {
+            echo "Release candidate ONLY (not approved for installation)"
             echo "Package: $actual_package"
-            echo "Version: 1.5.2 (3)"
+            echo "Version: $actual_version_name ($actual_version_code)"
             echo "Signer certificate SHA-256: $actual_certificate"
-          } | tee "$RUNNER_TEMP/elsewhere-v15-verification.txt"
+            echo "Source commit: $GITHUB_SHA"
+          } | tee "$RUNNER_TEMP/elsewhere-1.6.0-candidate-verification.txt"
 
       - name: Remove temporary signing key
         if: always()
@@ -168,12 +203,12 @@ jobs:
             shred --remove "$RUNNER_TEMP/elsewhere-v15-upload.jks" 2>/dev/null || rm -f "$RUNNER_TEMP/elsewhere-v15-upload.jks"
           fi
 
-      - name: Upload verified release APK
+      - name: Save private signed 1.6.0 candidate artifact (no deploy/install)
         uses: actions/upload-artifact@v4
         with:
-          name: Elsewhere-Production-Worlds-UI-Combined-Candidate-APK
+          name: Elsewhere-1.6.0-Production-Signed-REVIEW-ONLY
           path: |
             app/build/outputs/apk/release/app-release.apk
-            ${{ runner.temp }}/elsewhere-v15-verification.txt
+            ${{ runner.temp }}/elsewhere-1.6.0-candidate-verification.txt
           if-no-files-found: error
           retention-days: 30
