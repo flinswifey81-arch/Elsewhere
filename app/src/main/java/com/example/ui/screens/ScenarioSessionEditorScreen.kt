@@ -45,8 +45,12 @@ fun ScenarioSessionEditorScreen(
         loading = false
     }
 
-    BackHandler(enabled = !busy) {
-        if (draftJson == null) onNavigateBack() else showDiscard = true
+    // Even while saving, intercept Android Back so the screen cannot disappear
+    // halfway through a successful transaction and silently lose navigation feedback.
+    BackHandler {
+        if (!busy) {
+            if (draftJson == null) onNavigateBack() else showDiscard = true
+        }
     }
     val json = draftJson
     if (loading || (json == null && error == null)) {
