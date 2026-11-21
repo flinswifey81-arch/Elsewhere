@@ -667,6 +667,46 @@ class NpcRepository(
         }
     }
 
+    /**
+     * Active promoted Character gets only its OWN current-chat relationship
+     * with the active Persona, never the NPC Bank's narrator-only secrets,
+     * unrelated Character knowledge or another chat's relationship history.
+     * A Wack boundary requires explicit reintroduction, so no old base leaks.
+     */
+    suspend fun promotedSpeakerRelationshipContext(
+        chatId: String,
+        characterId: String,
+        activePersonaId: String,
+        asOfOrderIndex: Long? = null,
+        afterOrderIndex: Long? = null
+    ): String? = withContext(Dispatchers.IO) {
+        if (afterOrderIndex != null) return@withContext null
+        val base = dao.getDossier(characterId)?.takeIf { it.chatId == chatId }
+            ?: return@withContext null
+        val card = database.characterDao().getCharacterById(characterId)
+            ?: return@withContext null
+        val origin = card.extensionFieldsJson?.let { json ->
+            runCatching { mapAdapter.fromJson(json) }.getOrNull()
+        }?.get("_elsewhere_promoted_npc_id")
+        if (origin != characterId) return@withContext null
+        val changes = dao.getUpdates(chatId).filter {
+            asOfOrderIndex == null || it.sourceOrderIndex <= asOfOrderIndex
+        }
+        val state = project(listOf(base), changes).firstOrNull()
+            ?: return@withContext null
+        val relationship = state.personaRelationships[activePersonaId]
+            ?: state.relationshipToPersona.takeIf {
+                state.personaRelationships.isEmpty()
+            }
+        relationship?.takeIf(String::isNotBlank)?.take(4000)?.let {
+            "[CHAT-LOCAL RELATIONSHIP FOR ACTIVE CHARACTER ONLY]\\n" +
+                "Character ID: $characterId\\n" +
+                "Active Persona ID: $activePersonaId\\n" +
+                "Established relationship: $it\\n" +
+                "This does NOT transfer to any other chat, Persona or World canon."
+        }
+    }
+
     suspend fun relevantContext(
         chatId: String,
         recentMessages: List<MessageEntity>,
