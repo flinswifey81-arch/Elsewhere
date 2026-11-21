@@ -577,6 +577,53 @@ class NpcRepositoryTest {
     }
 
     @Test
+    fun continueDiscoversNewNamedSpeakerButDoesNotReplayEarlierNpcSegments() = runBlocking {
+        repository.setEnabled("chat", true)
+        repository.saveManual(dossier().copy(sceneMode = "HERE"))
+        val originalStory = StoryResponse(
+            listOf(StorySegment(StorySegmentType.NPC, "I will guard the door.", "npc", "Mara"))
+        )
+        val reply = MessageEntity(
+            messageId = "continued-story",
+            chatId = "chat",
+            speakerType = SpeakerType.CHARACTER,
+            speakerId = "character",
+            speakerDisplayNameSnapshot = "Character",
+            content = StoryResponseCodec.encode(originalStory),
+            orderIndex = 3L,
+            variantGroupId = "continued-story",
+            isPrimaryVariant = true
+        )
+        database.messageDao().insertMessage(reply)
+        val continuedStory = StoryResponse(
+            originalStory.segments + StorySegment(
+                StorySegmentType.NPC, "The bridge is safe.", "model-temp-id", "Liora Fen"
+            )
+        )
+        repository.persistContinuationAtomically(
+            reply.copy(content = StoryResponseCodec.encode(continuedStory)),
+            metadata = null, updates = emptyList(), activePersonaId = "player"
+        )
+        val afterFirstContinue = repository.getProjectedDossiers("chat")
+        assertEquals(2, afterFirstContinue.size)
+        val liora = afterFirstContinue.single { it.displayName == "Liora Fen" }
+        assertEquals("npc", afterFirstContinue.single { it.displayName == "Mara" }.npcId)
+        val stored = requireNotNull(database.messageDao().getMessageById(reply.messageId))
+        val segments = requireNotNull(StoryResponseCodec.decode(stored.content)).segments
+        assertEquals(liora.npcId, segments.last().speakerId)
+
+        repository.persistContinuationAtomically(
+            stored, metadata = null, updates = emptyList(), activePersonaId = "player"
+        )
+        assertEquals(2, repository.getProjectedDossiers("chat").size)
+        assertEquals(0, database.npcDao().getUpdatesForMessage(reply.messageId).size)
+        // The new speaker is a stable base entry. Replaying an unchanged
+        // continuation cannot create another NPC or duplicate an update.
+        assertEquals(liora.npcId,
+            repository.getProjectedDossiers("chat").single { it.displayName == "Liora Fen" }.npcId)
+    }
+
+    @Test
     fun continuationBatchesUseSeparateRevisionsAndDeleteTogether() = runBlocking {
         val message = MessageEntity(
             messageId = "reply",
