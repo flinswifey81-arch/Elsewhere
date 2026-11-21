@@ -180,6 +180,30 @@ interface ChatDao {
         )
     }
 
+    /**
+     * Solo spotlight is the first active participant by persisted sortPosition.
+     * Reorder actual participant rows; never mutate the chat's type or history.
+     */
+    @Transaction
+    suspend fun selectSoloSpotlight(chatId: String, characterId: String) {
+        require(getChatById(chatId)?.chatType == com.example.data.model.ChatType.SOLO) {
+            "Spotlight selection is only available in ordinary Solo chats."
+        }
+        val participants = getParticipantsForChatOnce(chatId)
+        require(participants.any { it.characterId == characterId && it.isActive }) {
+            "This Character is not an active participant in the chat."
+        }
+        val reordered = participants.sortedWith(
+            compareBy<ChatParticipantEntity> { it.characterId != characterId }
+                .thenBy { it.sortPosition }.thenBy { it.joinedAt }
+        )
+        reordered.forEachIndexed { index, participant ->
+            if (participant.sortPosition != index) {
+                updateChatParticipant(participant.copy(sortPosition = index))
+            }
+        }
+    }
+
     @Transaction
     suspend fun moveChatParticipant(chatId: String, characterId: String, direction: Int) {
         val ordered = getParticipantsForChatOnce(chatId).sortedBy { it.sortPosition }
