@@ -34,6 +34,7 @@ interface AppContainer {
     val generationNotifications: AndroidGenerationNotifications? get() = null
     val scenarioRepository: com.example.domain.repository.ScenarioRepository? get() = null
     val worldRepository: com.example.domain.repository.WorldRepository? get() = null
+    val campaignRepository: com.example.domain.repository.CampaignRepository? get() = null
     val modelProvider: com.example.domain.provider.ModelProvider
     val characterRepository: CharacterRepository
     val personaRepository: PersonaRepository
@@ -96,7 +97,8 @@ class DefaultAppContainer(private val context: Context) : AppContainer {
                 AppDatabase.MIGRATION_17_18,
                 AppDatabase.MIGRATION_18_19,
                 AppDatabase.MIGRATION_19_20,
-                AppDatabase.MIGRATION_20_21
+                AppDatabase.MIGRATION_20_21,
+                AppDatabase.MIGRATION_21_22
             )
             .build()
     }
@@ -114,6 +116,7 @@ class DefaultAppContainer(private val context: Context) : AppContainer {
 
     override val scenarioRepository by lazy { com.example.domain.repository.ScenarioRepository(database, dataCoordinator) }
     override val worldRepository by lazy { com.example.domain.repository.WorldRepository(database, dataCoordinator) }
+    override val campaignRepository by lazy { com.example.domain.repository.CampaignRepository(database, dataCoordinator) }
 
     override val characterRepository: CharacterRepository by lazy {
         CharacterRepository(database.characterDao(), moshi, profileImageRepository, dataCoordinator)
