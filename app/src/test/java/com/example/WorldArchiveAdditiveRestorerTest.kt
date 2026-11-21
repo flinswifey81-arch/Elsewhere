@@ -191,6 +191,76 @@ class WorldArchiveAdditiveRestorerTest {
         }
     }
 
+    @Test fun encryptedWorldRestoreReconnectsBothKindsOfLivingCastIdentity() = runBlocking {
+        val promotedCard = CharacterEntity(
+            characterId = "promoted-from-npc", displayName = "Promoted Archivist",
+            characterName = "Archivist", aliases = emptyList(), importSchemaVersion = 1,
+            identityJson = null, appearanceJson = null, personalityJson = null,
+            voiceJson = null, behaviorJson = null, backstoryJson = null,
+            knowledgeJson = null, worldContextJson = null, writingRulesJson = null,
+            examplesJson = null, authorNotesJson = null,
+            extensionFieldsJson =
+                """{"_elsewhere_promoted_npc_id":"promoted-from-npc"}"""
+        )
+        val reusableCard = promotedCard.copy(
+            characterId = "reusable-character",
+            displayName = "Reusable Captain", characterName = "Captain",
+            extensionFieldsJson =
+                """{"elsewhere_manual_fields":{"name":"Captain","personality":"Faithful"}}"""
+        )
+        val promotedNpc = NpcDossierEntity(
+            npcId = promotedCard.characterId, chatId = importedChat.chatId,
+            displayName = promotedCard.displayName
+        )
+        val linkedNpc = NpcDossierEntity(
+            npcId = "linked-scene-role", chatId = importedChat.chatId,
+            displayName = reusableCard.displayName,
+            extensionFieldsJson =
+                """{"_elsewhere_linked_character_id":"reusable-character"}"""
+        )
+        val source = history().copy(
+            characters = listOf(promotedCard, reusableCard),
+            npcDossiers = listOf(promotedNpc, linkedNpc),
+            chatParticipants = listOf(
+                ChatParticipantEntity(importedChat.chatId, promotedCard.characterId),
+                ChatParticipantEntity(importedChat.chatId, reusableCard.characterId)
+            )
+        )
+        val namespace = "world-livingcast-encrypted-12345"
+        io.inspectEncrypted(
+            ByteArrayInputStream(encrypted(source)),
+            "sufficiently-long-password".toCharArray()
+        ).use { archive ->
+            val plan = archive.planNewWorldImport(namespace)
+            val promotedId = plan.get(WorldArchiveIdKind.CHARACTER, promotedCard.characterId)
+            val reusableId = plan.get(WorldArchiveIdKind.CHARACTER, reusableCard.characterId)
+            val linkedNpcId = plan.get(WorldArchiveIdKind.NPC_DOSSIER, linkedNpc.npcId)
+            assertEquals(promotedId,
+                plan.get(WorldArchiveIdKind.NPC_DOSSIER, promotedNpc.npcId))
+            val result = importer.importAsNewWorld(archive, namespace)
+            assertNotEquals(importedWorld.worldId, result.worldId)
+            val cards = db.backupDao().getCharacters()
+            val npcs = db.backupDao().getNpcDossiers()
+            assertEquals(2, cards.size)
+            assertEquals(2, npcs.size)
+            assertTrue(cards.any { it.characterId == promotedId &&
+                it.extensionFieldsJson.orEmpty().contains(promotedId) })
+            assertTrue(npcs.any { it.npcId == promotedId })
+            assertTrue(npcs.any { it.npcId == linkedNpcId &&
+                it.extensionFieldsJson.orEmpty().contains(reusableId) })
+            assertTrue(cards.any { it.characterId == reusableId &&
+                it.extensionFieldsJson.orEmpty().contains("Faithful") })
+            val importedChatId = plan.get(WorldArchiveIdKind.CHAT, importedChat.chatId)
+            assertEquals(setOf(promotedId, reusableId),
+                db.chatDao().getParticipantsForChatOnce(importedChatId)
+                    .map { it.characterId }.toSet())
+            assertEquals(
+                "We found the key beneath the teapot.",
+                db.backupDao().getMessages().single().content
+            )
+        }
+    }
+
     @Test fun sameOperationCannotImportTwiceOrMergeByMatchingDisplayName() = runBlocking {
         existingRecords()
         val bytes = encrypted(history())
