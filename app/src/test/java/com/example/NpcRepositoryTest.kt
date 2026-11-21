@@ -611,12 +611,14 @@ class NpcRepositoryTest {
         val stored = requireNotNull(database.messageDao().getMessageById(reply.messageId))
         val segments = requireNotNull(StoryResponseCodec.decode(stored.content)).segments
         assertEquals(liora.npcId, segments.last().speakerId)
+        val updatesAfterFirstContinue = database.npcDao().getUpdatesForMessage(reply.messageId).size
 
         repository.persistContinuationAtomically(
             stored, metadata = null, updates = emptyList(), activePersonaId = "player"
         )
         assertEquals(2, repository.getProjectedDossiers("chat").size)
-        assertEquals(0, database.npcDao().getUpdatesForMessage(reply.messageId).size)
+        assertEquals(updatesAfterFirstContinue,
+            database.npcDao().getUpdatesForMessage(reply.messageId).size)
         // The new speaker is a stable base entry. Replaying an unchanged
         // continuation cannot create another NPC or duplicate an update.
         assertEquals(liora.npcId,
