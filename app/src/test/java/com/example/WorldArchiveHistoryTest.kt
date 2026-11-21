@@ -479,6 +479,101 @@ class WorldArchiveHistoryTest {
         assertEquals(privateCharacter.authorNotesJson, accepted.characters.single().authorNotesJson)
     }
 
+    @Test
+    fun v2WorldArchiveValidatesKnowledgeAndRejectsCrossWorldActorsOrInvalidReturns() {
+        val source = playerTurn
+        val memory = StoryMemoryEntity(
+            memoryId = "story-memory-a", chatId = chat.chatId, ownerId = chat.chatId,
+            content = "Piper made a promise.", sourceOrderIndex = source.orderIndex,
+            claim = "PROMISE", visibility = "CHARACTER_ONLY",
+            originKind = "MESSAGE", sourceMessageId = source.messageId,
+            sourceVariantGroupId = source.variantGroupId,
+            sourceSpeakerType = source.speakerType.name,
+            sourceSpeakerId = source.speakerId,
+            sourceCreatedAtEpochMillis = source.createdAt
+        )
+        val actor = StoryMemoryActorEntity(
+            memory.memoryId, "CHARACTER", character.characterId, "KNOWS"
+        )
+        val grant = StoryMemoryReturnEntity(
+            memory.memoryId, 5L, chat.chatId, approvedAtOrderIndex = 6L,
+            initiatedByUser = true
+        )
+        val baseline = state().copy(
+            storyMemories = listOf(memory),
+            storyMemoryActors = listOf(actor),
+            storyMemoryReturns = listOf(grant),
+            storyMemoryKnowledgeChanges = listOf(
+                StoryMemoryKnowledgeChangeEntity(
+                    memory.memoryId, 1L, character.characterId, "GRANTED"
+                )
+            ),
+            storyMemoryPerspectives = listOf(
+                StoryMemoryPerspectiveEntity(
+                    memory.memoryId, character.characterId, 1L,
+                    "BELIEVES", "a".repeat(64), note = "She may have meant it."
+                )
+            )
+        )
+        assertEquals(baseline, WorldArchiveStateCodec.parse(WorldArchiveStateCodec.encode(baseline)))
+        val remapped = WorldArchiveSemanticRemapper.rewrite(
+            baseline, WorldArchiveIdPlanner.plan(baseline, "v2-typed-import-123456")
+        ).state
+        val newMemory = remapped.storyMemories.single()
+        assertEquals(remapped.chats.single().chatId, newMemory.chatId)
+        assertEquals(remapped.messages.first().messageId, newMemory.sourceMessageId)
+        assertEquals(remapped.characters.single().characterId,
+            remapped.storyMemoryActors.single().actorId)
+        assertEquals(newMemory.memoryId, remapped.storyMemoryReturns.single().memoryId)
+        assertEquals(newMemory.memoryId, remapped.storyMemoryPerspectives.single().memoryId)
+
+        assertThrows(IllegalArgumentException::class.java) {
+            WorldArchiveStateCodec.validate(baseline.copy(
+                storyMemoryActors = listOf(actor.copy(actorId = "character-from-another-world"))
+            ))
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            WorldArchiveStateCodec.validate(baseline.copy(
+                storyMemoryReturns = listOf(grant.copy(initiatedByUser = false))
+            ))
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            WorldArchiveStateCodec.validate(baseline.copy(
+                storyMemoryPerspectives = listOf(baseline.storyMemoryPerspectives.single().copy(
+                    characterId = "missing-character"
+                ))
+            ))
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            WorldArchiveStateCodec.validate(baseline.copy(
+                storyMemories = listOf(memory.copy(ownerId = "wrong-chat"))
+            ))
+        }
+    }
+
+    @Test
+    fun deletedMessageProvenanceIsRetainedAsIneligibleHistoryNotDropped() {
+        val absent = StoryMemoryEntity(
+            memoryId = "orphan-memory", chatId = chat.chatId, ownerId = chat.chatId,
+            content = "Older memory from a now-deleted message.",
+            sourceOrderIndex = 3L, originKind = "MESSAGE",
+            sourceMessageId = "deleted-source-message",
+            sourceVariantGroupId = "deleted-source-message",
+            sourceSpeakerType = "CHARACTER", sourceSpeakerId = character.characterId,
+            sourceCreatedAtEpochMillis = 10L
+        )
+        val baseline = state().copy(storyMemories = listOf(absent))
+        val plan = WorldArchiveIdPlanner.plan(baseline, "deleted-provenance-12345")
+        val mapped = WorldArchiveSemanticRemapper.rewrite(baseline, plan).state
+        assertNotEquals(absent.sourceMessageId, mapped.storyMemories.single().sourceMessageId)
+        assertEquals(mapped.storyMemories.single().sourceMessageId,
+            mapped.storyMemories.single().sourceVariantGroupId)
+        assertTrue(mapped.messages.none {
+            it.messageId == mapped.storyMemories.single().sourceMessageId
+        })
+        assertEquals(absent.content, mapped.storyMemories.single().content)
+    }
+
     private fun sourcePayload() = BackupPayload(
         characters = listOf(character), personas = listOf(persona),
         chats = listOf(chat),
