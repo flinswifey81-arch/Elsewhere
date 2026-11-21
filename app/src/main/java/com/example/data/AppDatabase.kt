@@ -7,7 +7,7 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.example.data.model.*
 
-const val APP_DATABASE_VERSION = 21
+const val APP_DATABASE_VERSION = 22
 
 @Database(
     entities = [
@@ -48,7 +48,9 @@ const val APP_DATABASE_VERSION = 21
         WorldEntity::class,
         WorldMembershipEntity::class,
         WorldCastEntity::class,
-        WorldContinuityEventEntity::class
+        WorldContinuityEventEntity::class,
+        CampaignEntity::class,
+        CampaignChapterEntity::class
     ],
     version = APP_DATABASE_VERSION,
     exportSchema = false
@@ -68,8 +70,48 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun scenarioDao(): ScenarioDao
     abstract fun backupDao(): BackupDao
     abstract fun worldDao(): WorldDao
+    abstract fun campaignDao(): CampaignDao
 
     companion object {
+        /** Private Campaign records and chapter links; never rewrite existing chats. */
+        val MIGRATION_21_22 = object : Migration(21, 22) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS campaigns (
+                        campaignId TEXT NOT NULL PRIMARY KEY,
+                        worldId TEXT NOT NULL,
+                        title TEXT NOT NULL,
+                        summary TEXT NOT NULL,
+                        createdAt INTEGER NOT NULL,
+                        updatedAt INTEGER NOT NULL,
+                        FOREIGN KEY(worldId) REFERENCES worlds(worldId)
+                            ON UPDATE NO ACTION ON DELETE RESTRICT
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_campaigns_worldId ON campaigns(worldId)")
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS campaign_chapters (
+                        chapterId TEXT NOT NULL PRIMARY KEY,
+                        campaignId TEXT NOT NULL,
+                        chatId TEXT NOT NULL,
+                        ordinal INTEGER NOT NULL,
+                        title TEXT NOT NULL,
+                        recap TEXT NOT NULL,
+                        state TEXT NOT NULL,
+                        createdAt INTEGER NOT NULL,
+                        updatedAt INTEGER NOT NULL,
+                        FOREIGN KEY(campaignId) REFERENCES campaigns(campaignId)
+                            ON UPDATE NO ACTION ON DELETE CASCADE,
+                        FOREIGN KEY(chatId) REFERENCES chats(chatId)
+                            ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_campaign_chapters_campaignId ON campaign_chapters(campaignId)")
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_campaign_chapters_chatId ON campaign_chapters(chatId)")
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_campaign_chapters_campaignId_ordinal ON campaign_chapters(campaignId, ordinal)")
+            }
+        }
+
         /**
          * Append-only per-Character fictional perspectives. Existing KNOWS
          * permissions remain unchanged, and old chats acquire no invented states.
