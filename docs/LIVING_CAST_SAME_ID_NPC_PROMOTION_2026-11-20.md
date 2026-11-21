@@ -30,9 +30,19 @@ A linked NPC and Character with the same ID are **one identity**, not two suppor
 
 Both the integrated Worlds/RP workflow and manual-only release build gate require these tests.
 
+## Existing Character → independent chat NPC role
+
+The NPC Bank now offers **Add existing Character as NPC**, with a searchable list of saved Characters. This creates one chat-local dossier with its **own NPC ID** and an explicit internal `_elsewhere_linked_character_id` pointing to the existing global Character ID. A Character may appear in several unrelated stories; each gets a different NPC dossier, presence, relationship, discoveries and variant-update history. The Character card itself is not cloned, reimported or overwritten. Repeated selection in the same chat is idempotent.
+
+For Solo and Group chats, the same existing Character is also added to the selectable Character roster **at the end**, keeping the established lead. The player chooses when to change spotlight; Scenario narration remains Narrator-led. When a linked Character is answering, its NPC identity is excluded from the supporting Scene Cast to prevent double-speaking. The Character's authored personality, voice, behavior, identity, appearance and backstory can inform supporting NPC portrayal, but the compiler never pulls that card's other chat memories, `knowledgeJson`, creator-only `authorNotesJson` or unrelated World context into the NPC narrator block. Chat-local NPC fields remain editable and take contextual precedence.
+
+The typed Character link remains only in local NPC dossier metadata and encrypted app data. Ordinary NPC JSON exports (even full-private) and reusable NPC Library copies **strip** this internal app link; untrusted JSON imports cannot forge it. Exporting/importing a standalone NPC definition on another device does not automatically attach it to a coincidentally matching Character.
+
+`CharacterToNpcLinkTest` verifies one Character used as a supporting NPC in separate chats without merging local relationships, linked portrayal in the prompt, private-notes/knowledge exclusion, distinct NPC IDs, stable chat history, Solo spotlight eligibility, and inability to forge links through JSON or NPC library import. `ChatDetailGenerationTest.linkedExistingCharacterActsAsSupportingNpcThenCanTakeSoloSpotlight` verifies real fake-provider requests in both roles and no double speaker. `NpcBankPromotionUiTest` covers the selection UI.
+
 ## Roadmap blockers still open
 
-- **Character → NPC association** for any existing Character in multiple independent chats needs a separate typed link (not global name matching and not accidental reuse of chat-local NPC IDs).
-- Additional NPC/Character spotlight switching paths, branch-specific knowledge correctness, World cast identity reconciliation, and regeneration/variant rollback QA still require explicit acceptance.
+- Expanded cross-World cast identity reconciliation, full regeneration/variant rollback QA, and World archive ID remapping for these internal links still require explicit acceptance before a release.
+- Persistent Campaigns, checkpoints, journal/timeline, separate Campaign memories, opt-in bounded AI memory extraction and World intelligence remain major unfinished stages.
 - Persistent Campaigns, chapters/journal/timeline, and opt-in bounded paid AI memory extraction/review remain unfinished stages.
 - Nothing is ready for a user-device update or production signing solely from this change.
