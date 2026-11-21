@@ -127,12 +127,20 @@ fun ScenariosScreen(
 
 @Composable
 internal fun ScenarioEditor(definition: ScenarioDefinition, onChange: (ScenarioDefinition) -> Unit,
-    onSave: () -> Unit, onCancel: () -> Unit, artwork: @Composable () -> Unit = {}, busy: Boolean = false, error: String? = null) {
+    onSave: () -> Unit, onCancel: () -> Unit, artwork: @Composable () -> Unit = {},
+    busy: Boolean = false, error: String? = null,
+    editingActiveSession: Boolean = false) {
     var advanced by rememberSaveable { mutableStateOf(definition.experience == ScenarioExperience.SANDBOX) }
     var cast by rememberSaveable { mutableStateOf(false) }
     LazyColumn(Modifier.fillMaxSize().imePadding().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item { Text(if (definition.experience == ScenarioExperience.QUICK_SCENE) "Quick Scene" else "Open World / Sandbox", style = MaterialTheme.typography.headlineMedium) }
-        item { Text("Only title and premise are required. You can expand this scenario later. Saved edits apply to new playthroughs; existing stories retain their starting configuration.") }
+        item {
+            Text(
+                if (editingActiveSession)
+                    "Editing this playthrough only. New responses use these changes; past messages, the reusable Scenario template, and other playthroughs stay unchanged."
+                else "Only title and premise are required. You can expand this scenario later. Saved edits apply to new playthroughs; existing stories retain their starting configuration."
+            )
+        }
         item { ScenarioField("Scenario Title", definition.title) { onChange(definition.copy(title = it)) } }
         item { ScenarioField("Premise / Scene Setup", definition.premise) { onChange(definition.copy(premise = it)) } }
         item { ScenarioField("Opening Message (optional)", definition.openingMessage) { onChange(definition.copy(openingMessage = it)) } }
@@ -175,7 +183,9 @@ internal fun ScenarioEditor(definition: ScenarioDefinition, onChange: (ScenarioD
         }
         item { error?.let { Text(it, color = MaterialTheme.colorScheme.error) } }
         item { Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = onSave, enabled = !busy && definition.title.isNotBlank() && definition.premise.isNotBlank()) { Text(if (busy) "Saving…" else "Save scenario") }
+            Button(onClick = onSave, enabled = !busy && definition.title.isNotBlank() && definition.premise.isNotBlank()) {
+                Text(if (busy) "Saving…" else if (editingActiveSession) "Save playthrough" else "Save scenario")
+            }
             TextButton(onClick = onCancel, enabled = !busy) { Text("Cancel") }
         } }
         item { Spacer(Modifier.height(24.dp)) }
