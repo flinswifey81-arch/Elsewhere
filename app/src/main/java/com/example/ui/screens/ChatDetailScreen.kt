@@ -68,6 +68,8 @@ import com.example.ui.components.elsewhereTopAppBarColors
 import com.example.ui.theme.LocalElsewhereSemanticColors
 import com.example.domain.repository.ProfileImageKind
 import com.example.domain.repository.ProfileImageRepository
+import com.example.domain.export.ChatPdfTurnRange
+import com.example.domain.export.ChatTranscriptPdfExporter
 import com.example.data.model.NpcDossier
 import com.example.domain.npc.NpcSpeakerPortraitResolver
 import com.example.domain.story.StoryResponse
@@ -163,6 +165,46 @@ fun ChatDetailScreen(
     val coroutineScope = rememberCoroutineScope()
     var showDeleteChatConfirm by remember { mutableStateOf(false) }
     var showChatToolsMenu by remember { mutableStateOf(false) }
+    val pdfExporter = remember(appContainer.messageRepository) {
+        ChatTranscriptPdfExporter(appContainer.messageRepository)
+    }
+    var showPdfExport by remember { mutableStateOf(false) }
+    var pdfCountLoading by remember { mutableStateOf(false) }
+    var pdfInProgress by remember { mutableStateOf(false) }
+    var pdfTurnCount by remember { mutableIntStateOf(0) }
+    var pdfFirstTurn by rememberSaveable(chatId) { mutableStateOf("1") }
+    var pdfLastTurn by rememberSaveable(chatId) { mutableStateOf("") }
+    var pendingPdfRange by remember { mutableStateOf<ChatPdfTurnRange?>(null) }
+    val pdfSaveLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/pdf")
+    ) { uri ->
+        val requested = pendingPdfRange
+        pendingPdfRange = null
+        if (uri != null && requested != null) {
+            coroutineScope.launch {
+                pdfInProgress = true
+                try {
+                    val title = (uiState as? ChatUiState.Success)
+                        ?.chatSummary?.chat?.displayName ?: "Chat"
+                    val result = withContext(Dispatchers.IO) {
+                        val stream = context.contentResolver.openOutputStream(uri, "wt")
+                            ?: error("Cannot write to the selected PDF file.")
+                        stream.use { pdfExporter.export(chatId, title, requested, it) }
+                    }
+                    snackbarHostState.showSnackbar(
+                        "PDF saved: " + result.turns + " turns, " + result.pages + " pages"
+                    )
+                } catch (failure: Exception) {
+                    snackbarHostState.showSnackbar(
+                        "PDF export failed: " + (failure.message ?: "Unknown error")
+                    )
+                } finally {
+                    pdfInProgress = false
+                }
+            }
+        }
+    }
+
     var showChatMenu by remember { mutableStateOf(false) }
     var showWackConfirm by remember { mutableStateOf(false) }
     val imagePicker = rememberLauncherForActivityResult(
@@ -176,6 +218,80 @@ fun ChatDetailScreen(
             retainedStores?.forget(chatId)
             onChatDeleted()
         }
+    }
+
+    if (showPdfExport) {
+        val first = pdfFirstTurn.toIntOrNull()
+        val last = pdfLastTurn.toIntOrNull()
+        val validRange = !pdfCountLoading && !pdfInProgress &&
+            first != null && last != null && first >= 1 &&
+            last >= first && last <= pdfTurnCount
+        AlertDialog(
+            onDismissRequest = { if (!pdfInProgress) showPdfExport = false },
+            title = { Text("Download chat as PDF") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        if (pdfCountLoading) "Counting selected story turns…"
+                        else "Selected story turns: " + pdfTurnCount,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Text(
+                        "Saves the selected message variants in story order. " +
+                            "Your older transcript, including pre-Wack messages, is preserved. " +
+                            "Unselected regenerations and unsent drafts are excluded.",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            value = pdfFirstTurn,
+                            onValueChange = { pdfFirstTurn = it.filter(Char::isDigit).take(8) },
+                            label = { Text("First turn") },
+                            singleLine = true,
+                            modifier = Modifier.weight(1f).testTag("pdf_export_first_turn")
+                        )
+                        OutlinedTextField(
+                            value = pdfLastTurn,
+                            onValueChange = { pdfLastTurn = it.filter(Char::isDigit).take(8) },
+                            label = { Text("Last turn") },
+                            singleLine = true,
+                            modifier = Modifier.weight(1f).testTag("pdf_export_last_turn")
+                        )
+                    }
+                    TextButton(
+                        enabled = !pdfCountLoading && pdfTurnCount > 0,
+                        onClick = {
+                            pdfFirstTurn = "1"
+                            pdfLastTurn = pdfTurnCount.toString()
+                        }
+                    ) { Text("Entire chat") }
+                    Text(
+                        "PDFs are not encrypted. Save private roleplays in a location you trust.",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = validRange,
+                    modifier = Modifier.testTag("pdf_export_save"),
+                    onClick = {
+                        pendingPdfRange = ChatPdfTurnRange(
+                            requireNotNull(first), requireNotNull(last)
+                        )
+                        showPdfExport = false
+                        val chatName = (uiState as? ChatUiState.Success)
+                            ?.chatSummary?.chat?.displayName.orEmpty()
+                            .replace(Regex("[^A-Za-z0-9_-]"), "_")
+                            .take(70).ifBlank { "Elsewhere_Chat" }
+                        pdfSaveLauncher.launch(chatName + ".pdf")
+                    }
+                ) { Text("Save PDF") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showPdfExport = false }) { Text("Cancel") }
+            }
+        )
     }
 
     Scaffold(
@@ -212,6 +328,32 @@ fun ChatDetailScreen(
                             expanded = showChatToolsMenu,
                             onDismissRequest = { showChatToolsMenu = false }
                         ) {
+                            DropdownMenuItem(
+                                text = { Text("Download chat as PDF") },
+                                enabled = toolActionsEnabled && !pdfInProgress,
+                                modifier = Modifier.testTag("download_chat_pdf"),
+                                onClick = {
+                                    showChatToolsMenu = false
+                                    showPdfExport = true
+                                    pdfCountLoading = true
+                                    coroutineScope.launch {
+                                        runCatching { pdfExporter.selectedTurnCount(chatId) }
+                                            .onSuccess { count ->
+                                                pdfTurnCount = count
+                                                pdfFirstTurn = "1"
+                                                pdfLastTurn = count.toString()
+                                            }
+                                            .onFailure {
+                                                pdfTurnCount = 0
+                                                snackbarHostState.showSnackbar(
+                                                    "Could not read chat length: " +
+                                                        (it.message ?: "Unknown error")
+                                                )
+                                            }
+                                        pdfCountLoading = false
+                                    }
+                                }
+                            )
                             DropdownMenuItem(
                                 text = {
                                     Text("Update Memory Now")
