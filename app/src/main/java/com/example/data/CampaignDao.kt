@@ -64,4 +64,10 @@ interface CampaignDao {
 
     @Query("DELETE FROM campaigns WHERE campaignId = :campaignId")
     suspend fun deleteCampaign(campaignId: String): Int
+
+    @Query("DELETE FROM campaign_chapters")
+    suspend fun clearChapters()
+
+    @Query("DELETE FROM campaigns")
+    suspend fun clearCampaigns()
 }
