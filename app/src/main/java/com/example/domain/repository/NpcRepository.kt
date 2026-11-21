@@ -294,7 +294,13 @@ class NpcRepository(
             database.withTransaction {
                 dao.insertLibraryBank(bank)
                 dao.insertLibraryEntries(projected.mapIndexed { index, npc ->
-                    npc.toLibrary(bank.bankId, index).copy(extensionFieldsJson = baseExtensions[npc.npcId])
+                    npc.toLibrary(bank.bankId, index).copy(
+                        extensionFieldsJson = baseExtensions[npc.npcId]
+                            ?.let { raw -> runCatching { mapAdapter.fromJson(raw) }.getOrNull() }
+                            ?.filterKeys { it != "_elsewhere_linked_character_id" }
+                            ?.takeIf { it.isNotEmpty() }
+                            ?.let(mapAdapter::toJson)
+                    )
                 })
             }
             bank.bankId
@@ -859,7 +865,8 @@ class NpcRepository(
                 keepInScene = dossier.keepInScene,
                 extensionFields = if (includePrivateFields) {
                     bases[dossier.npcId]?.extensionFieldsJson
-                        ?.let { runCatching { mapAdapter.fromJson(it) }.getOrNull() }.orEmpty()
+                        ?.let { runCatching { mapAdapter.fromJson(it) }.getOrNull() }
+                        ?.filterKeys { it != "_elsewhere_linked_character_id" }.orEmpty()
                 } else emptyMap()
             )
         }
@@ -905,7 +912,9 @@ class NpcRepository(
                     keepInScene = card.keepInScene,
                     sceneMode = replacing?.sceneMode ?: "AUTO",
                     isManualBase = true,
-                    extensionFieldsJson = card.extensionFields.takeIf(Map<*, *>::isNotEmpty)?.let(mapAdapter::toJson),
+                    extensionFieldsJson = card.extensionFields
+                        .filterKeys { it != "_elsewhere_linked_character_id" }
+                        .takeIf { it.isNotEmpty() }?.let(mapAdapter::toJson),
                     createdAt = replacing?.createdAt ?: System.currentTimeMillis(),
                     updatedAt = System.currentTimeMillis()
                 )
@@ -948,7 +957,10 @@ class NpcRepository(
         role = role.trim(), appearance = appearance.trim(), personality = personality.trim(), relationshipToPersona = relationshipToPersona.trim(),
         personaRelationshipsJson = stringMapAdapter.toJson(personaRelationships.cleanMap()), characterKnowledgeJson = stringMapAdapter.toJson(characterKnowledge.cleanMap()),
         goals = goals.trim(), secrets = secrets.trim(), authorNotes = authorNotes.trim(), keepInScene = keepInScene,
-        extensionFieldsJson = extensionFields.takeIf(Map<*, *>::isNotEmpty)?.let(mapAdapter::toJson), sortPosition = position
+        extensionFieldsJson = extensionFields
+            .filterKeys { it != "_elsewhere_linked_character_id" }
+            .takeIf { it.isNotEmpty() }?.let(mapAdapter::toJson),
+        sortPosition = position
     )
 
     private fun NpcDossier.toLibrary(bankId: String, position: Int) = NpcLibraryEntryEntity(
@@ -962,7 +974,12 @@ class NpcRepository(
         npcId = UUID.randomUUID().toString(), chatId = chatId, displayName = displayName, aliasesJson = aliasesJson, role = role,
         appearance = appearance, personality = personality, relationshipToPersona = relationshipToPersona,
         personaRelationshipsJson = personaRelationshipsJson, characterKnowledgeJson = characterKnowledgeJson, goals = goals, secrets = secrets,
-        authorNotes = authorNotes, keepInScene = keepInScene, isManualBase = true, extensionFieldsJson = extensionFieldsJson
+        authorNotes = authorNotes, keepInScene = keepInScene, isManualBase = true,
+        extensionFieldsJson = extensionFieldsJson?.let { raw ->
+            runCatching { mapAdapter.fromJson(raw) }.getOrNull()
+                ?.filterKeys { it != "_elsewhere_linked_character_id" }
+                ?.takeIf { it.isNotEmpty() }?.let(mapAdapter::toJson)
+        }
     )
 
     private fun project(
