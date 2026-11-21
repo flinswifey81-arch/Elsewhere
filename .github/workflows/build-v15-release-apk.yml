@@ -115,6 +115,7 @@ jobs:
             --tests com.example.ScenarioModeTest.oneRequestPortraysMultipleNpcsAndPreservesModelSettingsAndNarratorIdentity \
             --tests com.example.LivingCastPromotionTest \
             --tests com.example.SoloSpotlightControlsTest \
+            --tests com.example.NpcBankPromotionUiTest \
             --tests com.example.ChatDetailGenerationTest.promotedNpcSpotlightSwitchesRealProviderResponderWithoutRestartingStory \
             --tests com.example.ScenarioActiveSessionEditTest \
             --tests com.example.ScenarioEditorTest
