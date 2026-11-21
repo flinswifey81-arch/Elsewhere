@@ -200,6 +200,7 @@ fun ElsewhereApp(
                         // Full Worlds archive UI belongs in normal Elsewhere, not a preview APK.
                         archiveTransfer = container.worldArchiveTransfer,
                         chatRepository = container.chatRepository,
+                        campaignRepository = container.campaignRepository,
                         onOpenChat = { chatId ->
                             navController.navigate("chat_detail/${Uri.encode(chatId)}")
                         },
