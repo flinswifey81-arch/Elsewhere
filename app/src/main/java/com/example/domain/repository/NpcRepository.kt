@@ -6,6 +6,7 @@ import com.example.data.model.MessageEntity
 import com.example.data.model.GenerationMetadataEntity
 import com.example.data.model.CharacterEntity
 import com.example.data.model.ChatType
+import com.example.data.model.ManualCharacterFieldsCodec
 import com.example.data.model.NpcBankSettingsEntity
 import com.example.data.model.NpcDossier
 import com.example.data.model.NpcDossierEntity
@@ -97,6 +98,66 @@ class NpcRepository(
     fun observeSettings(chatId: String): Flow<NpcBankSettingsEntity?> = dao.observeSettings(chatId)
 
     fun observeLibraryBanks(): Flow<List<NpcLibraryBankEntity>> = dao.observeLibraryBanks()
+
+    fun observeReusableCharacters(): Flow<List<CharacterEntity>> =
+        database.characterDao().getAllCharacters()
+
+    /** Internal per-chat NPC role link; not exported as independent NPC canon. */
+    private fun linkedCharacterId(base: NpcDossierEntity): String? =
+        base.extensionFieldsJson?.let { json ->
+            runCatching { mapAdapter.fromJson(json) }.getOrNull()
+        }?.get("_elsewhere_linked_character_id") as? String
+
+    /**
+     * One existing Character can appear in many independent RP chats, each
+     * with a DIFFERENT chat-local NPC dossier. They share authored identity,
+     * not chat memories, variant state, relationships, or discovered secrets.
+     * Idempotent per (chat, Character ID). No model/API request.
+     */
+    suspend fun addExistingCharacterAsNpc(chatId: String, characterId: String): String =
+        dataCoordinator.withMutation {
+            withContext(Dispatchers.IO) {
+                database.withTransaction {
+                    requireNotNull(database.chatDao().getChatById(chatId)) {
+                        "The chat no longer exists."
+                    }
+                    val character = requireNotNull(
+                        database.characterDao().getCharacterById(characterId)
+                    ) { "The linked Character no longer exists." }
+                    require(!character.isArchived) {
+                        "Archived Characters cannot be linked into an active NPC Bank."
+                    }
+                    val existing = dao.getDossiers(chatId).firstOrNull { dossier ->
+                        linkedCharacterId(dossier) == characterId ||
+                            (dossier.npcId == characterId &&
+                                character.extensionFieldsJson?.let { ext ->
+                                    runCatching { mapAdapter.fromJson(ext) }.getOrNull()
+                                }?.get("_elsewhere_promoted_npc_id") == characterId)
+                    }
+                    if (existing != null) return@withTransaction existing.npcId
+                    val authored = ManualCharacterFieldsCodec.toEditableFields(character)
+                    val npcId = UUID.randomUUID().toString()
+                    dao.insertDossier(
+                        NpcDossierEntity(
+                            npcId = npcId,
+                            chatId = chatId,
+                            displayName = character.displayName,
+                            aliasesJson = aliasesAdapter.toJson(character.aliases),
+                            appearance = authored.appearance.take(4000),
+                            personality = authored.personality.take(4000),
+                            goals = authored.conversationalGoals.take(4000),
+                            role = "",
+                            sceneMode = "AUTO",
+                            isManualBase = true,
+                            extensionFieldsJson = mapAdapter.toJson(
+                                mapOf("_elsewhere_linked_character_id" to characterId)
+                            )
+                        )
+                    )
+                    npcId
+                }
+            }
+        }
 
     /** Promoted NPC and reusable Character share their exact stable ID. */
     fun observePromotedCharacterIds(): Flow<Set<String>> =
