@@ -25,8 +25,8 @@ from verify_apk_identity import (
     apk_tool_identity,
 )
 
-QA_VERSION_CODE = 4  # EPHEMERAL EMULATOR ONLY; not a production release decision.
-QA_VERSION_NAME = "1.5.3-qa-emulator"
+QA_VERSION_CODE = 4  # Same version as prepared candidate; still an isolated debug-signing rehearsal.
+QA_VERSION_NAME = "1.6.0"
 DATABASE = "elsewhere_database"
 SENTINEL = b"Elsewhere-synthetic-emulator-file-survived-package-upgrade-v1\n"
 
@@ -49,7 +49,7 @@ def identity_gate(old: Path, new: Path, fixture: Path, aapt: str, apksigner: str
     ):
         raise RuntimeError("Wrong original version: rehearsal requires pinned v1.5.2 (3)")
     if (candidate.version_code, candidate.version_name) != (QA_VERSION_CODE, QA_VERSION_NAME):
-        raise RuntimeError("Candidate must have the *temporary* emulator-only version increment")
+        raise RuntimeError("Candidate debug build does not match prepared release version 1.6.0 (4)")
     with sqlite3.connect(f"file:{fixture}?mode=ro", uri=True) as conn:
         if conn.execute("PRAGMA user_version").fetchone()[0] != 15:
             raise RuntimeError("Synthetic fixture was not created by Room v15")
@@ -59,7 +59,7 @@ def identity_gate(old: Path, new: Path, fixture: Path, aapt: str, apksigner: str
         if len(tables) < 30:
             raise RuntimeError("Incomplete v15 schema fixture")
     print("QA_PRECHECK_PASS: two disposable debug APKs use matching non-production signer, "
-          "package and increasing emulator-only versions; synthetic Room v15 fixture valid")
+          "package and increasing candidate version; synthetic Room v15 fixture valid")
 
 
 def ordinary_tables(db: sqlite3.Connection) -> list[str]:
@@ -270,7 +270,7 @@ def rehearsal(old: Path, new: Path, test_apk: Path, fixture: Path) -> None:
               "after Android app-private transfer; no production/user data")
 
         # The -r transaction is the behavior this test actually exercises.
-        # The candidate is debug-signed and emulator-versioned ONLY.
+        # The candidate uses the prepared version but is debug-signed, NOT production-signed.
         adb(serial, "install", "-r", str(new))
         if private_read(serial, "files/qa-upgrade-marker") != SENTINEL:
             raise RuntimeError("Android update discarded the original app's private file")
