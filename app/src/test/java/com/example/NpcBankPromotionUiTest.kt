@@ -11,6 +11,7 @@ import com.example.data.model.ChatType
 import com.example.data.model.NpcDossier
 import com.example.domain.repository.AppDataMaintenanceCoordinator
 import com.example.domain.repository.ChatRepository
+import com.example.domain.repository.CharacterRepository
 import com.example.domain.repository.NpcRepository
 import com.example.ui.screens.NpcBankScreen
 import com.squareup.moshi.Moshi
@@ -89,4 +90,39 @@ class NpcBankPromotionUiTest {
             db.characterDao().getCharacterById("ui-npc")?.displayName
         })
     }
+    @Test fun existingCharacterCanJoinThisChatAsLinkedNpcWithoutCreatingAnotherCard() {
+        val cards = CharacterRepository(
+            db.characterDao(), Moshi.Builder().addLast(KotlinJsonAdapterFactory()).build()
+        )
+        runBlocking {
+            cards.importCharacterJson(
+                """{"schema_version":1,"character_id":"original-card",
+                   "display_name":"Captain Varka","character_name":"Varka","aliases":[]}"""
+            )
+        }
+        compose.setContent {
+            MaterialTheme {
+                NpcBankScreen(
+                    chatId = "storybook", repository = npc, chatRepository = chats,
+                    onNavigateBack = {}
+                )
+            }
+        }
+        compose.onNodeWithTag("add_existing_character_as_npc").performClick()
+        compose.onNodeWithTag("link_existing_character_original-card").performClick()
+        compose.waitUntil(15_000) {
+            runBlocking {
+                npc.getProjectedDossiers("storybook")
+                    .any { it.linkedCharacterId == "original-card" }
+            }
+        }
+        assertEquals(1, runBlocking {
+            db.backupDao().getCharacters().size
+        })
+        assertEquals(1, runBlocking {
+            npc.getProjectedDossiers("storybook")
+                .count { it.linkedCharacterId == "original-card" }
+        })
+    }
+
 }
