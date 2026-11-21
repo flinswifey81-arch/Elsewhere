@@ -150,6 +150,14 @@ class ChatRepository(
                 chatDao.moveChatParticipant(chatId, characterId, direction)
             }
         }
+
+    /** Solo spotlight changes only the selected responder ordering, never the history. */
+    suspend fun selectSoloSpotlight(chatId: String, characterId: String) =
+        dataCoordinator.withMutation {
+            withContext(Dispatchers.IO) {
+                chatDao.selectSoloSpotlight(chatId, characterId)
+            }
+        }
     
     suspend fun updateChat(chat: ChatEntity) = dataCoordinator.withMutation {
         withContext(Dispatchers.IO) { chatDao.updateChat(chat) }
