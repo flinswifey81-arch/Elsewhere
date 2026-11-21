@@ -86,7 +86,10 @@ data class BackupPayload(
     // v20, backward-compatible with earlier encrypted backup payloads.
     val storyMemoryKnowledgeChanges: List<StoryMemoryKnowledgeChangeEntity> = emptyList(),
     // v21 optional addition: older archives contain no synthetic perspectives.
-    val storyMemoryPerspectives: List<StoryMemoryPerspectiveEntity> = emptyList()
+    val storyMemoryPerspectives: List<StoryMemoryPerspectiveEntity> = emptyList(),
+    // v22: Campaign organization is optional for historical encrypted backups.
+    val campaigns: List<CampaignEntity> = emptyList(),
+    val campaignChapters: List<CampaignChapterEntity> = emptyList()
 )
 
 data class BackupPreview(
@@ -105,7 +108,8 @@ data class BackupPreview(
     val includesDrafts: Boolean,
     val includesCoopHistory: Boolean,
     val coopWillRestoreOffline: Boolean,
-    val scenarios: Int = 0
+    val scenarios: Int = 0,
+    val campaigns: Int = 0
 )
 
 data class BackupInspection(
