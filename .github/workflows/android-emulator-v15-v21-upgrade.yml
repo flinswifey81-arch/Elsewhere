@@ -1,4 +1,4 @@
-name: Disposable Android Emulator v15 to v21 Package Upgrade
+name: Disposable Android Emulator v15 to v22 Package Upgrade
 
 on:
   pull_request:
@@ -24,8 +24,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  emulator-v15-to-v21:
-    name: Fresh emulator / actual install -r / Room v15 to v21 retention
+  emulator-v15-to-v22:
+    name: Fresh emulator / actual install -r / Room v15 to v22 retention
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
@@ -49,7 +49,7 @@ jobs:
           set -euo pipefail
           test "$(git -C pinned-v15-emulator rev-parse HEAD)" = b2295d69877ba003e6473c8a40e1f7a514c560f7
           grep -q 'const val APP_DATABASE_VERSION = 15' pinned-v15-emulator/app/src/main/java/com/example/data/AppDatabase.kt
-          grep -q 'const val APP_DATABASE_VERSION = 21' app/src/main/java/com/example/data/AppDatabase.kt
+          grep -q 'const val APP_DATABASE_VERSION = 22' app/src/main/java/com/example/data/AppDatabase.kt
           python3 -m py_compile qa/device-upgrade/verify_disposable_upgrade.py
           python3 -m unittest discover -s qa/device-upgrade -p 'test_*.py' -v
           cp qa/v15-v21/FullV15RoomFixtureExportTest.kt pinned-v15-emulator/app/src/test/java/com/example/
@@ -119,7 +119,7 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
-      - name: Install v15 then update to v21 on an isolated emulator; verify row/file retention
+      - name: Install v15 then update to v22 on an isolated emulator; verify row/file retention
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 35
