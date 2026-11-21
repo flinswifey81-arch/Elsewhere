@@ -124,6 +124,11 @@ class StoryMemoriesScreenTest {
         val firstMemoryId = runBlocking {
             database.storyMemoryDao().forChat("ui-story").first().memoryId
         }
+        // Robolectric's paused Compose test clock does not guarantee that a raw
+        // waitUntil semantics poll advances pending LaunchedEffect / Room emissions.
+        // First flush the real UI startup work; the following wait still fails if
+        // the list is genuinely missing.
+        composeRule.waitForIdle()
         // LazyColumn composes offscreen memory cards only when reached.
         // Room/Robolectric initialization can be delayed on parallel CI
         // runners. Wait for the actual list to appear, not a fixed sleep.
