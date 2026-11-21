@@ -272,10 +272,10 @@ object WorldArchiveStateCodec {
                         memory.sourceCreatedAtEpochMillis != null
                 )) &&
                 (memory.sourceMessageId == null ||
-                    messageById[memory.sourceMessageId]?.let {
+                    (messageById[memory.sourceMessageId]?.let {
                         it.chatId == memory.chatId &&
                             it.variantGroupId == memory.sourceVariantGroupId
-                    } ?: true)
+                    } ?: true))
         }) { "A Story Memory has invalid chat scope, source or state" }
         // A deleted source is still an important historical reference. Preserve its
         // provenance; prompt eligibility independently rejects SOURCE_MISSING.
@@ -303,7 +303,10 @@ object WorldArchiveStateCodec {
         }
         require(state.storyMemoryActors.all { actor ->
             actor.memoryId in storyMemories &&
-                actor.relation in setOf("KNOWS", "MENTIONED") &&
+                actor.relation in setOf(
+                    "KNOWS", "MENTIONED", "RELATIONSHIP_FROM", "RELATIONSHIP_TO",
+                    "PROMISE_FROM", "PROMISE_TO"
+                ) &&
                 (actor.relation != "KNOWS" || actor.actorKind == StoryActorKind.CHARACTER.name) &&
                 actorOwned(actor.actorKind, actor.actorId, actor.memoryId)
         }) { "A Story Memory actor or knowledge grant is outside this World" }
