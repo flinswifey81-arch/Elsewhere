@@ -2,6 +2,7 @@ package com.example.domain.world
 
 import com.example.data.model.*
 import com.example.domain.memory.StoryActorKind
+import com.example.domain.memory.StoryMemoryEligibilityPolicy
 import com.example.domain.story.StoryResponseCodec
 import com.example.domain.story.StorySegmentType
 import com.squareup.moshi.Moshi
@@ -157,6 +158,7 @@ object WorldArchiveSemanticRemapper {
         val npcOwnerById = source.npcDossiers.associate { it.npcId to it.chatId }
         val oldNpcIds = npcOwnerById.keys
         val selectedChatIds = source.chats.map { it.chatId }.toSet()
+        val sourceMessageById = source.messages.associateBy { it.messageId }
         fun content(originalChat: String, raw: String): String {
             if (!StoryResponseCodec.isEncoded(raw)) return raw
             val response = requireNotNull(StoryResponseCodec.decode(raw)) {
@@ -328,6 +330,18 @@ object WorldArchiveSemanticRemapper {
                         WorldArchiveIdKind.VARIANT_GROUP, memory.sourceVariantGroupId
                     ),
                     sourceSpeakerId = sourceSpeakerId(memory),
+                    // A correctly sourced structured response can change encoded speaker IDs
+                    // during import. Only re-anchor its hash when the ORIGINAL hash was valid;
+                    // never resurrect stale knowledge invalidated by an edit or regeneration.
+                    sourceSha256 = memory.sourceSha256?.let { originalHash ->
+                        val oldSource = memory.sourceMessageId?.let { sourceMessageById[it] }
+                        if (oldSource != null && oldSource.isPrimaryVariant &&
+                            originalHash == StoryMemoryEligibilityPolicy.sha256(oldSource.content)) {
+                            StoryMemoryEligibilityPolicy.sha256(
+                                content(oldSource.chatId, oldSource.content)
+                            )
+                        } else originalHash
+                    },
                     believedById = memory.believedById?.let { original ->
                         storyActorId(requireNotNull(memory.believedByKind),
                             original, memory.chatId)
