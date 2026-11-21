@@ -66,20 +66,26 @@ class LorebookSameIdReplaceTest {
 
         // Export then build an imported same-ID definition with one retained entry.
         val json = repository.exportJson(original.lorebookId)
-        val parsed = repository.parseLorebookJson(json)
-        val updated = parsed.copy(
-            lorebook = parsed.lorebook.copy(name = "Improved Lorebook"),
-            entries = listOf(parsed.entries.first { it.entryId == retained.entryId }
-                .copy(title = "Updated retained entry", canonContent = "Fixed canon"))
+        val moshi = Moshi.Builder().addLast(KotlinJsonAdapterFactory()).build()
+        val mapAdapter = moshi.adapter<Map<String, Any?>>(
+            com.squareup.moshi.Types.newParameterizedType(
+                Map::class.java, String::class.java, Any::class.java
+            )
         )
-        // Reuse the repository's real exported schema instead of handcrafting an
-        // incompatible format: replace only the relevant JSON fields.
-        val modifiedJson = json
-            .replace("\"name\": \"Original\"", "\"name\": \"Improved Lorebook\"")
-            .replace("\"title\": \"Retained\"", "\"title\": \"Updated retained entry\"")
-            .replace("\"Original canon\"", "\"Fixed canon\"")
-        // Including both entries also verifies that retained overlay survives
-        // even if the other entry is kept by the source file.
+        val raw = requireNotNull(mapAdapter.fromJson(json))
+        val entries = (raw["entries"] as List<*>).filterIsInstance<Map<String, Any?>>()
+        val retainedJson = entries.single { it["id"] == retained.entryId }
+        val canon = retainedJson["canon"] as Map<String, Any?>
+        val modifiedJson = mapAdapter.toJson(raw + mapOf(
+            "name" to "Improved Lorebook",
+            "entries" to listOf(
+                retainedJson + mapOf(
+                    "title" to "Updated retained entry",
+                    "canon" to (canon + mapOf("content" to "Fixed canon"))
+                )
+            )
+        ))
+        // The other entry was deliberately omitted; only ITS overlay may be pruned.
         assertEquals(original.lorebookId, repository.importJson(
             modifiedJson, LorebookImportMode.REPLACE_EXISTING
         ))
@@ -94,6 +100,9 @@ class LorebookSameIdReplaceTest {
             database.lorebookDao().getOverlays("ongoing-rp").single {
                 it.entryId == retained.entryId
             })
+        assertNull(database.lorebookDao().getEntry(removed.entryId))
+        assertEquals(listOf(retained.entryId),
+            database.lorebookDao().getOverlays("ongoing-rp").map { it.entryId })
         val attachment = database.lorebookDao().getAttachments("ongoing-rp").single()
         assertEquals(original.lorebookId, attachment.lorebookId)
         assertFalse(attachment.isEnabled)
