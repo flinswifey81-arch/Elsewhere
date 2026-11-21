@@ -109,8 +109,11 @@ object WorldArchiveSemanticRemapper {
         fun npcExtension(row: NpcDossierEntity): String? {
             val fields = checked(row.extensionFieldsJson, "NPC extension",
                 setOf("_elsewhere_linked_character_id")).toMutableMap()
-            val linked = fields["_elsewhere_linked_character_id"] as? String
-            if (linked != null) {
+            if ("_elsewhere_linked_character_id" in fields) {
+                val linked = fields["_elsewhere_linked_character_id"] as? String
+                    ?: throw IllegalArgumentException(
+                        "Linked NPC Character reference must be a stable ID string."
+                    )
                 require(linked in sourceCharacterIds) {
                     "Linked Character is missing from the selected World archive."
                 }
