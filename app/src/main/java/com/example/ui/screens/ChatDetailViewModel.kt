@@ -1588,7 +1588,10 @@ class ChatDetailViewModel(
         // Promoted Character and NPC share a stable ID; never render the
         // responding Character again as an independent supporting NPC.
         val sceneCast = NpcSceneCastResolver.resolve(
-            projectedNpcDossiers.filterNot { it.npcId == fullCharacter.characterId },
+            projectedNpcDossiers.filterNot {
+                it.npcId == fullCharacter.characterId ||
+                    it.linkedCharacterId == fullCharacter.characterId
+            },
             recentScene
         )
         val presentNpcs = sceneCast.filter { it.presence == NpcScenePresence.PRESENT }.map { it.dossier }
