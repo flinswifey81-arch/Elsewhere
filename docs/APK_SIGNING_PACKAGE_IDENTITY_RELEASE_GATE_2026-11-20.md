@@ -15,7 +15,7 @@
 | Isolated Elsewhere Test application ID | `com.aistudio.elsewhere.abwzy.test` |
 | Historical Test installed signature/code | **Unknown until independently read from the actual installed Test APK** |
 
-The pinned fingerprint comes from `.github/workflows/build-v15-release-apk.yml`, which labels it as checked against previous v1.5/v1.5.1 APKs. This PR **has not independently extracted the certificate from the owner's installed APK**; compare that fingerprint against the known-good actual installed APK/device certificate before a production install.
+The pinned fingerprint is taken from the **immutable historical v1.5.2 source** (`b2295d69877ba003e6473c8a40e1f7a514c560f7`), whose release workflow labels it as checked against previous v1.5/v1.5.1 APKs. The owner confirmed their installed APK was the last build from that production workflow. This is strong provenance for **reusing the existing signing credentials**, but the certificate has not been independently extracted from the owner's actual installed APK. Confirm the real certificate before any production install.
 
 ## Two different gates
 
@@ -36,7 +36,7 @@ The workflow also creates an **actual production-shaped APK using a throwaway QA
 - A new non-Test `versionName` (not `1.5.2`)
 - Actual native-library packaging policy
 
-The current development Gradle configuration still advertises **`versionCode=3`, `versionName=1.5.2`**. Do **not** call it an upgrade-ready release without deliberately setting a new version and validating it. The old manually triggered `build-v15-release-apk.yml` is a *historical v15 candidate* workflow; it should not be used as proof that the new draft v21 code has been production-signed or upgraded.
+The draft now prepares **`versionCode=4`, `versionName=1.6.0`**, keeping the original `.v15` package ID. This is source configuration, **not yet a finished production-signed APK**. The existing `build-v15-release-apk.yml` has been changed to a deliberately manual-only **1.6.0 candidate builder** that requires an explicit confirmation and applies the frozen signer check to the real built artifact. The pinned historical workflow at commit `b2295d6` remains the immutable v1.5.2 baseline. See `docs/RELEASE_1_6_0_CANDIDATE_HANDOFF_2026-11-20.md`.
 
 For a signed **Elsewhere Test upgrade**, `--mode test-update` additionally requires the *actual installed Test signer fingerprint* via `--expected-test-signer` and its installed code via `--installed-test-code`. If they are unknown, the tool refuses to promise the Test APK can update the installed copy. The sandbox isolation check does **not** substitute for Test-update compatibility.
 
@@ -74,7 +74,7 @@ python3 qa/apk-identity/verify_apk_identity.py --installed-apk ./installed-elsew
 
 The pair check validates the **installed historical APK before trusting the candidate**, then requires the exact production package ID, original installed version (1.5.2/code 3), non-debuggable APKs, verified historical production certificate on **both actual APKs**, a strictly higher candidate versionCode, a changed non-Test versionName, and candidate native-library packaging. A fake release APK signed with the CI throwaway key **must fail**. There is **no actual installed-APK certificate comparison result yet**.
 
-The result is an **identity/packaging prerequisite**, not approval to install or a proof about the owner's data, device migration, or backup recoverability. The current app Gradle still advertises **versionCode=3**, so it cannot currently pass as a production update. Do not increment production versioning, access historical signing secrets, or install anything until the real release preparation is explicitly approved.
+The result is an **identity/packaging prerequisite**, not approval to install or proof about the owner's data, device migration, or backup recoverability. Gradle now prepares **versionCode=4**, but the original production keystore is **not** accessed by PR CI. Do not dispatch the separate production-signing workflow or install an APK before its current-head QA suite passes, the source is reviewed, and the owner chooses to proceed.
 
 **Privacy:** keep both local APK files off GitHub, chat attachments, CI artifacts and public servers. Only the non-secret verification outcome is needed for a release review. This step never requests or modifies the production signing key.
 ## Optional owner-controlled, one-command read-only installed APK preflight
@@ -93,10 +93,10 @@ The script explicitly selects the authorized serial, refuses emulators and unaut
 
 An optional `--candidate PATH_TO_FINISHED_PRODUCTION_APK` also verifies both the real installed and real proposed APK identities and the candidate's native packaging using the same fail-closed paired gate. Neither a matching certificate nor a green local pair check is permission to install a release. Physical-device upgrade, private backup recovery, production-key availability, and the release `versionCode` increment remain separate mandatory release decisions.
 
-**Current status:** This command is implemented and testable with simulated local ADB responses, but has **not** been run against the owner's actual installed Elsewhere. The historical certificate remains unconfirmed from the phone. This is a developer-prepared procedure for later owner-controlled release verification, not a request to connect a phone now.
+**Current status:** The owner confirmed the app currently installed was built using the historical production-signing workflow. The optional ADB command remains a last-mile cryptographic check and has **not** run against the owner's actual installed Elsewhere. It is available whenever the owner wants to use it, not a request to connect their phone now.
 ## First live CI finding
 
-An initial signing QA run on older commit `10dd197` built its APKs and passed sandbox identity isolation, but failed when the **debug** APK's native-library compression was incorrectly tested against the release policy (`native-lib-packaging`). The verifier was corrected on the draft branch to apply that packaging check only to release-shaped and sandbox builds. A dedicated regression test was added. **The corrected current-head run must pass before marking the gate verified**; the older failure is not evidence of a production APK signing mismatch.
+An initial signing QA run on older commit `10dd197` erroneously applied release native-library compression rules to a **debug** APK. That issue was corrected, and the full signing-safety QA passed on later heads, including `5447f09`. The newly prepared 1.6.0 changes require a **fresh current-head pass**; historical green runs do not validate changed release-version/source files.
 
 ## What this cannot prove
 
