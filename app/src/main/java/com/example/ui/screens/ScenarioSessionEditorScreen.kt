@@ -24,6 +24,7 @@ fun ScenarioSessionEditorScreen(
 ) {
     val repository = container.scenarioRepository
     val scope = rememberCoroutineScope()
+    val characters by container.characterRepository.getAllCharacters().collectAsState(emptyList())
     var draftJson by rememberSaveable(chatId) { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
     var loading by remember(chatId) { mutableStateOf(true) }
@@ -94,7 +95,8 @@ fun ScenarioSessionEditorScreen(
         onCancel = { if (!busy) showDiscard = true },
         busy = busy,
         error = error,
-        editingActiveSession = true
+        editingActiveSession = true,
+        availableCharacters = characters
     )
 
     if (showDiscard) {
