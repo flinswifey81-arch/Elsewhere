@@ -34,12 +34,16 @@ internal fun ProfileJsonImportWorkflow(
     var waitingForReview by remember { mutableStateOf<List<PendingSameIdJson>>(emptyList()) }
     var completed by remember { mutableStateOf<List<BatchImportResult>>(emptyList()) }
     var busy by remember { mutableStateOf(false) }
+    // Even adjacent batch files sharing ONE ID must re-read the current card's
+    // name after an approved replacement, before asking about the next file.
+    var reviewRevision by remember { mutableIntStateOf(0) }
 
     fun finishOne(result: BatchImportResult) {
         val allResults = completed + result
         val remaining = waitingForReview.drop(1)
         completed = allResults
         waitingForReview = remaining
+        reviewRevision++
         if (remaining.isEmpty()) {
             summary = BatchImportSummary(allResults)
             completed = emptyList()
@@ -131,6 +135,7 @@ internal fun ProfileJsonImportWorkflow(
                                 )
                                 completed = emptyList()
                                 showPaste = false
+                                pastedJson = ""
                             } catch (failure: Exception) {
                                 error = failure.message ?: "JSON import failed."
                             } finally {
@@ -148,7 +153,8 @@ internal fun ProfileJsonImportWorkflow(
 
     val pending = waitingForReview.firstOrNull()
     var existingName by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(pending?.id) {
+    LaunchedEffect(pending?.id, reviewRevision) {
+        existingName = null
         existingName = pending?.let {
             runCatching { findExistingName(it.id) }.getOrNull()
         }
