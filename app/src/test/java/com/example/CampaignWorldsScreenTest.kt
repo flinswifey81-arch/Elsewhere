@@ -47,9 +47,17 @@ class CampaignWorldsScreenTest {
                 chatId = "old-rp", displayName = "Existing roleplay", chatType = ChatType.SOLO
             ))
         }
+        var requestedChapter: Pair<String, String>? = null
         compose.setContent {
             MaterialTheme {
-                WorldsScreen(worlds, chatRepository = chats, campaignRepository = campaigns)
+                WorldsScreen(
+                    worlds,
+                    chatRepository = chats,
+                    campaignRepository = campaigns,
+                    onCreateSoloCampaignChapter = { worldId, campaignId ->
+                        requestedChapter = worldId to campaignId
+                    }
+                )
             }
         }
         compose.waitUntil(20_000) {
@@ -71,5 +79,10 @@ class CampaignWorldsScreenTest {
         assertEquals(world.worldId, stored.worldId)
         assertNotNull(runBlocking { db.chatDao().getChatById("old-rp") })
         assertEquals(0, runBlocking { campaigns.chapters(stored.campaignId).size })
+        compose.onNodeWithTag("worlds_list")
+            .performScrollToNode(hasTestTag("start_campaign_solo_chapter"))
+        compose.onNodeWithTag("start_campaign_solo_chapter")
+            .assertIsEnabled().performClick()
+        assertEquals(world.worldId to stored.campaignId, requestedChapter)
     }
 }
