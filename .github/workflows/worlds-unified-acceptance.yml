@@ -46,6 +46,10 @@ jobs:
             --tests com.example.AppDatabaseMigrationTest \
             --tests com.example.WorldRepositoryTest \
             --tests com.example.WorldDefinitionBundleTransferTest \
+            --tests com.example.SameIdJsonReplaceTest \
+            --tests com.example.LorebookSameIdReplaceTest \
+            --tests com.example.BatchJsonImportTest \
+            --tests com.example.ProfileJsonImportWorkflowTest \
             --tests com.example.WorldEpisodeContextCompilerTest \
             --tests com.example.WorldDefinitionCodecTest \
             --tests com.example.WorldsScreenTest \
