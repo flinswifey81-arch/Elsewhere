@@ -162,7 +162,7 @@ class DefaultAppContainer(private val context: Context) : AppContainer {
     }
 
     override val npcRepository: NpcRepository by lazy {
-        NpcRepository(database, moshi, dataCoordinator)
+        NpcRepository(database, moshi, dataCoordinator, profileImageRepository)
     }
 
     override val npcOutputParser: NpcStructuredOutputParser by lazy {
