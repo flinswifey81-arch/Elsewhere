@@ -773,7 +773,9 @@ class NpcRepository(
         val origin = card.extensionFieldsJson?.let { json ->
             runCatching { mapAdapter.fromJson(json) }.getOrNull()
         }?.get("_elsewhere_promoted_npc_id")
-        if (origin != characterId) return@withContext null
+        if (origin != characterId && linkedCharacterId(base) != characterId) {
+            return@withContext null
+        }
         val changes = dao.getUpdates(chatId).filter {
             asOfOrderIndex == null || it.sourceOrderIndex <= asOfOrderIndex
         }
