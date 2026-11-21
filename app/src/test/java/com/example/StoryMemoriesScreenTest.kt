@@ -348,9 +348,14 @@ class StoryMemoriesScreenTest {
                 StoryMemoriesScreen("ui-story", repository, chats, onNavigateBack = {})
             }
         }
-        // This button lives inside the first lazily composed memory card.
-        // Parallel CI can be slower to start Room/Robolectric; wait for the
-        // actual list without hiding a missing-list regression.
+        // Flush initial Compose LaunchedEffect and Room emissions before the
+        // timed semantics assertion. On paused Robolectric clocks, waitUntil()
+        // can poll before the collecting coroutine gets an execution turn.
+        // An unavailable list still fails: we do NOT skip its assertion.
+        assertEquals(1, runBlocking {
+            database.storyMemoryDao().forChat("ui-story").size
+        })
+        composeRule.waitForIdle()
         composeRule.waitUntil(45_000) {
             composeRule.onAllNodesWithTag("story_memories_list")
                 .fetchSemanticsNodes().isNotEmpty()
