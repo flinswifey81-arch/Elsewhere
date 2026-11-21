@@ -4,6 +4,8 @@ import androidx.room.withTransaction
 import com.example.data.AppDatabase
 import com.example.data.model.MessageEntity
 import com.example.data.model.GenerationMetadataEntity
+import com.example.data.model.CharacterEntity
+import com.example.data.model.ChatType
 import com.example.data.model.NpcBankSettingsEntity
 import com.example.data.model.NpcDossier
 import com.example.data.model.NpcDossierEntity
@@ -26,9 +28,12 @@ import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 
 enum class NpcImportCollisionMode { IMPORT_AS_NEW, REPLACE_EXISTING }
+
+data class NpcPromotionResult(val characterId: String, val created: Boolean, val attachedToChat: Boolean)
 
 data class NpcUpdateApplyReport(val skippedReasons: List<String> = emptyList()) {
     fun warning(kind: String): String? = skippedReasons.takeIf { it.isNotEmpty() }?.let { reasons ->
@@ -71,7 +76,8 @@ data class NpcLibraryBank(val bank: NpcLibraryBankEntity, val entries: List<NpcL
 class NpcRepository(
     private val database: AppDatabase,
     private val moshi: Moshi,
-    private val dataCoordinator: AppDataMaintenanceCoordinator = AppDataMaintenanceCoordinator.Global
+    private val dataCoordinator: AppDataMaintenanceCoordinator = AppDataMaintenanceCoordinator.Global,
+    private val profileImageRepository: ProfileImageRepository? = null
 ) {
     private val dao get() = database.npcDao()
     private val messageDao get() = database.messageDao()
@@ -91,6 +97,109 @@ class NpcRepository(
     fun observeSettings(chatId: String): Flow<NpcBankSettingsEntity?> = dao.observeSettings(chatId)
 
     fun observeLibraryBanks(): Flow<List<NpcLibraryBankEntity>> = dao.observeLibraryBanks()
+
+    /** Promoted NPC and reusable Character share their exact stable ID. */
+    fun observePromotedCharacterIds(): Flow<Set<String>> =
+        database.characterDao().getAllCharacters().map { cards ->
+            cards.filter { card ->
+                card.extensionFieldsJson?.let { json ->
+                    runCatching { mapAdapter.fromJson(json)?.get("_elsewhere_promoted_npc_id") }
+                        .getOrNull() == card.characterId
+                } == true
+            }.mapTo(mutableSetOf()) { it.characterId }
+        }
+
+    /**
+     * Promote a chat NPC into a reusable Character WITHOUT deleting the NPC,
+     * its variant-linked update history, or any prior messages. The same ID is
+     * used in both tables. Only portrayal fields cross this boundary; secrets,
+     * private author notes and per-Persona relationships never become public
+     * global Character knowledge. No model call.
+     */
+    suspend fun promoteNpcToCharacter(chatId: String, npcId: String): NpcPromotionResult =
+        dataCoordinator.withMutation {
+            withContext(Dispatchers.IO) {
+                val chat = requireNotNull(database.chatDao().getChatById(chatId)) {
+                    "This chat does not exist."
+                }
+                val source = requireNotNull(dao.getDossier(npcId)) {
+                    "This NPC no longer exists."
+                }
+                require(source.chatId == chatId) {
+                    "This NPC belongs to a different chat."
+                }
+                // Snapshot selected-variant updates after Wack. Never use a
+                // non-selected historical branch as Character base material.
+                val npc = getProjectedDossiers(
+                    chatId, afterOrderIndex = chat.contextResetOrderIndex
+                ).firstOrNull { it.npcId == npcId }
+                    ?: throw IllegalStateException("The NPC could not be projected.")
+                val result = database.withTransaction {
+                    require(dao.getDossier(npcId)?.chatId == chatId) {
+                        "The original NPC was changed or removed. Nothing was promoted."
+                    }
+                    val existing = database.characterDao().getCharacterById(npcId)
+                    if (existing != null) {
+                        val origin = existing.extensionFieldsJson?.let {
+                            runCatching { mapAdapter.fromJson(it) }.getOrNull()
+                        }?.get("_elsewhere_promoted_npc_id")
+                        require(origin == npcId) {
+                            "An unrelated Character owns this ID. Nothing was changed."
+                        }
+                        require(!existing.isArchived) {
+                            "The linked Character is archived. Unarchive it before using it again."
+                        }
+                    } else {
+                        database.characterDao().insertNewCharacter(
+                            CharacterEntity(
+                                characterId = npcId,
+                                displayName = npc.displayName,
+                                characterName = npc.displayName,
+                                aliases = npc.aliases,
+                                importSchemaVersion = 1,
+                                identityJson = mapAdapter.toJson(
+                                    mapOf("name" to npc.displayName, "role" to npc.role)
+                                ),
+                                appearanceJson = npc.appearance.takeIf(String::isNotBlank)?.let {
+                                    mapAdapter.toJson(mapOf("description" to it))
+                                },
+                                personalityJson = mapAdapter.toJson(
+                                    mapOf("summary" to npc.personality, "goals" to npc.goals)
+                                ),
+                                voiceJson = null,
+                                behaviorJson = null,
+                                backstoryJson = null,
+                                knowledgeJson = null,
+                                worldContextJson = null,
+                                writingRulesJson = null,
+                                examplesJson = null,
+                                authorNotesJson = null,
+                                extensionFieldsJson = mapAdapter.toJson(
+                                    mapOf("_elsewhere_promoted_npc_id" to npcId)
+                                )
+                            )
+                        )
+                    }
+                    // Scenario episodes have a narrator, not a direct primary
+                    // Character roster. They can link this card explicitly.
+                    val attach = chat.chatType != ChatType.SCENARIO &&
+                        database.chatDao().getChatParticipant(chatId, npcId) == null
+                    if (attach) database.chatDao().addChatParticipantAtEnd(chatId, npcId)
+                    NpcPromotionResult(npcId, existing == null, attach)
+                }
+                if (result.created) {
+                    // Device-local portraits stay untouched in the NPC Bank.
+                    // A copy into Character storage is best effort, not destructive.
+                    runCatching {
+                        profileImageRepository?.copyImageToKind(
+                            ProfileImageKind.NPC, npcId,
+                            ProfileImageKind.CHARACTER, npcId
+                        )
+                    }
+                }
+                result
+            }
+        }
 
     suspend fun getLibraryBank(bankId: String): NpcLibraryBank? = withContext(Dispatchers.IO) {
         dao.getLibraryBanks().firstOrNull { it.bankId == bankId }?.let { NpcLibraryBank(it, dao.getLibraryEntries(bankId)) }
