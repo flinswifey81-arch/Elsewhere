@@ -286,6 +286,18 @@ class WorldArchiveAdditiveRestorer(
         if (state.chatSettings.isNotEmpty()) backup.insertChatSettings(state.chatSettings)
         if (state.generationMetadata.isNotEmpty()) backup.insertGenerationMetadata(state.generationMetadata)
         if (state.roleplayMemories.isNotEmpty()) backup.insertRoleplayMemories(state.roleplayMemories)
+        // Story Memory V2's parent and every child record must join the SAME atomic
+        // World restore. Its Wack/knowledge provenance must not be reconstructed.
+        val storyMemoryDao = database.storyMemoryDao()
+        if (state.storyMemories.isNotEmpty()) storyMemoryDao.insertAll(state.storyMemories)
+        if (state.storyMemoryActors.isNotEmpty()) storyMemoryDao.insertActors(state.storyMemoryActors)
+        if (state.storyMemoryReturns.isNotEmpty()) storyMemoryDao.insertReturns(state.storyMemoryReturns)
+        if (state.storyMemoryKnowledgeChanges.isNotEmpty()) {
+            storyMemoryDao.insertKnowledgeChanges(state.storyMemoryKnowledgeChanges)
+        }
+        if (state.storyMemoryPerspectives.isNotEmpty()) {
+            storyMemoryDao.insertPerspectives(state.storyMemoryPerspectives)
+        }
         if (state.conversationSummaries.isNotEmpty()) backup.insertConversationSummaries(state.conversationSummaries)
         if (state.lorebooks.isNotEmpty()) backup.insertLorebooks(state.lorebooks)
         if (state.lorebookEntries.isNotEmpty()) backup.insertLorebookEntries(state.lorebookEntries)
