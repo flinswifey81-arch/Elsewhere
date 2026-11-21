@@ -699,10 +699,10 @@ class NpcRepository(
                 state.personaRelationships.isEmpty()
             }
         relationship?.takeIf(String::isNotBlank)?.take(4000)?.let {
-            "[CHAT-LOCAL RELATIONSHIP FOR ACTIVE CHARACTER ONLY]\\n" +
-                "Character ID: $characterId\\n" +
-                "Active Persona ID: $activePersonaId\\n" +
-                "Established relationship: $it\\n" +
+            "[CHAT-LOCAL RELATIONSHIP FOR ACTIVE CHARACTER ONLY]\n" +
+                "Character ID: $characterId\n" +
+                "Active Persona ID: $activePersonaId\n" +
+                "Established relationship: $it\n" +
                 "This does NOT transfer to any other chat, Persona or World canon."
         }
     }
