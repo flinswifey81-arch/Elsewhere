@@ -21,6 +21,9 @@ class WorldRepository(
 
     private val jsonCodec = Moshi.Builder().addLast(KotlinJsonAdapterFactory()).build()
     private val worldLinksAdapter = jsonCodec.adapter(WorldLinksV1::class.java)
+    private val resourcesMapAdapter = jsonCodec.adapter<Map<String, Any?>>(
+        Types.newParameterizedType(Map::class.java, String::class.java, Any::class.java)
+    )
     private val stringsAdapter = jsonCodec.adapter<List<String>>(
         Types.newParameterizedType(List::class.java, String::class.java)
     )
@@ -53,32 +56,91 @@ class WorldRepository(
     }
 
     /**
-     * World definition export preserves the currently representable setting, cast,
-     * relationships and accepted events. Refuse nonempty linked resources rather
-     * than falsely claiming to export their data, episodes or transcripts.
+     * Shareable authored World Definition JSON. Include all supported linked
+     * Character, Persona, Scenario and Lorebook definitions, never just IDs.
+     * No chats, attached images, unsent drafts or roleplay memory are exported:
+     * use the encrypted World archive for complete playthrough transfer.
      */
     suspend fun exportDefinition(worldId: String): String {
         val document = database.withTransaction {
             val world = requireWorld(worldId)
-            require(dao.getMemberships(worldId).isEmpty()) {
-                "World has linked resources; use complete World archive when available."
-            }
+            val memberships = dao.getMemberships(worldId)
+            require(memberships.none {
+                it.resourceType in setOf(
+                    WorldResourceType.CHAT.name, WorldResourceType.NPC_LIBRARY_BANK.name
+                )
+            }) { "Chat and NPC Bank links require an encrypted World archive." }
             val links = requireNotNull(worldLinksAdapter.fromJson(world.linksJson)) {
-                "World relationship data is invalid."
+                "World role and relationship data is invalid."
             }
-            require(links.castRoles.isEmpty() &&
-                requireNotNull(stringsAdapter.fromJson(world.defaultLorebookIdsJson)).isEmpty()) {
-                "World role/default Lorebook links require complete export."
+            require(links.castRoles.none { it.roleType == "NPC_LIBRARY" }) {
+                "NPC Library role links require an encrypted World archive."
             }
             val cast = dao.getCast(worldId)
             val castIds = cast.map { it.worldCharacterId }.toSet()
             require(links.relationships.all {
                 it.fromWorldCharacterId in castIds && it.toWorldCharacterId in castIds
             }) { "World relationship refers to a missing cast member." }
-
             val events = dao.getEvents(worldId).filter { it.status == "ACCEPTED" }
             require(events.all { it.sourceChatId == null }) {
-                "Accepted event references a chat; use complete World archive."
+                "Accepted event cites a chat; use encrypted World archive."
+            }
+
+            val scenarioIds = (
+                memberships.filter { it.resourceType == WorldResourceType.SCENARIO.name }
+                    .map { it.resourceId } +
+                links.castRoles.filter { it.roleType == "SCENARIO_NPC" }
+                    .mapNotNull { it.scenarioId } +
+                cast.filter { it.provenanceKind.uppercase() == "SCENARIO" }
+                    .mapNotNull { it.provenanceId }
+            ).toSortedSet()
+            val scenarios = scenarioIds.map { id ->
+                val saved = requireNotNull(database.scenarioDao().get(id)) {
+                    "Linked Scenario was deleted; remove the link before export."
+                }
+                WorldScenarioV1(id, ScenarioCodec.decode(saved.definitionJson))
+            }
+            val characterIds = (
+                memberships.filter { it.resourceType == WorldResourceType.CHARACTER.name }
+                    .map { it.resourceId } +
+                links.castRoles.filter { it.roleType == "CHARACTER" }
+                    .map { it.resourceId } +
+                cast.filter { it.provenanceKind.uppercase() == "CHARACTER" }
+                    .mapNotNull { it.provenanceId } +
+                scenarios.flatMap { item ->
+                    item.definition.npcs.mapNotNull { it.sourceCharacterId }
+                }
+            ).toSortedSet()
+            val personaIds = (
+                memberships.filter { it.resourceType == WorldResourceType.PERSONA.name }
+                    .map { it.resourceId } +
+                links.castRoles.filter { it.roleType == "PERSONA" }
+                    .map { it.resourceId } +
+                cast.filter { it.provenanceKind.uppercase() == "PERSONA" }
+                    .mapNotNull { it.provenanceId }
+            ).toSortedSet()
+            val defaultLorebooks = requireNotNull(
+                stringsAdapter.fromJson(world.defaultLorebookIdsJson)
+            )
+            val lorebookIds = (
+                memberships.filter { it.resourceType == WorldResourceType.LOREBOOK.name }
+                    .map { it.resourceId } + defaultLorebooks
+            ).toSortedSet()
+            val charRepo = CharacterRepository(database.characterDao(), jsonCodec)
+            val personaRepo = PersonaRepository(database.personaDao(), jsonCodec)
+            val loreRepo = LorebookRepository(database.lorebookDao(), jsonCodec)
+            fun parsedObject(raw: String, label: String): Map<String, Any?> =
+                requireNotNull(resourcesMapAdapter.fromJson(raw)) {
+                    "Linked $label returned an empty definition."
+                }
+            val characterCards = characterIds.map { id ->
+                parsedObject(charRepo.exportCharacterJson(id), "Character")
+            }
+            val personaCards = personaIds.map { id ->
+                parsedObject(personaRepo.exportPersonaJson(id), "Persona")
+            }
+            val lorebookCards = lorebookIds.map { id ->
+                parsedObject(loreRepo.exportJson(id), "Lorebook")
             }
             WorldDefinitionV1(
                 format = WorldDefinitionCodec.FORMAT,
@@ -89,34 +151,44 @@ class WorldRepository(
                     description = world.description,
                     settingSummary = world.settingSummary,
                     worldRules = world.worldRules,
-                    genreTags = requireNotNull(stringsAdapter.fromJson(world.genreTagsJson))
+                    genreTags = requireNotNull(stringsAdapter.fromJson(world.genreTagsJson)),
+                    defaultLorebookIds = defaultLorebooks
                 ),
-                resources = WorldResourcesV1(worldCast = cast.map { member ->
-                    WorldCastV1(
-                        worldCharacterId = member.worldCharacterId,
-                        name = member.name,
-                        aliases = requireNotNull(stringsAdapter.fromJson(member.aliasesJson)),
-                        profile = mapOf(
-                            "identity" to member.identity,
-                            "appearance" to member.appearance,
-                            "personality" to member.personality,
-                            "voice" to member.voice,
-                            "backstory" to member.backstory,
-                            "motivations" to member.motivations,
-                            "knowledge_limits" to member.knowledgeLimits,
-                            "role" to member.role
-                        ),
-                        provenance = WorldProvenanceV1(sourceKind = "import"),
-                        lockedFields = requireNotNull(stringsAdapter.fromJson(member.lockedFieldsJson))
-                    )
-                }),
+                resources = WorldResourcesV1(
+                    characters = characterCards,
+                    personas = personaCards,
+                    scenarios = scenarios,
+                    lorebooks = lorebookCards,
+                    worldCast = cast.map { member ->
+                        WorldCastV1(
+                            worldCharacterId = member.worldCharacterId,
+                            name = member.name,
+                            aliases = requireNotNull(stringsAdapter.fromJson(member.aliasesJson)),
+                            profile = mapOf(
+                                "identity" to member.identity,
+                                "appearance" to member.appearance,
+                                "personality" to member.personality,
+                                "voice" to member.voice,
+                                "backstory" to member.backstory,
+                                "motivations" to member.motivations,
+                                "knowledge_limits" to member.knowledgeLimits,
+                                "role" to member.role
+                            ),
+                            provenance = WorldProvenanceV1(
+                                sourceKind = member.provenanceKind,
+                                sourceId = member.provenanceId
+                            ),
+                            lockedFields = requireNotNull(
+                                stringsAdapter.fromJson(member.lockedFieldsJson)
+                            )
+                        )
+                    }
+                ),
                 links = links,
                 continuity = events.map { event ->
                     WorldContinuityV1(
-                        eventId = event.eventId,
-                        title = event.title,
-                        facts = event.facts,
-                        status = "ACCEPTED",
+                        eventId = event.eventId, title = event.title,
+                        facts = event.facts, status = "ACCEPTED",
                         relatedWorldCharacterIds = requireNotNull(
                             stringsAdapter.fromJson(event.relatedCastIdsJson)
                         )
@@ -124,6 +196,9 @@ class WorldRepository(
                 }
             )
         }
+        // The same dependency validator used by import runs BEFORE returning
+        // anything, so an export never claims to be portable when links are missing.
+        WorldDefinitionBundleResources(database, jsonCodec).prepare(document)
         return WorldDefinitionCodec.encode(document)
     }
 
