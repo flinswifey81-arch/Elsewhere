@@ -96,6 +96,7 @@ fun ChatDetailScreen(
     onNavigateToLorebooks: () -> Unit = {},
     onNavigateToStoryMemories: () -> Unit = {},
     onNavigateToNpcBank: () -> Unit = {},
+    onNavigateToScenarioSessionEditor: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     // Navigation ordinarily destroys a screen-scoped ViewModel on exit. Use one application-
@@ -407,6 +408,19 @@ fun ChatDetailScreen(
                                 leadingIcon = { Icon(Icons.Filled.Groups, contentDescription = null) },
                                 onClick = { showChatMenu = false; onNavigateToNpcBank() }
                             )
+                            if ((uiState as? ChatUiState.Success)?.chatSummary?.chat?.chatType == ChatType.SCENARIO) {
+                                val current = uiState as? ChatUiState.Success
+                                DropdownMenuItem(
+                                    text = { Text("Edit this Scenario playthrough") },
+                                    modifier = Modifier.testTag("edit_active_scenario_playthrough"),
+                                    enabled = current != null && current.historyLoaded &&
+                                        !current.isGenerating && !current.partialStopped,
+                                    onClick = {
+                                        showChatMenu = false
+                                        onNavigateToScenarioSessionEditor()
+                                    }
+                                )
+                            }
                             DropdownMenuItem(
                                 text = { Text("Chat Settings") },
                                 leadingIcon = { Icon(Icons.Filled.Settings, contentDescription = null) },
