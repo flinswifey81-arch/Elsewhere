@@ -48,10 +48,12 @@ fun ContextInspectorScreen(
     var inspectedCharacterName by remember { mutableStateOf<String?>(null) }
 
     var isLoading by remember { mutableStateOf(true) }
+    var inspectionFailure by remember { mutableStateOf<String?>(null) }
     var refreshVersion by remember { mutableStateOf(0) }
     val scope = rememberCoroutineScope()
     LaunchedEffect(chatId, characterId, refreshVersion) {
         try {
+            inspectionFailure = null
             val summary = appContainer.chatRepository.getChatSummaryById(chatId)
             val settings = appContainer.chatRepository.getEffectiveChatSettings(chatId)
                 ?: com.example.data.model.ChatSettingsEntity(chatId = chatId)
@@ -260,6 +262,9 @@ fun ContextInspectorScreen(
                 selectedStoryMemoryCount = allowed.size
                 compiledMessages = if (allowed.isEmpty()) baseline else compileWithMemories(allowed)
             }
+        } catch (failure: Exception) {
+            inspectionFailure = failure.message ?: "Unable to inspect this conversation."
+            compiledMessages = emptyList()
         } finally {
             isLoading = false
         }
@@ -291,6 +296,15 @@ fun ContextInspectorScreen(
                 contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
+                item {
+                    inspectionFailure?.let { failure ->
+                        Text(
+                            failure,
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                }
                 item {
                     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer), border = elsewhereCardBorder()) {
                         Column(modifier = Modifier.padding(16.dp).fillMaxWidth()) {
