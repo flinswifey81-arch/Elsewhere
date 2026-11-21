@@ -71,4 +71,48 @@ class ScenarioEditorTest {
         compose.onAllNodesWithText("Save scenario").assertCountEquals(0)
     }
 
+
+    @Test @Config(qualifiers = "w360dp-h800dp")
+    fun scenarioNpcCanLinkAndUnlinkARealCharacterByStableId() {
+        val existing = CharacterEntity(
+            characterId = "stable-character-123", displayName = "Captain Varka",
+            characterName = "Varka", aliases = emptyList(), importSchemaVersion = 1,
+            identityJson = null, appearanceJson = null, personalityJson = null,
+            voiceJson = null, behaviorJson = null, backstoryJson = null,
+            knowledgeJson = null, worldContextJson = null, writingRulesJson = null,
+            examplesJson = null, authorNotesJson = null, extensionFieldsJson = null
+        )
+        var chosenId: String? = null
+        compose.setContent {
+            var draft by remember {
+                mutableStateOf(ScenarioDefinition(
+                    title = "Forest", premise = "A camp",
+                    npcs = listOf(ScenarioNpc(npcId = "forest-npc", name = "The Captain"))
+                ))
+            }
+            AppTheme {
+                ScenarioEditor(
+                    definition = draft,
+                    onChange = {
+                        draft = it
+                        chosenId = draft.npcs.single().sourceCharacterId
+                    },
+                    onSave = {},
+                    onCancel = {},
+                    availableCharacters = listOf(existing)
+                )
+            }
+        }
+        compose.onNodeWithText("Recurring NPCs (1) · Edit").performClick()
+        compose.onNode(hasScrollAction()).performScrollToNode(hasText("Link Character"))
+        compose.onNodeWithText("Link Character").performClick()
+        compose.onNodeWithText("Captain Varka").performClick()
+        compose.waitForIdle()
+        assertEquals("stable-character-123", chosenId)
+        compose.onNode(hasScrollAction()).performScrollToNode(hasText("Unlink Character"))
+        compose.onNodeWithText("Unlink Character").performClick()
+        compose.waitForIdle()
+        assertNull(chosenId)
+    }
+
 }
