@@ -92,6 +92,18 @@ class CharacterToNpcLinkTest {
         assertTrue(firstPrompt.contains("ONE_KNOWLEDGE_ONLY"))
         assertFalse(firstPrompt.contains("FORBIDDEN_OTHER_CHAT_SECRET"))
         assertFalse(firstPrompt.contains("FORBIDDEN_AUTHOR_NOTE"))
+        val firstRelationship = npc.promotedSpeakerRelationshipContext(
+            firstChat, "existing", "player"
+        ).orEmpty()
+        assertTrue(firstRelationship.contains("STORY_ONE_PRIVATE_RELATIONSHIP"))
+        assertFalse(firstRelationship.contains("FORBIDDEN_OTHER_CHAT_SECRET"))
+        assertFalse(firstRelationship.contains("FORBIDDEN_AUTHOR_NOTE"))
+        assertNull(npc.promotedSpeakerRelationshipContext(
+            secondChat, "existing", "player"
+        ))
+        assertNull(npc.promotedSpeakerRelationshipContext(
+            firstChat, "existing", "player", afterOrderIndex = 100L
+        ))
 
         val secondPrompt = npc.relevantContext(
             chatId = secondChat, recentMessages = emptyList(),
