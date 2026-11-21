@@ -11,7 +11,8 @@ class GenerationHistoryWithCurrentTest {
         messageId = "turn-$index", chatId = "synthetic",
         speakerType = SpeakerType.PERSONA, speakerId = "persona",
         speakerDisplayNameSnapshot = "Mara",
-        content = "Scene $index", orderIndex = index.toLong()
+        content = "Scene $index", orderIndex = index.toLong(),
+        createdAt = 1_700_000_000_000L + index
     )
 
     @Test fun behavesExactlyLikeConcatenatedList() {
