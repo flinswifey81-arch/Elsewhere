@@ -42,7 +42,8 @@ The typed Character link remains only in local NPC dossier metadata and encrypte
 
 ## Roadmap blockers still open
 
-- Expanded cross-World cast identity reconciliation, full regeneration/variant rollback QA, and World archive ID remapping for these internal links still require explicit acceptance before a release.
+- Encrypted World archive import now explicitly remaps both Living Cast link kinds: a trusted promoted NPC and Character share one **new** ID in the imported World, and a separate chat-local NPC link points to the newly imported Character. Known plain-text manual profile fields stay intact. Unknown opaque reference-bearing extensions still fail closed rather than becoming dangling links. `WorldArchiveHistoryTest` covers both cases; full encrypted archive restore remains a separate acceptance gate.
+- Expanded cross-World cast identity reconciliation and full regeneration/variant rollback QA still require explicit acceptance before a release.
 - Persistent Campaigns, checkpoints, journal/timeline, separate Campaign memories, opt-in bounded AI memory extraction and World intelligence remain major unfinished stages.
 - Persistent Campaigns, chapters/journal/timeline, and opt-in bounded paid AI memory extraction/review remain unfinished stages.
 - Nothing is ready for a user-device update or production signing solely from this change.
