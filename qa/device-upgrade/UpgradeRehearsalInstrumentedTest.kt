@@ -18,7 +18,7 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class UpgradeRehearsalInstrumentedTest {
     @Test
-    fun originalRoom15DatabaseMigratesThroughTheInstalledV21App() {
+    fun originalRoom15DatabaseMigratesThroughTheInstalledV22App() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val app = context.applicationContext as ElsewhereApplication
         val original = runBlocking {
@@ -34,7 +34,7 @@ class UpgradeRehearsalInstrumentedTest {
         ).use { database ->
             database.rawQuery("PRAGMA user_version", null).use { cursor ->
                 check(cursor.moveToFirst())
-                assertEquals(21, cursor.getInt(0))
+                assertEquals(com.example.data.APP_DATABASE_VERSION, cursor.getInt(0))
             }
             database.rawQuery(
                 "SELECT content FROM messages WHERE messageId = ?",
