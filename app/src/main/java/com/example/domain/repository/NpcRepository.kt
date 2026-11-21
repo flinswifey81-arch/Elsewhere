@@ -118,7 +118,7 @@ class NpcRepository(
         dataCoordinator.withMutation {
             withContext(Dispatchers.IO) {
                 val result = database.withTransaction {
-                    requireNotNull(database.chatDao().getChatById(chatId)) {
+                    val chat = requireNotNull(database.chatDao().getChatById(chatId)) {
                         "The chat no longer exists."
                     }
                     val character = requireNotNull(
@@ -134,7 +134,15 @@ class NpcRepository(
                                     runCatching { mapAdapter.fromJson(ext) }.getOrNull()
                                 }?.get("_elsewhere_promoted_npc_id") == characterId)
                     }
-                    if (existing != null) return@withTransaction existing.npcId to false
+                    if (existing != null) {
+                        // Repeated linking never duplicates either role.
+                        if (chat.chatType != ChatType.SCENARIO &&
+                            database.chatDao().getChatParticipant(chatId, characterId) == null
+                        ) {
+                            database.chatDao().addChatParticipantAtEnd(chatId, characterId)
+                        }
+                        return@withTransaction existing.npcId to false
+                    }
                     val authored = ManualCharacterFieldsCodec.toEditableFields(character)
                     val npcId = UUID.randomUUID().toString()
                     dao.insertDossier(
@@ -154,6 +162,13 @@ class NpcRepository(
                             )
                         )
                     )
+                    if (chat.chatType != ChatType.SCENARIO &&
+                        database.chatDao().getChatParticipant(chatId, characterId) == null
+                    ) {
+                        // Make a selected Character available for Solo spotlight
+                        // or Group roster without ever making it the initial lead.
+                        database.chatDao().addChatParticipantAtEnd(chatId, characterId)
+                    }
                     npcId to true
                 }
                 if (result.second) {
