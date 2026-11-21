@@ -26,6 +26,7 @@ fun ScenariosScreen(
     val repository = container.scenarioRepository ?: return
     val scenarios by repository.observeAll().collectAsState(emptyList())
     val personas by container.personaRepository.getAllPersonas().collectAsState(emptyList())
+    val characters by container.characterRepository.getAllCharacters().collectAsState(emptyList())
     val worlds = container.worldRepository?.observeWorlds()?.collectAsState(initial = emptyList())?.value.orEmpty()
     val scope = rememberCoroutineScope()
     var editingId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -52,7 +53,8 @@ fun ScenariosScreen(
             },
             onCancel = { showDiscard = true },
             artwork = { ProfileImageEditor(container.profileImageRepository, ProfileImageKind.SCENARIO, editingId, definition.title) },
-            busy = busy, error = error
+            busy = busy, error = error,
+            availableCharacters = characters
         )
         androidx.activity.compose.BackHandler { showDiscard = true }
         if (showDiscard) AlertDialog(onDismissRequest = { showDiscard = false }, title = { Text("Discard editor changes?") },
@@ -129,9 +131,13 @@ fun ScenariosScreen(
 internal fun ScenarioEditor(definition: ScenarioDefinition, onChange: (ScenarioDefinition) -> Unit,
     onSave: () -> Unit, onCancel: () -> Unit, artwork: @Composable () -> Unit = {},
     busy: Boolean = false, error: String? = null,
-    editingActiveSession: Boolean = false) {
+    editingActiveSession: Boolean = false,
+    availableCharacters: List<CharacterEntity> = emptyList()
+) {
     var advanced by rememberSaveable { mutableStateOf(definition.experience == ScenarioExperience.SANDBOX) }
     var cast by rememberSaveable { mutableStateOf(false) }
+    var linkingNpcId by remember { mutableStateOf<String?>(null) }
+    var linkSearch by remember { mutableStateOf("") }
     LazyColumn(Modifier.fillMaxSize().imePadding().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item { Text(if (definition.experience == ScenarioExperience.QUICK_SCENE) "Quick Scene" else "Open World / Sandbox", style = MaterialTheme.typography.headlineMedium) }
         item {
@@ -176,6 +182,28 @@ internal fun ScenarioEditor(definition: ScenarioDefinition, onChange: (ScenarioD
                     ScenarioField("Relationships", npc.relationships) { update(npc.copy(relationships = it)) }
                     ScenarioField("Narrative Role", npc.narrativeRole) { update(npc.copy(narrativeRole = it)) }
                     ScenarioField("Additional Character Instructions", npc.instructions) { update(npc.copy(instructions = it)) }
+                    val linked = availableCharacters.firstOrNull {
+                        it.characterId == npc.sourceCharacterId
+                    }
+                    Text(
+                        when {
+                            npc.sourceCharacterId == null -> "Standalone Scenario NPC"
+                            linked != null -> "Linked Character: ${linked.displayName}"
+                            else -> "Linked Character missing — reassign or unlink before generating"
+                        },
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TextButton(onClick = {
+                            linkingNpcId = npc.npcId
+                            linkSearch = ""
+                        }) { Text(if (npc.sourceCharacterId == null) "Link Character" else "Change linked Character") }
+                        if (npc.sourceCharacterId != null) {
+                            TextButton(onClick = { update(npc.copy(sourceCharacterId = null)) }) {
+                                Text("Unlink Character")
+                            }
+                        }
+                    }
                     TextButton(onClick = { onChange(definition.copy(npcs = definition.npcs.filterNot { it.npcId == npc.npcId })) }) { Text("Remove NPC") }
                 } }
             }
@@ -189,6 +217,52 @@ internal fun ScenarioEditor(definition: ScenarioDefinition, onChange: (ScenarioD
             TextButton(onClick = onCancel, enabled = !busy) { Text("Cancel") }
         } }
         item { Spacer(Modifier.height(24.dp)) }
+    }
+    val targetNpcId = linkingNpcId
+    if (targetNpcId != null) {
+        AlertDialog(
+            onDismissRequest = { linkingNpcId = null },
+            title = { Text("Link an existing Character") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "Uses the same Character identity and authored portrayal. " +
+                            "Does not copy its other chats, private memories or NPC scene state.",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    OutlinedTextField(
+                        value = linkSearch,
+                        onValueChange = { linkSearch = it.take(100) },
+                        label = { Text("Search Character cards") },
+                        singleLine = true
+                    )
+                    val choices = availableCharacters.filter {
+                        !it.isArchived && it.displayName.contains(linkSearch, ignoreCase = true)
+                    }.sortedBy { it.displayName.lowercase() }
+                    LazyColumn(
+                        modifier = Modifier.fillMaxWidth().heightIn(max = 280.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        items(choices, key = { it.characterId }) { character ->
+                            TextButton(
+                                onClick = {
+                                    onChange(definition.copy(npcs = definition.npcs.map { npc ->
+                                        if (npc.npcId == targetNpcId)
+                                            npc.copy(sourceCharacterId = character.characterId)
+                                        else npc
+                                    }))
+                                    linkingNpcId = null
+                                }
+                            ) { Text(character.displayName) }
+                        }
+                        if (choices.isEmpty()) item { Text("No matching active Character cards.") }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { linkingNpcId = null }) { Text("Cancel") }
+            }
+        )
     }
 }
 
