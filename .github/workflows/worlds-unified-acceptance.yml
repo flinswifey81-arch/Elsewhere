@@ -62,6 +62,7 @@ jobs:
             --tests com.example.RetainedChatViewModelStoresTest \
             --tests com.example.ReplyNotificationPolicyTest \
             --tests com.example.NpcSceneCastResolverTest \
+            --tests com.example.NpcRepositoryTest \
             --tests com.example.NpcSpeakerPortraitResolverTest \
             --tests com.example.NpcStructuredOutputParserTest \
             --tests com.example.StoryResponseTest \
