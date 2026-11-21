@@ -834,10 +834,16 @@ class NpcRepository(
                 NpcContextSelection(dossier, mentionScore + if (dossier.keepInScene) 1000 else 0)
             }.sortedWith(compareByDescending<NpcContextSelection> { it.score }.thenByDescending { it.dossier.updatedAt })
                 .take(limit.coerceIn(1, 8))
+            // Resolve suspending Room reads BEFORE entering joinToString's
+            // non-suspending rendering lambda.
+            val linkedCards = mutableMapOf<String, CharacterEntity>()
+            selected.mapNotNull { it.dossier.linkedCharacterId }.distinct().forEach { id ->
+                database.characterDao().getCharacterById(id)
+                    ?.takeUnless { it.isArchived }
+                    ?.let { linkedCards[id] = it }
+            }
             selected.joinToString("\n\n") { selection ->
-                val linkedCard = selection.dossier.linkedCharacterId?.let {
-                    database.characterDao().getCharacterById(it)
-                }?.takeUnless { it.isArchived }
+                val linkedCard = selection.dossier.linkedCharacterId?.let(linkedCards::get)
                 with(selection.dossier) {
                     buildString {
                         append("[NPC id=").append(npcId).append("]\n")
