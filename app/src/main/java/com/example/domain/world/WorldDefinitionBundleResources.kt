@@ -237,7 +237,7 @@ internal class WorldDefinitionBundleResources(
                 role = member.profile["role"].orEmpty(),
                 provenanceKind = member.provenance?.sourceKind ?: "manual",
                 provenanceId = member.provenance?.sourceId?.let { id ->
-                    when (member.provenance.sourceKind.uppercase()) {
+                    when (member.provenance?.sourceKind?.uppercase()) {
                         "CHARACTER" -> lookup(characterIds, id)
                         "PERSONA" -> lookup(personaIdsNew, id)
                         "SCENARIO" -> lookup(scenarioIdsNew, id)
