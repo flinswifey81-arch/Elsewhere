@@ -107,7 +107,9 @@ jobs:
             --tests com.example.ChatDetailGenerationTest.structuredContinueAppendsToTheSameLogicalResponseWithoutRepeatingSegments \
             --tests com.example.ChatDetailGenerationTest.wackPreservesSavedDataAndBlocksPreResetGenerationTools \
             --tests com.example.LocalGroupGenerationTest.groupRetryRegenerateAndContinueKeepSelectedSpeakerAndNonPersistedDirectorTurn \
-            --tests com.example.ScenarioModeTest.oneRequestPortraysMultipleNpcsAndPreservesModelSettingsAndNarratorIdentity
+            --tests com.example.ScenarioModeTest.oneRequestPortraysMultipleNpcsAndPreservesModelSettingsAndNarratorIdentity \
+            --tests com.example.ScenarioActiveSessionEditTest \
+            --tests com.example.ScenarioEditorTest
 
       - name: Restore v1.5 release signing key
         env:
