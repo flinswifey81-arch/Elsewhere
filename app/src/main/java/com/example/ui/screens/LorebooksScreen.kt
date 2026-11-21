@@ -28,6 +28,7 @@ import com.example.data.model.LorebookEntryEntity
 import com.example.data.model.LorebookWithEntries
 import com.example.domain.repository.LorebookImportMode
 import com.example.domain.repository.LorebookImportPreview
+import com.example.domain.repository.LorebookDuplicateIdException
 import com.example.domain.repository.LorebookRepository
 import com.example.domain.repository.LorebookValidationException
 import com.example.ui.components.ProfileLibraryActions
@@ -63,6 +64,13 @@ fun LorebooksScreen(
     var noticeMessage by remember { mutableStateOf<String?>(null) }
     var pendingExportJson by remember { mutableStateOf<String?>(null) }
     var batchImportSummary by remember { mutableStateOf<BatchImportSummary?>(null) }
+    var pendingBatchDuplicates by remember {
+        mutableStateOf<List<PendingSameIdJson>>(emptyList())
+    }
+    var completedBatchImports by remember {
+        mutableStateOf<List<BatchImportResult>>(emptyList())
+    }
+    var importing by remember { mutableStateOf(false) }
 
     fun previewJson(json: String) {
         scope.launch {
@@ -78,6 +86,32 @@ fun LorebooksScreen(
         }
     }
 
+    fun finishBatchDuplicate(result: BatchImportResult) {
+        val allResults = completedBatchImports + result
+        val remaining = pendingBatchDuplicates.drop(1)
+        completedBatchImports = allResults
+        pendingBatchDuplicates = remaining
+        pendingImportJson = null
+        importPreview = null
+        confirmLorebookReplace = false
+        if (remaining.isEmpty()) {
+            batchImportSummary = BatchImportSummary(allResults)
+            completedBatchImports = emptyList()
+        } else {
+            previewJson(remaining.first().json)
+        }
+    }
+
+    fun dismissImportPreview() {
+        val duplicate = pendingBatchDuplicates.firstOrNull()
+        if (duplicate != null) {
+            finishBatchDuplicate(BatchImportResult(duplicate.fileName, skipped = true))
+        } else {
+            importPreview = null
+            pendingImportJson = null
+        }
+    }
+
     val importFileLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris: List<Uri> ->
         if (uris.isNotEmpty()) {
             scope.launch {
@@ -88,12 +122,33 @@ fun LorebooksScreen(
                         errorMessage = error.message ?: "Unable to read the selected file."
                     }
                 } else {
-                    batchImportSummary = importJsonDocuments(
-                        context = context,
-                        uris = uris,
-                        reader = { readBoundedLorebookJson(context, it) }
-                    ) { json ->
-                        repository.importJson(json, LorebookImportMode.REJECT_DUPLICATE)
+                    importing = true
+                    try {
+                        val batch = stageDuplicateJsonImports(
+                            items = uris,
+                            nameOf = { documentDisplayName(context, it) },
+                            read = { readBoundedLorebookJson(context, it) },
+                            importer = { json ->
+                                val preview = repository.previewImport(json)
+                                if (preview.duplicateLorebookId) {
+                                    throw LorebookDuplicateIdException(preview.lorebook.lorebookId)
+                                }
+                                repository.importJson(json, LorebookImportMode.REJECT_DUPLICATE)
+                            },
+                            duplicateId = { (it as? LorebookDuplicateIdException)?.duplicateId }
+                        )
+                        completedBatchImports = batch.completed
+                        pendingBatchDuplicates = batch.duplicates
+                        if (batch.duplicates.isEmpty()) {
+                            batchImportSummary = BatchImportSummary(batch.completed)
+                            completedBatchImports = emptyList()
+                        } else {
+                            previewJson(batch.duplicates.first().json)
+                        }
+                    } catch (failure: Exception) {
+                        errorMessage = failure.message ?: "Unable to import the selected Lorebooks."
+                    } finally {
+                        importing = false
                     }
                 }
             }
@@ -226,10 +281,7 @@ fun LorebooksScreen(
     if (!confirmLorebookReplace) importPreview?.let { preview ->
         val json = pendingImportJson
         AlertDialog(
-            onDismissRequest = {
-                importPreview = null
-                pendingImportJson = null
-            },
+            onDismissRequest = { if (!importing) dismissImportPreview() },
             title = { Text("Import Preview") },
             text = {
                 Column(
