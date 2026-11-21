@@ -1,4 +1,4 @@
-name: Disposable Android Emulator v15 to v22 Package Upgrade
+name: Disposable Android Emulator v15 to v21 Package Upgrade
 
 on:
   pull_request:
@@ -23,9 +23,11 @@ concurrency:
   group: disposable-emulator-upgrade
   cancel-in-progress: true
 
+# Keep the established workflow/job check identity so existing required checks
+# remain enforced while the target Room version advances from v21 to v22.
 jobs:
-  emulator-v15-to-v22:
-    name: Fresh emulator / actual install -r / Room v15 to v22 retention
+  emulator-v15-to-v21:
+    name: Fresh emulator / actual install -r / Room v15 to v21 retention
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
