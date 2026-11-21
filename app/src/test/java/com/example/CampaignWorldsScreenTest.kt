@@ -56,10 +56,10 @@ class CampaignWorldsScreenTest {
             compose.onAllNodesWithTag("world_card_" + world.worldId).fetchSemanticsNodes().isNotEmpty()
         }
         compose.onNodeWithTag("world_card_" + world.worldId).performClick()
-        compose.waitUntil(20_000) {
-            compose.onAllNodesWithTag("create_campaign").fetchSemanticsNodes().isNotEmpty()
-        }
-        compose.onNodeWithTag("create_campaign").performScrollTo().assertIsEnabled().performClick()
+        // LazyColumn's Campaign section may be beyond the viewport; its child
+        // semantics do not exist until the list scrolls it into composition.
+        compose.onNodeWithTag("worlds_list").performScrollToNode(hasTestTag("create_campaign"))
+        compose.onNodeWithTag("create_campaign").assertIsEnabled().performClick()
         compose.onNodeWithTag("campaign_title_field").performTextInput("My Campaign")
         compose.onNodeWithTag("save_campaign").assertIsEnabled().performClick()
 
