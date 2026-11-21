@@ -286,6 +286,65 @@ class WorldArchiveHistoryTest {
     }
 
     @Test
+    fun promotedNpcAndCharacterRemapToOneNewIdentityWithTrustedOrigin() {
+        val promoted = character.copy(
+            characterId = npc.npcId,
+            displayName = "The Porter",
+            characterName = "The Porter",
+            extensionFieldsJson = """{"_elsewhere_promoted_npc_id":"npc-a"}"""
+        )
+        val original = state().copy(
+            characters = state().characters + promoted,
+            chatParticipants = state().chatParticipants +
+                ChatParticipantEntity(chat.chatId, promoted.characterId)
+        )
+        val plan = WorldArchiveIdPlanner.plan(original, "promoted-identity-world-archive-123")
+        val mappedId = plan.get(WorldArchiveIdKind.CHARACTER, promoted.characterId)
+        assertEquals(mappedId, plan.get(WorldArchiveIdKind.NPC_DOSSIER, npc.npcId))
+        val imported = WorldArchiveSemanticRemapper.rewrite(original, plan).state
+        WorldArchiveStateCodec.validate(imported)
+        assertEquals(mappedId, imported.npcDossiers.single().npcId)
+        val card = imported.characters.single { it.characterId == mappedId }
+        assertTrue(card.extensionFieldsJson.orEmpty().contains(mappedId))
+        assertFalse(card.extensionFieldsJson.orEmpty().contains("npc-a"))
+        assertEquals(1, imported.chatParticipants.count { it.characterId == mappedId })
+        assertNotEquals(imported.characters.first().characterId, mappedId)
+    }
+
+    @Test
+    fun linkedCharacterNpcExtensionRemapsToImportedCharacterWithoutLeakingOpaqueIds() {
+        val original = state().copy(
+            npcDossiers = listOf(npc.copy(
+                extensionFieldsJson =
+                    """{"_elsewhere_linked_character_id":"character-a"}"""
+            )),
+            characters = listOf(character.copy(
+                extensionFieldsJson =
+                    """{"elsewhere_manual_fields":{"personality":"Honest work.","name":"Varka"}}"""
+            ))
+        )
+        val plan = WorldArchiveIdPlanner.plan(original, "linked-character-world-archive-123")
+        val imported = WorldArchiveSemanticRemapper.rewrite(original, plan).state
+        val linked = imported.npcDossiers.single()
+        assertEquals(plan.get(WorldArchiveIdKind.NPC_DOSSIER, npc.npcId), linked.npcId)
+        assertTrue(linked.extensionFieldsJson.orEmpty().contains(
+            plan.get(WorldArchiveIdKind.CHARACTER, character.characterId)
+        ))
+        assertFalse(linked.extensionFieldsJson.orEmpty().contains("character-a"))
+        assertTrue(imported.characters.single().extensionFieldsJson.orEmpty()
+            .contains("Honest work."))
+        WorldArchiveStateCodec.validate(imported)
+
+        val missing = original.copy(npcDossiers = listOf(npc.copy(
+            extensionFieldsJson = """{"_elsewhere_linked_character_id":"not-embedded"}"""
+        )))
+        val missingPlan = WorldArchiveIdPlanner.plan(missing, "missing-link-world-archive-123")
+        assertThrows(IllegalArgumentException::class.java) {
+            WorldArchiveSemanticRemapper.rewrite(missing, missingPlan)
+        }
+    }
+
+    @Test
     fun importMustNotSilentlyLoseUnsupportedStructuredSegmentsOrOpaqueExtensions() {
         val structured = StoryResponseCodec.encode(StoryResponse(segments = listOf(
             StorySegment(StorySegmentType.CHARACTER, "The story cannot lose this line.",
