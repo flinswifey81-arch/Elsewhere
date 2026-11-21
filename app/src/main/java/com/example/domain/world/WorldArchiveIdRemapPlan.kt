@@ -1,6 +1,8 @@
 package com.example.domain.world
 
 import com.example.data.model.ScenarioCodec
+import com.squareup.moshi.Moshi
+import com.squareup.moshi.Types
 import java.nio.charset.StandardCharsets
 import java.util.UUID
 
@@ -67,6 +69,14 @@ data class WorldArchiveIdRemapPlan(
  * after validation; it must never do global text search-and-replace in RP prose.
  */
 object WorldArchiveIdPlanner {
+    private val extensionAdapter = Moshi.Builder().build().adapter<Map<String, Any?>>(
+        Types.newParameterizedType(Map::class.java, String::class.java, Any::class.java)
+    )
+
+    private fun origin(json: String?): String? =
+        json?.let { runCatching { extensionAdapter.fromJson(it) }.getOrNull() }
+            ?.get("_elsewhere_promoted_npc_id") as? String
+
     fun plan(
         state: WorldArchiveStateV1,
         namespace: String,
@@ -148,6 +158,30 @@ object WorldArchiveIdPlanner {
             mappings[kind] = mapped
         }
 
+        // An NPC promoted to a Character is ONE underlying identity with the
+        // same source ID, explicitly attested by app-authored origin metadata.
+        // Give BOTH imported tables the identical new ID so the link survives
+        // without introducing a duplicate person.
+        val promotedIds = state.characters.filter { character ->
+            origin(character.extensionFieldsJson) == character.characterId &&
+                state.npcDossiers.any { it.npcId == character.characterId }
+        }.map { it.characterId }.toSet()
+        if (promotedIds.isNotEmpty()) {
+            val originalNpc = requireNotNull(mappings[WorldArchiveIdKind.NPC_DOSSIER])
+            val originalCharacters = requireNotNull(mappings[WorldArchiveIdKind.CHARACTER])
+            val aligned = originalNpc.toMutableMap()
+            promotedIds.forEach { source ->
+                aligned[source] = originalCharacters.getValue(source)
+            }
+            require(aligned.values.toSet().size == aligned.size) {
+                "Promoted Character/NPC identity collision in World import"
+            }
+            require(aligned.values.none {
+                it in reservedIds[WorldArchiveIdKind.NPC_DOSSIER].orEmpty()
+            }) { "Promoted NPC identity would overwrite a destination NPC" }
+            mappings[WorldArchiveIdKind.NPC_DOSSIER] = aligned
+        }
+
         val remappedMessages = requireNotNull(mappings[WorldArchiveIdKind.MESSAGE])
         // Compute this once: a large World can contain tens of thousands of variants.
         val selfNamedVariantGroups = (
@@ -181,8 +215,11 @@ object WorldArchiveIdPlanner {
                 val previous = ownerOf.putIfAbsent(fresh, kind to old)
                 if (previous != null) {
                     require(
-                        kind == WorldArchiveIdKind.VARIANT_GROUP &&
-                            previous == (WorldArchiveIdKind.MESSAGE to old)
+                        (kind == WorldArchiveIdKind.VARIANT_GROUP &&
+                            previous == (WorldArchiveIdKind.MESSAGE to old)) ||
+                        (kind == WorldArchiveIdKind.NPC_DOSSIER &&
+                            previous == (WorldArchiveIdKind.CHARACTER to old) &&
+                            old in promotedIds)
                     ) { "Two independent World archive resources would share an imported identity" }
                 }
             }
