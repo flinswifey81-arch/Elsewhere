@@ -471,6 +471,11 @@ class BackupRepository internal constructor(
     private suspend fun replaceDatabaseContents(payload: BackupPayload) {
         // FK cascade removes only World-owned membership/cast/event records.
         // All source Characters, Lorebooks, Scenarios and chats remain separate.
+        // Campaigns RESTRICT World deletion so no private playthrough structure
+        // is discarded accidentally. Full restore explicitly clears the old
+        // Campaign graph first, inside the same rollback-protected transaction.
+        database.campaignDao().clearChapters()
+        database.campaignDao().clearCampaigns()
         database.worldDao().clearWorlds()
         database.scenarioDao().clearSessions()
         database.scenarioDao().clearScenarios()
