@@ -126,7 +126,8 @@ class ScenarioActiveSessionEditTest {
             requireNotNull(repository.session(sibling)).definitionJson)
         assertNotEquals(oldSnapshot.definitionJson,
             requireNotNull(repository.session(first)).definitionJson)
-        // No new Room tables or schema upgrade required.
-        assertEquals(21, com.example.data.APP_DATABASE_VERSION)
+        // Editing a Scenario session does not itself require schema changes.
+        // Compare with the supported database version; Campaigns separately use v22.
+        assertEquals(22, com.example.data.APP_DATABASE_VERSION)
     }
 }
