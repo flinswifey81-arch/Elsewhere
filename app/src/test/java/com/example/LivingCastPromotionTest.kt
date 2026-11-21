@@ -102,6 +102,18 @@ class LivingCastPromotionTest {
         assertTrue(card.identityJson.orEmpty().contains("Keeper of the archive"))
         assertTrue(card.appearanceJson.orEmpty().contains("Copper braid"))
         assertTrue(card.personalityJson.orEmpty().contains("Find the lost atlas"))
+        val scoped = npc.promotedSpeakerRelationshipContext(
+            chatId, original.npcId, "player"
+        ).orEmpty()
+        assertTrue(scoped.contains("PROMOTION_PRIVATE_PERSONA_RELATIONSHIP"))
+        assertFalse(scoped.contains("PROMOTION_PRIVATE_SECRET"))
+        assertFalse(scoped.contains("PROMOTION_LOCAL_AUTHOR_NOTES"))
+        assertNull(npc.promotedSpeakerRelationshipContext(
+            chatId, original.npcId, "another-persona"
+        ))
+        assertNull(npc.promotedSpeakerRelationshipContext(
+            chatId, original.npcId, "player", afterOrderIndex = 100L
+        ))
         val exported = chars.exportCharacterJson(original.npcId)
         listOf("PROMOTION_PRIVATE_SECRET", "PROMOTION_LOCAL_AUTHOR_NOTES",
             "PROMOTION_PRIVATE_RELATIONSHIP", "PROMOTION_PRIVATE_PERSONA_RELATIONSHIP",
