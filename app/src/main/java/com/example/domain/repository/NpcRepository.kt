@@ -795,7 +795,10 @@ class NpcRepository(
             // A promoted NPC and the active Character share an ID; do not
             // introduce that identity again as a separate supporting actor.
             val dossiers = project(bases, updates)
-                .filterNot { it.npcId == observerCharacterId }
+                .filterNot {
+                    it.npcId == observerCharacterId ||
+                        it.linkedCharacterId == observerCharacterId
+                }
             if (dossiers.isEmpty()) return@withContext null
             val recentText = recentMessages.filter { it.isPrimaryVariant }.takeLast(4)
                 .joinToString("\n") {
@@ -817,9 +820,37 @@ class NpcRepository(
             }.sortedWith(compareByDescending<NpcContextSelection> { it.score }.thenByDescending { it.dossier.updatedAt })
                 .take(limit.coerceIn(1, 8))
             selected.joinToString("\n\n") { selection ->
+                val linkedCard = selection.dossier.linkedCharacterId?.let {
+                    database.characterDao().getCharacterById(it)
+                }?.takeUnless { it.isArchived }
                 with(selection.dossier) {
                     buildString {
                         append("[NPC id=").append(npcId).append("]\n")
+                        linkedCard?.let { card ->
+                            // Existing Character's authored identity is reusable.
+                            // NEVER read its other chat memories, personal notes,
+                            // knowledgeJson or world-specific private continuity.
+                            append("LINKED CHARACTER ID: ").append(card.characterId).append('\n')
+                            append("Use this person's authored portrayal as baseline; ")
+                                .append("the NPC Bank fields below describe THIS chat's role.\n")
+                            fun authored(label: String, raw: String?) {
+                                raw?.takeIf(String::isNotBlank)?.take(1800)?.let { value ->
+                                    append(label).append(": ").append(value).append('\n')
+                                }
+                            }
+                            authored("Authored identity", card.identityJson)
+                            authored("Authored appearance", card.appearanceJson)
+                            authored("Authored personality", card.personalityJson)
+                            authored("Authored voice", card.voiceJson)
+                            authored("Authored behavior", card.behaviorJson)
+                            authored("Authored backstory", card.backstoryJson)
+                            authored("Authored writing rules", card.writingRulesJson)
+                            ManualCharacterFieldsCodec.readStored(card)?.let { fields ->
+                                authored("Manual tone", fields.tone)
+                                authored("Manual personality", fields.personality)
+                                authored("Manual appearance", fields.appearance)
+                            }
+                        }
                         append("[STORYTELLER CONTINUITY — NOT AUTOMATIC SPEAKER KNOWLEDGE]\n")
                         append("Name: ").append(displayName).append('\n')
                         if (aliases.isNotEmpty()) append("Aliases: ").append(aliases.joinToString(", ")).append('\n')
@@ -1043,6 +1074,7 @@ class NpcRepository(
             authorNotes = base.authorNotes,
             keepInScene = base.keepInScene,
             sceneMode = base.sceneMode,
+            linkedCharacterId = linkedCharacterId(base),
             isManualBase = base.isManualBase,
             createdAt = base.createdAt,
             updatedAt = maxOf(base.updatedAt, relevant.maxOfOrNull { it.createdAt } ?: base.updatedAt)
