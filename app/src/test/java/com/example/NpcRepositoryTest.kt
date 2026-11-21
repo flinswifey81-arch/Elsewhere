@@ -99,9 +99,13 @@ class NpcRepositoryTest {
         )
 
         repository.setSceneMode("npc", com.example.data.model.NpcSceneMode.HERE)
+        val projected = repository.getProjectedDossiers("chat").single()
+        assertEquals("HERE", projected.sceneMode)
+        assertEquals(com.example.domain.npc.NpcScenePresence.PRESENT,
+            com.example.domain.npc.NpcSceneCastResolver.resolve(listOf(projected), emptyList()).single().presence)
         val context = repository.relevantContext("chat", emptyList()).orEmpty()
 
-        assertTrue(context.contains("Trusted guide"))
+        assertTrue("NPC context unexpectedly empty: " + context.isEmpty(), context.contains("Trusted guide"))
         assertTrue(context.contains("NEVER_SEND_SECRET"))
         assertFalse(context.contains("NEVER_SEND_AUTHOR_NOTE"))
     }
