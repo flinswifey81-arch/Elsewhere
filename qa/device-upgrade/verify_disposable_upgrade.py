@@ -277,10 +277,10 @@ def rehearsal(old: Path, new: Path, test_apk: Path, fixture: Path) -> None:
         adb(serial, "install", str(test_apk))
         runner = PRODUCTION_PACKAGE + ".test/androidx.test.runner.AndroidJUnitRunner"
         output = adb(serial, "shell", "am", "instrument", "-w", "-r", "-e",
-                     "class", "com.example.UpgradeRehearsalInstrumentedTest", runner)
+                     "class", "com.example.UpgradeRehearsalInstrumentedTest,com.example.ChatPdfExportInstrumentedTest", runner)
         result = output.decode("utf-8", "replace")
-        if "OK (1 test)" not in result or "INSTRUMENTATION_CODE: -1" not in result:
-            raise RuntimeError("Native v21 migration instrumentation did not pass")
+        if "OK (2 tests)" not in result or "INSTRUMENTATION_CODE: -1" not in result:
+            raise RuntimeError("Native v21 migration and real Android PDF instrumentation did not pass")
         adb(serial, "shell", "am", "force-stop", PRODUCTION_PACKAGE)
         new_version, _, new_digests = snapshot(copy_device_database(serial, after), columns)
         if new_version != 21:
