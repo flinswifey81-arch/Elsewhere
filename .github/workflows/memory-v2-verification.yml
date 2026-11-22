@@ -146,9 +146,24 @@ jobs:
           grep -q 'const val APP_DATABASE_VERSION = 15' pinned-original-v15/app/src/main/java/com/example/data/AppDatabase.kt
           cp qa/v15-v21/FullV15RoomFixtureExportTest.kt pinned-original-v15/app/src/test/java/com/example/
           cp qa/v15-v21/OriginalV15EncryptedBackupExportTest.kt pinned-original-v15/app/src/test/java/com/example/
-          (cd pinned-original-v15 && bash ./gradlew :app:testDebugUnitTest --no-daemon \
-            --tests com.example.FullV15RoomFixtureExportTest \
-            --tests com.example.OriginalV15EncryptedBackupExportTest)
+          # The pinned v15 source is immutable. Maven's Robolectric download
+          # occasionally returns HTTP 429 on fresh runners. Retry that exact
+          # infrastructure error only; never retry or suppress a failed test.
+          for attempt in 1 2 3; do
+            attempt_log="$RUNNER_TEMP/v15-fixture-attempt-${attempt}.log"
+            if (cd pinned-original-v15 && bash ./gradlew :app:testDebugUnitTest \
+                --no-daemon --no-configuration-cache \
+                --tests com.example.FullV15RoomFixtureExportTest \
+                --tests com.example.OriginalV15EncryptedBackupExportTest) 2>&1 | tee "$attempt_log"; then
+              break
+            fi
+            if [ "$attempt" -eq 3 ] || ! grep -Eq                 'HTTP 429|status code 429|Too Many Requests' "$attempt_log"; then
+              echo "Pinned v15 fixture build failed for a non-rate-limit reason."
+              exit 1
+            fi
+            echo "Maven returned HTTP 429; retrying unchanged pinned v15 build."
+            sleep $((attempt * 20))
+          done
           test -s "$ELSEWHERE_V15_FIXTURE_PATH"
           test -s "$ELSEWHERE_V15_ENCRYPTED_PATH"
       - name: Reject incomplete, empty or forged-version fixtures
