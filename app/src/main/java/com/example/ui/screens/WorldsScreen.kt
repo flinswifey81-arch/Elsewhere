@@ -93,6 +93,9 @@ fun WorldsScreen(
     var journalDraftTitle by remember { mutableStateOf("") }
     var journalDraftBody by remember { mutableStateOf("") }
     var deleteJournalTarget by remember { mutableStateOf<CampaignJournalEntryEntity?>(null) }
+    var worldDraftJournalTarget by remember { mutableStateOf<CampaignJournalEntryEntity?>(null) }
+    var worldDraftReviewedTitle by remember { mutableStateOf("") }
+    var worldDraftReviewedFacts by remember { mutableStateOf("") }
 
     val context = LocalContext.current
     var showImportJson by remember { mutableStateOf(false) }
@@ -412,6 +415,65 @@ fun WorldsScreen(
                 TextButton(onClick = { deleteJournalTarget = null }) { Text("Cancel") }
             }
         )
+    }
+
+    worldDraftJournalTarget?.let { target ->
+        val campaign = campaigns.firstOrNull { it.campaignId == target.campaignId }
+        if (campaign != null && campaignRepository != null && selected?.worldId == campaign.worldId) {
+            AlertDialog(
+                onDismissRequest = { if (!busy) worldDraftJournalTarget = null },
+                title = { Text("Propose for shared World Canon?") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            "This creates a DRAFT in " + selected.title +
+                                ". It will not affect World Canon or any other Campaign " +
+                                "until you separately review and choose Accept as Canon. " +
+                                "Only the text shown below is copied; check it for " +
+                                "private details, spoilers and character secrets.",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        OutlinedTextField(
+                            value = worldDraftReviewedTitle,
+                            onValueChange = { worldDraftReviewedTitle = it.take(200) },
+                            label = { Text("Reviewed World event title") },
+                            modifier = Modifier.testTag("world_draft_from_campaign_title")
+                        )
+                        OutlinedTextField(
+                            value = worldDraftReviewedFacts,
+                            onValueChange = { worldDraftReviewedFacts = it.take(12_000) },
+                            label = { Text("Facts to propose for World review") },
+                            minLines = 3,
+                            maxLines = 8,
+                            modifier = Modifier.testTag("world_draft_from_campaign_facts")
+                        )
+                    }
+                },
+                confirmButton = {
+                    TextButton(
+                        enabled = !busy && worldDraftReviewedTitle.isNotBlank() &&
+                            worldDraftReviewedFacts.isNotBlank(),
+                        modifier = Modifier.testTag("propose_world_draft_from_campaign"),
+                        onClick = {
+                            submit {
+                                campaignRepository.proposeJournalEntryForWorldReview(
+                                    target.campaignId,
+                                    target.journalEntryId,
+                                    worldDraftReviewedTitle,
+                                    worldDraftReviewedFacts
+                                )
+                                worldDraftJournalTarget = null
+                                notice = "World continuity draft created. Review it in Continuity " +
+                                    "and select Accept as Canon only if you want to share it."
+                            }
+                        }
+                    ) { Text("Create draft") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { worldDraftJournalTarget = null }) { Text("Cancel") }
+                }
+            )
+        }
     }
 
     confirmPlaintextWorldExport?.let { world ->
@@ -773,6 +835,18 @@ fun WorldsScreen(
                                                 }) { Text("Edit") }
                                                 TextButton(onClick = { deleteJournalTarget = entry }) {
                                                     Text("Delete")
+                                                }
+                                                if (entry.entryType == "JOURNAL") {
+                                                    TextButton(
+                                                        modifier = Modifier.testTag(
+                                                            "draft_world_from_journal_" + entry.journalEntryId
+                                                        ),
+                                                        onClick = {
+                                                            worldDraftJournalTarget = entry
+                                                            worldDraftReviewedTitle = entry.title
+                                                            worldDraftReviewedFacts = entry.body
+                                                        }
+                                                    ) { Text("Propose to World") }
                                                 }
                                             }
                                         }
