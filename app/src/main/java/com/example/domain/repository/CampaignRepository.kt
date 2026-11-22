@@ -5,12 +5,13 @@ import com.example.data.AppDatabase
 import com.example.data.model.CampaignChapterEntity
 import com.example.data.model.CampaignEntity
 import com.example.data.model.CampaignJournalEntryEntity
+import com.example.data.model.WorldContinuityEventEntity
 import java.security.MessageDigest
 import com.example.data.model.WorldMembershipEntity
 import com.example.data.model.WorldResourceType
 /**
  * Local Campaign organization only. No paid provider calls, automatic chapter-memory
- * sharing, World-canon promotion, or changes to saved messages / variants.
+ * sharing, automatic World-canon promotion, or changes to saved messages / variants.
  */
 class CampaignRepository(
     private val database: AppDatabase,
@@ -107,6 +108,56 @@ class CampaignRepository(
                 "Entry belongs to another Campaign or no longer exists."
             }
             require(dao.deleteJournalEntry(entryId) == 1)
+        }
+    }
+
+    /**
+     * Copies ONLY player-reviewed, player-edited journal text to a World DRAFT.
+     * This is the first half of deliberate promotion: existing World review must
+     * separately accept the draft before it can affect another Campaign.
+     * A private checkpoint cannot be promoted directly; its source may be
+     * invalidated by Wack or a regenerated variant. A player can author a
+     * new Journal note describing the version they intend to share.
+     */
+    suspend fun proposeJournalEntryForWorldReview(
+        campaignId: String, journalEntryId: String,
+        reviewedTitle: String, reviewedFacts: String
+    ): WorldContinuityEventEntity = coordinator.withMutation {
+        database.withTransaction {
+            val campaign = requireNotNull(dao.getCampaign(campaignId)) {
+                "Campaign not found."
+            }
+            val entry = requireNotNull(dao.getJournalEntry(journalEntryId)) {
+                "Campaign Journal entry not found."
+            }
+            require(entry.campaignId == campaignId) {
+                "Cannot promote another Campaign's private notes."
+            }
+            require(entry.entryType == "JOURNAL") {
+                "Only reviewed Journal entries can become World drafts; checkpoints remain private."
+            }
+            require(reviewedTitle.trim().isNotEmpty() && reviewedTitle.length <= 200) {
+                "Give the World draft a title of 1–200 characters."
+            }
+            require(reviewedFacts.trim().isNotEmpty() && reviewedFacts.length <= 12_000) {
+                "Give the World draft reviewed details (up to 12,000 characters)."
+            }
+            require(database.worldDao().getWorld(campaign.worldId) != null) {
+                "The Campaign's World is unavailable."
+            }
+            // Provenance is informational; only the reviewed title and facts
+            // are copied. Source message, other journal entries, secrets,
+            // memories and alternate branches are never copied implicitly.
+            val sourceChatId = entry.chapterId?.let { chapterId ->
+                dao.getChapter(chapterId)?.takeIf { it.campaignId == campaignId }?.chatId
+            }
+            WorldContinuityEventEntity(
+                worldId = campaign.worldId,
+                title = reviewedTitle.trim(),
+                facts = reviewedFacts.trim(),
+                status = "DRAFT",
+                sourceChatId = sourceChatId
+            ).also { database.worldDao().insertEvent(it) }
         }
     }
 
