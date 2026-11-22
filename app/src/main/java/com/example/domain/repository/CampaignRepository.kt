@@ -4,6 +4,8 @@ import androidx.room.withTransaction
 import com.example.data.AppDatabase
 import com.example.data.model.CampaignChapterEntity
 import com.example.data.model.CampaignEntity
+import com.example.data.model.CampaignJournalEntryEntity
+import java.security.MessageDigest
 import com.example.data.model.WorldMembershipEntity
 import com.example.data.model.WorldResourceType
 /**
@@ -21,6 +23,127 @@ class CampaignRepository(
     suspend fun forWorld(worldId: String) = dao.forWorld(worldId)
     suspend fun chapters(campaignId: String) = dao.chapters(campaignId)
     suspend fun getCampaign(campaignId: String) = dao.getCampaign(campaignId)
+
+    // Journal and checkpoint records never enter a model prompt implicitly.
+    fun observeJournal(campaignId: String) = dao.observeJournal(campaignId)
+    suspend fun journal(campaignId: String) = dao.journal(campaignId)
+
+    enum class CheckpointSourceStatus {
+        CURRENT, BEFORE_WACK, OTHER_VARIANT, MESSAGE_EDITED,
+        SOURCE_REMOVED, CHAPTER_REMOVED, START_OF_CHAPTER
+    }
+
+    /**
+     * A checkpoint is a durable, non-destructive bookmark. It captures only
+     * the current selected message's identity, variant and content digest,
+     * not a duplicate transcript or a restorable overwrite of chat history.
+     */
+    suspend fun saveCheckpoint(
+        campaignId: String, chapterId: String, title: String, notes: String = ""
+    ): CampaignJournalEntryEntity = createJournalRecord(
+        campaignId, chapterId, title, notes, "CHECKPOINT"
+    )
+
+    suspend fun addJournalNote(
+        campaignId: String, title: String, body: String, chapterId: String? = null
+    ): CampaignJournalEntryEntity = createJournalRecord(
+        campaignId, chapterId, title, body, "JOURNAL"
+    )
+
+    private suspend fun createJournalRecord(
+        campaignId: String, chapterId: String?, title: String, body: String, type: String
+    ): CampaignJournalEntryEntity = coordinator.withMutation {
+        database.withTransaction {
+            require(dao.getCampaign(campaignId) != null) { "Campaign not found." }
+            val chapter = chapterId?.let { requireNotNull(dao.getChapter(it)) { "Chapter not found." } }
+            require(chapter == null || chapter.campaignId == campaignId) {
+                "Cannot record an event against another Campaign's chapter."
+            }
+            require(type != "CHECKPOINT" || chapter != null) {
+                "A checkpoint requires a selected chapter."
+            }
+            validateJournalText(title, body)
+            val selected = if (type == "CHECKPOINT") {
+                database.messageDao().getLatestPrimaryWindow(
+                    requireNotNull(chapter).chatId, 1
+                ).firstOrNull()
+            } else null
+            CampaignJournalEntryEntity(
+                campaignId = campaignId,
+                chapterId = chapterId,
+                sourceChatId = if (type == "CHECKPOINT") chapter?.chatId else null,
+                sourceMessageId = selected?.messageId,
+                sourceVariantGroupId = selected?.variantGroupId,
+                sourceOrderIndex = selected?.orderIndex,
+                sourceContentSha256 = selected?.content?.let(::contentSha256),
+                entryType = type,
+                title = title.trim(),
+                body = body.trim()
+            ).also { dao.insertJournalEntry(it) }
+        }
+    }
+
+    suspend fun updateJournalEntry(
+        campaignId: String, entryId: String, title: String, body: String
+    ) = coordinator.withMutation {
+        database.withTransaction {
+            val previous = requireNotNull(dao.getJournalEntry(entryId)) { "Journal entry not found." }
+            require(previous.campaignId == campaignId) { "Entry belongs to another Campaign." }
+            validateJournalText(title, body)
+            require(dao.updateJournalEntry(previous.copy(
+                title = title.trim(), body = body.trim(), updatedAt = System.currentTimeMillis()
+            )) == 1)
+        }
+    }
+
+    suspend fun deleteJournalEntry(campaignId: String, entryId: String) = coordinator.withMutation {
+        database.withTransaction {
+            require(dao.getJournalEntry(entryId)?.campaignId == campaignId) {
+                "Entry belongs to another Campaign or no longer exists."
+            }
+            require(dao.deleteJournalEntry(entryId) == 1)
+        }
+    }
+
+    /** Verify a saved checkpoint against the current chosen branch and Wack.
+     * This is display-only. No historical message text is returned and no
+     * other Campaign may query an entry without its matching Campaign ID.
+     */
+    suspend fun checkpointStatus(campaignId: String, entryId: String): CheckpointSourceStatus {
+        val entry = requireNotNull(dao.getJournalEntry(entryId)) { "Entry not found." }
+        require(entry.campaignId == campaignId) { "Entry belongs to another Campaign." }
+        require(entry.entryType == "CHECKPOINT") { "Not a checkpoint." }
+        if (entry.chapterId == null) return CheckpointSourceStatus.CHAPTER_REMOVED
+        if (entry.sourceOrderIndex == null) return CheckpointSourceStatus.START_OF_CHAPTER
+        val id = entry.sourceMessageId ?: return CheckpointSourceStatus.SOURCE_REMOVED
+        val message = database.messageDao().getMessageById(id)
+            ?: return CheckpointSourceStatus.SOURCE_REMOVED
+        if (message.chatId != entry.sourceChatId ||
+            message.variantGroupId != entry.sourceVariantGroupId ||
+            message.orderIndex != entry.sourceOrderIndex) {
+            return CheckpointSourceStatus.SOURCE_REMOVED
+        }
+        val resetIndex = database.chatDao().getChatById(message.chatId)?.contextResetOrderIndex
+        if (resetIndex != null && message.orderIndex <= resetIndex) {
+            return CheckpointSourceStatus.BEFORE_WACK
+        }
+        if (!message.isPrimaryVariant) return CheckpointSourceStatus.OTHER_VARIANT
+        if (contentSha256(message.content) != entry.sourceContentSha256) {
+            return CheckpointSourceStatus.MESSAGE_EDITED
+        }
+        return CheckpointSourceStatus.CURRENT
+    }
+
+    private fun validateJournalText(title: String, body: String) {
+        require(title.trim().isNotBlank() && title.length <= 200) {
+            "Journal entry title must contain 1–200 characters."
+        }
+        require(body.length <= 12_000) { "Journal entry exceeds 12,000 characters." }
+    }
+
+    private fun contentSha256(content: String): String =
+        MessageDigest.getInstance("SHA-256").digest(content.toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it) }
 
     suspend fun createCampaign(worldId: String, title: String): CampaignEntity =
         coordinator.withMutation {
