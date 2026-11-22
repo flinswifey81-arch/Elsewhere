@@ -181,7 +181,8 @@ class AppDatabaseMigrationTest {
                 AppDatabase.MIGRATION_18_19,
                 AppDatabase.MIGRATION_19_20,
                 AppDatabase.MIGRATION_20_21,
-                AppDatabase.MIGRATION_21_22
+                AppDatabase.MIGRATION_21_22,
+                AppDatabase.MIGRATION_22_23
             )
             .allowMainThreadQueries()
             .build()
@@ -203,6 +204,7 @@ class AppDatabaseMigrationTest {
             assertTrue(migrated.npcDao().getLibraryBanks().isEmpty())
             assertTrue(migrated.worldDao().getWorlds().isEmpty())
             assertTrue(migrated.campaignDao().getAllCampaigns().isEmpty())
+            assertTrue(migrated.campaignDao().getAllJournalEntries().isEmpty())
             assertTrue(migrated.chatDao().getChatById("chat-keep")?.contextResetOrderIndex == null)
         } finally {
             migrated.close()
