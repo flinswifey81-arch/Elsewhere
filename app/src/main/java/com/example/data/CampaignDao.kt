@@ -9,6 +9,7 @@ import com.example.data.model.CampaignChapterEntity
 import com.example.data.model.CampaignEntity
 import com.example.data.model.CampaignJournalEntryEntity
 import com.example.data.model.CampaignContinuityItemEntity
+import com.example.data.model.CampaignMemoryShareEntity
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -114,6 +115,40 @@ interface CampaignDao {
 
     @Query("DELETE FROM campaign_continuity_items WHERE itemId = :itemId")
     suspend fun deleteContinuityItem(itemId: String): Int
+
+    /** Source pointer never bypasses source memory provenance/knowledge gates. */
+    @Query("""
+        SELECT s.* FROM campaign_memory_shares s
+        INNER JOIN campaign_chapters source
+          ON source.chapterId = s.sourceChapterId AND source.campaignId = s.campaignId
+        INNER JOIN campaign_chapters destination
+          ON destination.chatId = :chatId AND destination.campaignId = s.campaignId
+        WHERE source.ordinal < destination.ordinal
+        ORDER BY source.ordinal DESC, s.approvedAt DESC, s.sourceMemoryId
+        LIMIT :limit
+    """)
+    suspend fun memorySharesForLaterChapter(chatId: String, limit: Int = 128): List<CampaignMemoryShareEntity>
+
+    @Query("SELECT * FROM campaign_memory_shares WHERE campaignId = :campaignId ORDER BY approvedAt DESC, sourceMemoryId")
+    suspend fun memorySharesForCampaign(campaignId: String): List<CampaignMemoryShareEntity>
+
+    @Query("SELECT * FROM campaign_memory_shares ORDER BY campaignId, sourceMemoryId")
+    suspend fun getAllMemoryShares(): List<CampaignMemoryShareEntity>
+
+    @Query("SELECT * FROM campaign_memory_shares WHERE campaignId = :campaignId AND sourceMemoryId = :memoryId LIMIT 1")
+    suspend fun getMemoryShare(campaignId: String, memoryId: String): CampaignMemoryShareEntity?
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertMemoryShare(share: CampaignMemoryShareEntity)
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertMemoryShares(shares: List<CampaignMemoryShareEntity>)
+
+    @Query("DELETE FROM campaign_memory_shares WHERE campaignId = :campaignId AND sourceMemoryId = :memoryId")
+    suspend fun deleteMemoryShare(campaignId: String, memoryId: String): Int
+
+    @Query("DELETE FROM campaign_memory_shares")
+    suspend fun clearMemoryShares()
 
     @Query("DELETE FROM campaign_continuity_items")
     suspend fun clearContinuityItems()
