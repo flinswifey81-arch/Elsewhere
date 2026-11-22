@@ -40,6 +40,56 @@ class CampaignWorldsScreenTest {
     }
     @After fun tearDown() = db.close()
 
+    @Test fun arcCanBeAuthoredAndCompletedFromTheCampaignUi() {
+        val world = runBlocking { worlds.createWorld("Arc setting") }
+        val campaign = runBlocking { campaigns.createCampaign(world.worldId, "Arc campaign") }
+        compose.setContent {
+            MaterialTheme {
+                WorldsScreen(worlds, chatRepository = chats, campaignRepository = campaigns)
+            }
+        }
+        compose.waitUntil(20_000) {
+            compose.onAllNodesWithTag("world_card_" + world.worldId)
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithTag("world_card_" + world.worldId).performClick()
+        compose.onNodeWithTag("worlds_list")
+            .performScrollToNode(hasTestTag("open_campaign_" + campaign.campaignId))
+        compose.onNodeWithTag("open_campaign_" + campaign.campaignId).performClick()
+        compose.onNodeWithTag("worlds_list")
+            .performScrollToNode(hasTestTag("campaign_new_arc"))
+        compose.onNodeWithTag("campaign_new_arc").assertIsEnabled().performClick()
+        compose.onNodeWithTag("campaign_continuity_title").performTextInput("The First Arc")
+        compose.onNodeWithTag("campaign_continuity_details")
+            .performTextInput("Our story began here.")
+        compose.onNodeWithTag("save_campaign_continuity").assertIsEnabled().performClick()
+        compose.waitUntil(20_000) {
+            runBlocking { campaigns.continuityItems(campaign.campaignId).size == 1 }
+        }
+        val arc = runBlocking { campaigns.continuityItems(campaign.campaignId).single() }
+        assertEquals("ARC", arc.itemType)
+        assertEquals("ACTIVE", arc.status)
+        compose.waitUntil(20_000) {
+            compose.onAllNodesWithTag("edit_campaign_continuity_" + arc.itemId)
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithTag("edit_campaign_continuity_" + arc.itemId).performClick()
+        compose.onNodeWithText("Arc complete").performClick()
+        compose.onNodeWithTag("campaign_continuity_resolution")
+            .performTextInput("The conclusion was peaceful.")
+        compose.onNodeWithTag("save_campaign_continuity").assertIsEnabled().performClick()
+        compose.waitUntil(20_000) {
+            runBlocking {
+                campaigns.continuityItems(campaign.campaignId)
+                    .singleOrNull()?.status == "COMPLETE"
+            }
+        }
+        assertEquals("The conclusion was peaceful.", runBlocking {
+            campaigns.continuityItems(campaign.campaignId).single().resolution
+        })
+        assertEquals(0, runBlocking { worlds.getEvents(world.worldId).size })
+    }
+
     @Test fun campaignJournalCanBeSavedThroughWorldUiWithoutChangingChat() {
         val world = runBlocking { worlds.createWorld("Journal World") }
         val campaign = runBlocking {
