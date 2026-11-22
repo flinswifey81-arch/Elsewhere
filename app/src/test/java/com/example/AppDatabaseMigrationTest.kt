@@ -32,6 +32,81 @@ class AppDatabaseMigrationTest {
     }
 
     @Test
+    fun migrationFrom22To23AddsJournalWithoutChangingExistingCampaignAndChapterRows() {
+        val helper = FrameworkSQLiteOpenHelperFactory().create(
+            SupportSQLiteOpenHelper.Configuration.builder(context)
+                .name(databaseName)
+                .callback(object : SupportSQLiteOpenHelper.Callback(22) {
+                    override fun onCreate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                        db.execSQL("""
+                            CREATE TABLE worlds (
+                                worldId TEXT NOT NULL PRIMARY KEY,
+                                title TEXT NOT NULL
+                            )
+                        """.trimIndent())
+                        db.execSQL("""
+                            CREATE TABLE campaigns (
+                                campaignId TEXT NOT NULL PRIMARY KEY,
+                                worldId TEXT NOT NULL,
+                                title TEXT NOT NULL,
+                                summary TEXT NOT NULL,
+                                createdAt INTEGER NOT NULL,
+                                updatedAt INTEGER NOT NULL
+                            )
+                        """.trimIndent())
+                        db.execSQL("""
+                            CREATE TABLE campaign_chapters (
+                                chapterId TEXT NOT NULL PRIMARY KEY,
+                                campaignId TEXT NOT NULL,
+                                chatId TEXT NOT NULL,
+                                ordinal INTEGER NOT NULL,
+                                title TEXT NOT NULL,
+                                recap TEXT NOT NULL,
+                                state TEXT NOT NULL,
+                                createdAt INTEGER NOT NULL,
+                                updatedAt INTEGER NOT NULL
+                            )
+                        """.trimIndent())
+                        db.execSQL("INSERT INTO worlds VALUES ('world-keep', 'Unchanged World')")
+                        db.execSQL("INSERT INTO campaigns VALUES ('campaign-keep', 'world-keep', 'Unchanged Campaign', '', 10, 11)")
+                        db.execSQL("INSERT INTO campaign_chapters VALUES ('chapter-keep', 'campaign-keep', 'chat-keep', 1, 'Keep Chapter', 'Preserve recap', 'COMPLETE', 12, 13)")
+                    }
+                    override fun onUpgrade(
+                        db: androidx.sqlite.db.SupportSQLiteDatabase,
+                        oldVersion: Int, newVersion: Int
+                    ) = Unit
+                })
+                .build()
+        )
+        try {
+            val database = helper.writableDatabase
+            AppDatabase.MIGRATION_22_23.migrate(database)
+            database.query(
+                "SELECT title, summary FROM campaigns WHERE campaignId='campaign-keep'"
+            ).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals("Unchanged Campaign", cursor.getString(0))
+                assertEquals("", cursor.getString(1))
+            }
+            database.query(
+                "SELECT recap, state FROM campaign_chapters WHERE chapterId='chapter-keep'"
+            ).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals("Preserve recap", cursor.getString(0))
+                assertEquals("COMPLETE", cursor.getString(1))
+            }
+            database.query("SELECT * FROM campaign_journal_entries").use { cursor ->
+                assertEquals(0, cursor.count)
+            }
+            database.query("PRAGMA index_list('campaign_journal_entries')").use { cursor ->
+                assertTrue(cursor.count >= 3)
+            }
+        } finally {
+            helper.close()
+        }
+    }
+
+    @Test
     fun migrationFrom1To2PreservesExistingMessagesAndInitializesVariants() {
         val helper = FrameworkSQLiteOpenHelperFactory().create(
             SupportSQLiteOpenHelper.Configuration.builder(context)
