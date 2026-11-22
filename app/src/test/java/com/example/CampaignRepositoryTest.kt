@@ -242,6 +242,86 @@ class CampaignRepositoryTest {
         assertNull(entry.sourceMessageId)
     }
 
+    @Test fun journalPromotionCreatesReviewedWorldDraftButNeverAutomaticallyAcceptsIt() = runBlocking {
+        val world = worlds.createWorld("Shared World")
+        val first = campaigns.createCampaign(world.worldId, "Private Story A")
+        val second = campaigns.createCampaign(world.worldId, "Private Story B")
+        db.chatDao().insertChat(ChatEntity(
+            chatId = "campaign-a-chat", displayName = "Private A", chatType = ChatType.SOLO
+        ))
+        db.chatDao().insertChat(ChatEntity(
+            chatId = "campaign-b-chat", displayName = "Private B", chatType = ChatType.SOLO
+        ))
+        val chapter = campaigns.addChapter(first.campaignId, "campaign-a-chat", "Opening")
+        val privateEntry = campaigns.addJournalNote(
+            first.campaignId,
+            "Private observation",
+            "A confidential speculation; this must stay inside Campaign A.",
+            chapter.chapterId
+        )
+        campaigns.addChapter(second.campaignId, "campaign-b-chat", "Different history")
+        val baseline = worlds.draftEvent(world.worldId,
+            "Established World Rule", "Old baseline remains accepted.")
+        worlds.acceptEvent(world.worldId, baseline.eventId)
+        val expectedOriginalEvents = worlds.getEvents(world.worldId)
+        assertTrue(runCatching {
+            campaigns.proposeJournalEntryForWorldReview(
+                second.campaignId, privateEntry.journalEntryId,
+                "Stolen title", "Stolen private fact"
+            )
+        }.isFailure)
+        assertEquals(expectedOriginalEvents, worlds.getEvents(world.worldId))
+
+        val proposal = campaigns.proposeJournalEntryForWorldReview(
+            first.campaignId, privateEntry.journalEntryId,
+            "Reviewed setting fact",
+            "This deliberate, player-approved fact can be considered for World Canon."
+        )
+        assertEquals(world.worldId, proposal.worldId)
+        assertEquals("DRAFT", proposal.status)
+        assertEquals("campaign-a-chat", proposal.sourceChatId)
+        assertEquals("Reviewed setting fact", proposal.title)
+        assertTrue(proposal.facts.contains("deliberate, player-approved"))
+        assertFalse(proposal.facts.contains("confidential speculation"))
+        assertEquals("DRAFT", worlds.getEvents(world.worldId)
+            .single { it.eventId == proposal.eventId }.status)
+        assertEquals("ACCEPTED", worlds.getEvents(world.worldId)
+            .single { it.eventId == baseline.eventId }.status)
+        assertEquals(listOf(baseline.eventId), worlds.getEvents(world.worldId)
+            .filter { it.status == "ACCEPTED" }.map { it.eventId })
+        assertTrue(campaigns.journal(second.campaignId).isEmpty())
+        assertEquals(privateEntry.body,
+            campaigns.journal(first.campaignId).single().body)
+        assertNotNull(db.chatDao().getChatById("campaign-a-chat"))
+        assertTrue(db.messageDao().getMessagesForChatOnce("campaign-a-chat").isEmpty())
+
+        // The existing explicit World acceptance action is still mandatory.
+        worlds.acceptEvent(world.worldId, proposal.eventId)
+        assertEquals("ACCEPTED", worlds.getEvents(world.worldId)
+            .single { it.eventId == proposal.eventId }.status)
+        assertEquals(privateEntry.body,
+            campaigns.journal(first.campaignId).single().body)
+    }
+
+    @Test fun privateCheckpointsCannotBePromotedWithoutAuthoredJournalReview() = runBlocking {
+        val world = worlds.createWorld("No implicit checkpoint sharing")
+        val campaign = campaigns.createCampaign(world.worldId, "One story")
+        db.chatDao().insertChat(ChatEntity(
+            chatId = "checkpoint-promotion", displayName = "Chapter", chatType = ChatType.SOLO
+        ))
+        val chapter = campaigns.addChapter(campaign.campaignId, "checkpoint-promotion", "Chapter")
+        val checkpoint = campaigns.saveCheckpoint(campaign.campaignId,
+            chapter.chapterId, "An old bookmark", "Do not share automatically.")
+        assertTrue(runCatching {
+            campaigns.proposeJournalEntryForWorldReview(
+                campaign.campaignId, checkpoint.journalEntryId,
+                checkpoint.title, checkpoint.body
+            )
+        }.isFailure)
+        assertTrue(worlds.getEvents(world.worldId).isEmpty())
+        assertEquals("CHECKPOINT", campaigns.journal(campaign.campaignId).single().entryType)
+    }
+
     @Test fun invalidCrossCampaignEditsDoNotMutateOtherCampaignOrChapter() = runBlocking {
         val world = worlds.createWorld("Two timelines")
         val first = campaigns.createCampaign(world.worldId, "Timeline A")
