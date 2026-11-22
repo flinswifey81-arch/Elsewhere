@@ -8,6 +8,7 @@ import androidx.room.Update
 import com.example.data.model.CampaignChapterEntity
 import com.example.data.model.CampaignEntity
 import com.example.data.model.CampaignJournalEntryEntity
+import com.example.data.model.CampaignContinuityItemEntity
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -89,6 +90,33 @@ interface CampaignDao {
 
     @Query("DELETE FROM campaign_journal_entries WHERE journalEntryId = :entryId")
     suspend fun deleteJournalEntry(entryId: String): Int
+
+    @Query("SELECT * FROM campaign_continuity_items WHERE campaignId = :campaignId ORDER BY createdAt, itemId")
+    fun observeContinuityItems(campaignId: String): Flow<List<CampaignContinuityItemEntity>>
+
+    @Query("SELECT * FROM campaign_continuity_items WHERE campaignId = :campaignId ORDER BY createdAt, itemId")
+    suspend fun continuityItems(campaignId: String): List<CampaignContinuityItemEntity>
+
+    @Query("SELECT * FROM campaign_continuity_items ORDER BY campaignId, createdAt, itemId")
+    suspend fun getAllContinuityItems(): List<CampaignContinuityItemEntity>
+
+    @Query("SELECT * FROM campaign_continuity_items WHERE itemId = :itemId LIMIT 1")
+    suspend fun getContinuityItem(itemId: String): CampaignContinuityItemEntity?
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertContinuityItem(item: CampaignContinuityItemEntity)
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertContinuityItems(items: List<CampaignContinuityItemEntity>)
+
+    @Update
+    suspend fun updateContinuityItem(item: CampaignContinuityItemEntity): Int
+
+    @Query("DELETE FROM campaign_continuity_items WHERE itemId = :itemId")
+    suspend fun deleteContinuityItem(itemId: String): Int
+
+    @Query("DELETE FROM campaign_continuity_items")
+    suspend fun clearContinuityItems()
 
     @Query("DELETE FROM campaign_journal_entries")
     suspend fun clearJournalEntries()
