@@ -93,7 +93,9 @@ data class BackupPayload(
     // v23: source-linked private checkpoints and Campaign Journal entries.
     val campaignJournalEntries: List<CampaignJournalEntryEntity> = emptyList(),
     // v24: optional private arcs, promises, threads and relationship progress.
-    val campaignContinuityItems: List<CampaignContinuityItemEntity> = emptyList()
+    val campaignContinuityItems: List<CampaignContinuityItemEntity> = emptyList(),
+    // v25: explicit, source-linked Campaign memory approvals.
+    val campaignMemoryShares: List<CampaignMemoryShareEntity> = emptyList()
 )
 
 data class BackupPreview(
@@ -115,7 +117,8 @@ data class BackupPreview(
     val scenarios: Int = 0,
     val campaigns: Int = 0,
     val campaignJournalEntries: Int = 0,
-    val campaignContinuityItems: Int = 0
+    val campaignContinuityItems: Int = 0,
+    val campaignMemoryShares: Int = 0
 )
 
 data class BackupInspection(
