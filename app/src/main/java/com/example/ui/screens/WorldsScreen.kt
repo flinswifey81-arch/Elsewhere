@@ -27,6 +27,7 @@ import com.example.data.model.WorldEntity
 import com.example.data.model.CampaignEntity
 import com.example.data.model.CampaignChapterEntity
 import com.example.data.model.CampaignJournalEntryEntity
+import com.example.data.model.CampaignContinuityItemEntity
 import com.example.data.model.ChatEntity
 import com.example.domain.repository.CampaignRepository
 import com.example.domain.repository.WorldRepository
@@ -96,6 +97,20 @@ fun WorldsScreen(
     var worldDraftJournalTarget by remember { mutableStateOf<CampaignJournalEntryEntity?>(null) }
     var worldDraftReviewedTitle by remember { mutableStateOf("") }
     var worldDraftReviewedFacts by remember { mutableStateOf("") }
+    var continuityItems by remember { mutableStateOf<List<CampaignContinuityItemEntity>>(emptyList()) }
+    var continuityDialogOpen by remember { mutableStateOf(false) }
+    var continuityEditTarget by remember { mutableStateOf<CampaignContinuityItemEntity?>(null) }
+    var continuityDraftType by remember { mutableStateOf("THREAD") }
+    var continuityDraftTitle by remember { mutableStateOf("") }
+    var continuityDraftDetails by remember { mutableStateOf("") }
+    var continuityDraftResolution by remember { mutableStateOf("") }
+    var continuityDraftComplete by remember { mutableStateOf(false) }
+    var continuityDraftOpenChapter by remember { mutableStateOf<String?>(null) }
+    var continuityDraftCloseChapter by remember { mutableStateOf<String?>(null) }
+    var continuityTypePickerOpen by remember { mutableStateOf(false) }
+    var continuityOpenChapterPickerOpen by remember { mutableStateOf(false) }
+    var continuityCloseChapterPickerOpen by remember { mutableStateOf(false) }
+    var deleteContinuityTarget by remember { mutableStateOf<CampaignContinuityItemEntity?>(null) }
 
     val context = LocalContext.current
     var showImportJson by remember { mutableStateOf(false) }
@@ -159,6 +174,7 @@ fun WorldsScreen(
             chapters = emptyList()
             journalEntries = emptyList()
             checkpointStatuses = emptyMap()
+            continuityItems = emptyList()
             availableChats = emptyList()
         } else {
             try {
@@ -172,6 +188,9 @@ fun WorldsScreen(
                     campaigns.any { it.campaignId == chosen }
                 }
                 journalEntries = activeCampaign?.let { campaignRepository?.journal(it) }.orEmpty()
+                continuityItems = activeCampaign?.let {
+                    campaignRepository?.continuityItems(it)
+                }.orEmpty()
                 checkpointStatuses = journalEntries
                     .filter { it.entryType == "CHECKPOINT" }
                     .associate { entry ->
