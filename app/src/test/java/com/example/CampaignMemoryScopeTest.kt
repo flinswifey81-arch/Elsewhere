@@ -165,6 +165,42 @@ class CampaignMemoryScopeTest {
         assertNotNull(db.chatDao().getChatById("a-early"))
     }
 
+    @Test fun campaignMemoriesShareExistingPromptBudgetWithChatLocalMemories() = runBlocking {
+        val earlier = memories.saveManual("a-early", "The silver compass belongs to Mara.")
+        campaigns.shareStoryMemoryWithCampaign(campaignA, "a-early", earlier.memoryId)
+        val local = memories.saveManual("a-later", "The silver compass is still mysterious.")
+        val short = memories.retrieveForGeneration(
+            "a-later", StoryActorRef(StoryActorKind.NARRATOR, "narrator:a-later"),
+            sceneText = "silver compass", maxMemories = 1, maxSelectedTextCharacters = 50
+        )
+        assertEquals(1, short.selected.size)
+        assertTrue(short.selected.single().content.length <= 50)
+        val both = memories.retrieveForGeneration(
+            "a-later", StoryActorRef(StoryActorKind.NARRATOR, "narrator:a-later"),
+            sceneText = "silver compass", maxMemories = 8, maxSelectedTextCharacters = 200
+        )
+        assertEquals(setOf(earlier.memoryId, local.memoryId),
+            both.selected.map { it.memoryId }.toSet())
+    }
+
+    @Test fun hiddenOrUnreviewedSourceMemoryCannotBeSharedOrRecalled() = runBlocking {
+        val note = memories.saveManual("a-early", "The silver compass is lost.")
+        memories.update("a-early", note.memoryId, hidden = true)
+        assertTrue(runCatching {
+            campaigns.shareStoryMemoryWithCampaign(campaignA, "a-early", note.memoryId)
+        }.isFailure)
+        memories.update("a-early", note.memoryId, hidden = false)
+        campaigns.shareStoryMemoryWithCampaign(campaignA, "a-early", note.memoryId)
+        assertEquals(1, read("a-later").selected.size)
+        memories.update("a-early", note.memoryId, hidden = true)
+        assertTrue(read("a-later").selected.isEmpty())
+        memories.update("a-early", note.memoryId, hidden = false)
+        assertEquals(1, read("a-later").selected.size)
+        memories.delete("a-early", note.memoryId)
+        assertTrue(db.campaignDao().getAllMemoryShares().isEmpty())
+        assertTrue(read("a-later").selected.isEmpty())
+    }
+
     @Test fun WackAlsoBlocksFreshShareOfUnrestoredOldSourceMemory() = runBlocking {
         val note = memories.saveManual("a-early", "The silver compass is missing.")
         db.chatDao().setContextResetBoundary("a-early", 18L, 18L)
