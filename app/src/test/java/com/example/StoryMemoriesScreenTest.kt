@@ -65,7 +65,13 @@ class StoryMemoriesScreenTest {
         composeRule.waitUntil(10_000) {
             runBlocking { database.storyMemoryDao().forChat("ui-story").size == 1 }
         }
-        composeRule.onNodeWithText("The fictional silver compass belongs to Mara.").assertExists()
+        // The editor and the newly saved memory can both contain the same
+        // sentence while Compose is finishing the save animation. Finding
+        // two instances is valid; verify the persisted row separately.
+        assertTrue(
+            composeRule.onAllNodesWithText("The fictional silver compass belongs to Mara.")
+                .fetchSemanticsNodes().isNotEmpty()
+        )
         // Waiting for the Room value alone does not guarantee that the
         // previous UI action has cleared its temporary working state.
         composeRule.waitUntil(10_000) {
