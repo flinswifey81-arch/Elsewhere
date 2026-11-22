@@ -26,6 +26,7 @@ import com.example.data.model.WorldContinuityEventEntity
 import com.example.data.model.WorldEntity
 import com.example.data.model.CampaignEntity
 import com.example.data.model.CampaignChapterEntity
+import com.example.data.model.CampaignJournalEntryEntity
 import com.example.data.model.ChatEntity
 import com.example.domain.repository.CampaignRepository
 import com.example.domain.repository.WorldRepository
@@ -83,6 +84,15 @@ fun WorldsScreen(
     var chapterEditTitle by remember { mutableStateOf("") }
     var chapterEditRecap by remember { mutableStateOf("") }
     var chapterEditComplete by remember { mutableStateOf(false) }
+    var journalEntries by remember { mutableStateOf<List<CampaignJournalEntryEntity>>(emptyList()) }
+    var checkpointStatuses by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+    var journalDialogOpen by remember { mutableStateOf(false) }
+    var journalDraftType by remember { mutableStateOf("JOURNAL") }
+    var journalDraftChapterId by remember { mutableStateOf<String?>(null) }
+    var journalEditTarget by remember { mutableStateOf<CampaignJournalEntryEntity?>(null) }
+    var journalDraftTitle by remember { mutableStateOf("") }
+    var journalDraftBody by remember { mutableStateOf("") }
+    var deleteJournalTarget by remember { mutableStateOf<CampaignJournalEntryEntity?>(null) }
 
     val context = LocalContext.current
     var showImportJson by remember { mutableStateOf(false) }
@@ -144,6 +154,8 @@ fun WorldsScreen(
             events = emptyList()
             campaigns = emptyList()
             chapters = emptyList()
+            journalEntries = emptyList()
+            checkpointStatuses = emptyMap()
             availableChats = emptyList()
         } else {
             try {
@@ -153,6 +165,19 @@ fun WorldsScreen(
                 chapters = chosenCampaignId?.takeIf { chosen ->
                     campaigns.any { it.campaignId == chosen }
                 }?.let { campaignRepository?.chapters(it) }.orEmpty()
+                val activeCampaign = chosenCampaignId?.takeIf { chosen ->
+                    campaigns.any { it.campaignId == chosen }
+                }
+                journalEntries = activeCampaign?.let { campaignRepository?.journal(it) }.orEmpty()
+                checkpointStatuses = journalEntries
+                    .filter { it.entryType == "CHECKPOINT" }
+                    .associate { entry ->
+                        entry.journalEntryId to runCatching {
+                            requireNotNull(campaignRepository)
+                                .checkpointStatus(entry.campaignId, entry.journalEntryId)
+                                .name.replace('_', ' ')
+                        }.getOrDefault("CHECKPOINT UNAVAILABLE")
+                    }
                 availableChats = chatRepository?.getAllChats()?.first().orEmpty()
             } catch (failure: Exception) {
                 error = failure.message ?: "Unable to load World details."
@@ -289,6 +314,103 @@ fun WorldsScreen(
                 }, modifier = Modifier.testTag("save_campaign_recap")) { Text("Save") }
             },
             dismissButton = { TextButton(onClick = { editingChapter = null }) { Text("Cancel") } }
+        )
+    }
+
+    if (journalDialogOpen && chosenCampaign != null && campaignRepository != null) AlertDialog(
+        onDismissRequest = { if (!busy) journalDialogOpen = false },
+        title = {
+            Text(
+                when {
+                    journalEditTarget != null -> "Edit Campaign entry"
+                    journalDraftType == "CHECKPOINT" -> "Save chapter checkpoint"
+                    else -> "New Campaign Journal entry"
+                }
+            )
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    if (journalDraftType == "CHECKPOINT") {
+                        "A checkpoint bookmarks the latest selected story turn. It does not rewind or overwrite chat history. Changed variants and Wack boundaries remain respected."
+                    } else {
+                        "This note stays private to this Campaign and is not automatically added to World Canon or model context."
+                    },
+                    style = MaterialTheme.typography.bodySmall
+                )
+                OutlinedTextField(
+                    value = journalDraftTitle,
+                    onValueChange = { journalDraftTitle = it.take(200) },
+                    label = { Text("Title") },
+                    modifier = Modifier.testTag("campaign_journal_title")
+                )
+                OutlinedTextField(
+                    value = journalDraftBody,
+                    onValueChange = { journalDraftBody = it.take(12_000) },
+                    label = { Text(if (journalDraftType == "CHECKPOINT") "Checkpoint notes" else "Journal entry") },
+                    minLines = 3,
+                    maxLines = 8,
+                    modifier = Modifier.testTag("campaign_journal_body")
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = !busy && journalDraftTitle.isNotBlank(),
+                modifier = Modifier.testTag("save_campaign_journal_entry"),
+                onClick = {
+                    submit {
+                        val target = journalEditTarget
+                        if (target != null) {
+                            campaignRepository.updateJournalEntry(
+                                chosenCampaign.campaignId, target.journalEntryId,
+                                journalDraftTitle, journalDraftBody
+                            )
+                        } else if (journalDraftType == "CHECKPOINT") {
+                            campaignRepository.saveCheckpoint(
+                                chosenCampaign.campaignId,
+                                requireNotNull(journalDraftChapterId),
+                                journalDraftTitle, journalDraftBody
+                            )
+                        } else {
+                            campaignRepository.addJournalNote(
+                                chosenCampaign.campaignId, journalDraftTitle,
+                                journalDraftBody, journalDraftChapterId
+                            )
+                        }
+                        journalDialogOpen = false
+                        journalEditTarget = null
+                    }
+                }
+            ) { Text("Save") }
+        },
+        dismissButton = {
+            TextButton(onClick = { journalDialogOpen = false; journalEditTarget = null }) {
+                Text("Cancel")
+            }
+        }
+    )
+
+    deleteJournalTarget?.let { target ->
+        if (campaignRepository != null) AlertDialog(
+            onDismissRequest = { if (!busy) deleteJournalTarget = null },
+            title = { Text("Delete journal entry?") },
+            text = {
+                Text("Only this Campaign entry is deleted. The underlying chat, selected variants and Story Memories remain unchanged.")
+            },
+            confirmButton = {
+                TextButton(enabled = !busy, onClick = {
+                    submit {
+                        campaignRepository.deleteJournalEntry(
+                            target.campaignId, target.journalEntryId
+                        )
+                        deleteJournalTarget = null
+                    }
+                }) { Text("Delete entry") }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleteJournalTarget = null }) { Text("Cancel") }
+            }
         )
     }
 
@@ -587,6 +709,71 @@ fun WorldsScreen(
                                                     chapterEditRecap = chapter.recap
                                                     chapterEditComplete = chapter.state == "COMPLETE"
                                                 }) { Text("Edit recap") }
+                                                TextButton(
+                                                    modifier = Modifier.testTag("checkpoint_chapter_" + chapter.chapterId),
+                                                    onClick = {
+                                                        journalEditTarget = null
+                                                        journalDraftType = "CHECKPOINT"
+                                                        journalDraftChapterId = chapter.chapterId
+                                                        journalDraftTitle = "Chapter " + chapter.ordinal + " checkpoint"
+                                                        journalDraftBody = ""
+                                                        journalDialogOpen = true
+                                                    }
+                                                ) { Text("Save checkpoint") }
+                                            }
+                                        }
+                                    }
+                                    HorizontalDivider()
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text("Campaign Journal (" + journalEntries.size + ")",
+                                            style = MaterialTheme.typography.titleSmall,
+                                            modifier = Modifier.weight(1f))
+                                        TextButton(
+                                            modifier = Modifier.testTag("add_campaign_journal"),
+                                            onClick = {
+                                                journalEditTarget = null
+                                                journalDraftType = "JOURNAL"
+                                                journalDraftChapterId = null
+                                                journalDraftTitle = ""
+                                                journalDraftBody = ""
+                                                journalDialogOpen = true
+                                            }
+                                        ) { Text("New entry") }
+                                    }
+                                    Text("Timeline is chronological, with source-linked checkpoints. Notes never become shared World Canon automatically.",
+                                        style = MaterialTheme.typography.bodySmall)
+                                    journalEntries.forEach { entry ->
+                                        Column(
+                                            modifier = Modifier.fillMaxWidth()
+                                                .testTag("campaign_journal_" + entry.journalEntryId),
+                                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                                        ) {
+                                            Text(
+                                                (if (entry.entryType == "CHECKPOINT") "Checkpoint: " else "Journal: ") + entry.title,
+                                                style = MaterialTheme.typography.titleSmall
+                                            )
+                                            if (entry.body.isNotBlank()) {
+                                                Text(entry.body, style = MaterialTheme.typography.bodySmall, maxLines = 4)
+                                            }
+                                            if (entry.entryType == "CHECKPOINT") {
+                                                Text(
+                                                    "Turn " + (entry.sourceOrderIndex?.toString() ?: "not started") +
+                                                        " • " + checkpointStatuses[entry.journalEntryId].orEmpty(),
+                                                    style = MaterialTheme.typography.labelSmall
+                                                )
+                                            }
+                                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                                TextButton(onClick = {
+                                                    journalEditTarget = entry
+                                                    journalDraftType = entry.entryType
+                                                    journalDraftChapterId = entry.chapterId
+                                                    journalDraftTitle = entry.title
+                                                    journalDraftBody = entry.body
+                                                    journalDialogOpen = true
+                                                }) { Text("Edit") }
+                                                TextButton(onClick = { deleteJournalTarget = entry }) {
+                                                    Text("Delete")
+                                                }
                                             }
                                         }
                                     }
