@@ -73,7 +73,9 @@ fun WorldsScreen(
     var chapters by remember { mutableStateOf<List<CampaignChapterEntity>>(emptyList()) }
     var availableChats by remember { mutableStateOf<List<ChatEntity>>(emptyList()) }
     var chosenCampaignId by remember { mutableStateOf<String?>(null) }
-    val chosenCampaign = campaigns.firstOrNull { it.campaignId == chosenCampaignId }
+    val chosenCampaign = campaigns.firstOrNull {
+        it.campaignId == chosenCampaignId && it.worldId == selectedId
+    }
     var newCampaignOpen by remember { mutableStateOf(false) }
     var newCampaignTitle by remember { mutableStateOf("") }
     var deletingCampaign by remember { mutableStateOf<CampaignEntity?>(null) }
@@ -165,6 +167,18 @@ fun WorldsScreen(
         }
     }
 
+    // Switching Worlds must never leave dialogs/actions pointing to a
+    // previously opened Campaign, even for one async Room refresh frame.
+    LaunchedEffect(selectedId) {
+        chosenCampaignId = null
+        journalDialogOpen = false
+        journalEditTarget = null
+        worldDraftJournalTarget = null
+        continuityDialogOpen = false
+        continuityEditTarget = null
+        deleteContinuityTarget = null
+    }
+
     LaunchedEffect(selectedId, chosenCampaignId, refreshVersion) {
         val id = selectedId
         if (id == null) {
@@ -253,7 +267,12 @@ fun WorldsScreen(
         if (campaignRepository != null) AlertDialog(
             onDismissRequest = { if (!busy) deletingCampaign = null },
             title = { Text("Delete Campaign organization?") },
-            text = { Text("This removes Campaign and chapter links and their local recaps. It does NOT delete any chat, message, variant, or chat memory. This cannot be undone.") },
+            text = {
+                Text("This permanently deletes this Campaign's organization, chapter recaps, " +
+                    "Journal entries, checkpoints, arc summaries, promises and other tracked " +
+                    "threads. It does NOT delete any underlying chat, message, variant or " +
+                    "chat-local Story Memory. This cannot be undone.")
+            },
             confirmButton = {
                 TextButton(enabled = !busy, onClick = {
                     submit {
