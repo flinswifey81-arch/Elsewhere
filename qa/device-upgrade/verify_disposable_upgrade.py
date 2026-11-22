@@ -128,7 +128,23 @@ def require_rooted_disposable_emulator(serial: str) -> None:
     build_type = adb(serial, "shell", "getprop", "ro.build.type").strip()
     if build_type not in (b"userdebug", b"eng"):
         raise RuntimeError("Refusing root: AOSP userdebug/eng emulator required")
-    adb(serial, "root")
+    # CI images can report sys.boot_completed before adbd is ready to
+    # restart as root. Retry ONLY after the strict disposable-emulator and
+    # userdebug/eng checks; never relax those checks or accept a real device.
+    root_ready = False
+    for attempt in range(4):
+        command = subprocess.run(
+            ["adb", "-s", serial, "root"], capture_output=True, check=False
+        )
+        if command.returncode == 0:
+            root_ready = True
+            break
+        if attempt < 3:
+            time.sleep(2)
+            if only_emulator() != serial:
+                raise RuntimeError("ADB target changed during emulator-only root setup")
+    if not root_ready:
+        raise RuntimeError("Disposable emulator adbd could not restart as root")
     adb(serial, "wait-for-device")
     if only_emulator() != serial:
         raise RuntimeError("ADB target changed during emulator-only root setup")
