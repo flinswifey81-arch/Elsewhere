@@ -64,8 +64,13 @@ class CampaignRepository(
             }
             validateJournalText(title, body)
             val selected = if (type == "CHECKPOINT") {
-                database.messageDao().getLatestPrimaryWindow(
-                    requireNotNull(chapter).chatId, 1
+                val chatId = requireNotNull(chapter).chatId
+                val resetBoundary = database.chatDao()
+                    .getChatById(chatId)?.contextResetOrderIndex
+                // A checkpoint created AFTER Wack may never anchor to an older
+                // pre-Wack turn, even when it is the last visible message.
+                database.messageDao().getSelectedHistoryReversePage(
+                    chatId, resetBoundary, 1, 0
                 ).firstOrNull()
             } else null
             CampaignJournalEntryEntity(
