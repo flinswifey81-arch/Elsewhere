@@ -7,7 +7,7 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.example.data.model.*
 
-const val APP_DATABASE_VERSION = 23
+const val APP_DATABASE_VERSION = 24
 
 @Database(
     entities = [
@@ -51,7 +51,8 @@ const val APP_DATABASE_VERSION = 23
         WorldContinuityEventEntity::class,
         CampaignEntity::class,
         CampaignChapterEntity::class,
-        CampaignJournalEntryEntity::class
+        CampaignJournalEntryEntity::class,
+        CampaignContinuityItemEntity::class
     ],
     version = APP_DATABASE_VERSION,
     exportSchema = false
@@ -74,6 +75,40 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun campaignDao(): CampaignDao
 
     companion object {
+        /** Stage 5: additive arcs / promises / threads; no chat mutation. */
+        val MIGRATION_23_24 = object : Migration(23, 24) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS campaign_continuity_items (
+                        itemId TEXT NOT NULL PRIMARY KEY,
+                        campaignId TEXT NOT NULL,
+                        itemType TEXT NOT NULL,
+                        title TEXT NOT NULL,
+                        details TEXT NOT NULL,
+                        status TEXT NOT NULL,
+                        resolution TEXT NOT NULL,
+                        openedChapterId TEXT,
+                        closedChapterId TEXT,
+                        sourceJournalEntryId TEXT,
+                        createdAt INTEGER NOT NULL,
+                        updatedAt INTEGER NOT NULL,
+                        FOREIGN KEY(campaignId) REFERENCES campaigns(campaignId)
+                            ON UPDATE NO ACTION ON DELETE CASCADE,
+                        FOREIGN KEY(openedChapterId) REFERENCES campaign_chapters(chapterId)
+                            ON UPDATE NO ACTION ON DELETE SET NULL,
+                        FOREIGN KEY(closedChapterId) REFERENCES campaign_chapters(chapterId)
+                            ON UPDATE NO ACTION ON DELETE SET NULL,
+                        FOREIGN KEY(sourceJournalEntryId) REFERENCES campaign_journal_entries(journalEntryId)
+                            ON UPDATE NO ACTION ON DELETE SET NULL
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_campaign_continuity_items_campaignId ON campaign_continuity_items(campaignId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_campaign_continuity_items_openedChapterId ON campaign_continuity_items(openedChapterId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_campaign_continuity_items_closedChapterId ON campaign_continuity_items(closedChapterId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_campaign_continuity_items_sourceJournalEntryId ON campaign_continuity_items(sourceJournalEntryId)")
+            }
+        }
+
         /** Additive private journal/checkpoint storage. No existing story rows are rewritten. */
         val MIGRATION_22_23 = object : Migration(22, 23) {
             override fun migrate(db: SupportSQLiteDatabase) {
