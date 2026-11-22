@@ -89,10 +89,9 @@ class CampaignRepository(
                     message.speakerType.name == source.sourceSpeakerType &&
                     message.speakerId == source.sourceSpeakerId &&
                     message.createdAt == source.sourceCreatedAtEpochMillis &&
-                    message.editedAt == null && (
-                        source.sourceSha256 == null ||
+                    (if (source.sourceSha256 != null)
                         StoryMemoryEligibilityPolicy.sha256(message.content) == source.sourceSha256
-                    )
+                    else message.editedAt == null)
                 ) { "The source message changed or its variant is no longer selected." }
             } else {
                 require(source.originKind == "MANUAL") {
