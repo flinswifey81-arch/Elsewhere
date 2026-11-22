@@ -5,6 +5,7 @@ import com.example.data.AppDatabase
 import com.example.data.model.CampaignChapterEntity
 import com.example.data.model.CampaignEntity
 import com.example.data.model.CampaignJournalEntryEntity
+import com.example.data.model.CampaignContinuityItemEntity
 import com.example.data.model.WorldContinuityEventEntity
 import java.security.MessageDigest
 import com.example.data.model.WorldMembershipEntity
@@ -24,6 +25,137 @@ class CampaignRepository(
     suspend fun forWorld(worldId: String) = dao.forWorld(worldId)
     suspend fun chapters(campaignId: String) = dao.chapters(campaignId)
     suspend fun getCampaign(campaignId: String) = dao.getCampaign(campaignId)
+
+    // Each Campaign's arcs/threads are local notes, never implicit prompt input.
+    fun observeContinuityItems(campaignId: String) = dao.observeContinuityItems(campaignId)
+    suspend fun continuityItems(campaignId: String) = dao.continuityItems(campaignId)
+
+    private val continuityTypes = setOf(
+        "ARC", "THREAD", "PROMISE", "QUEST", "DISCOVERY", "RELATIONSHIP"
+    )
+
+    /**
+     * A Campaign arc summary or ongoing thread, always authored explicitly.
+     * Optional original chapter or journal provenance must belong to the SAME
+     * Campaign. The record neither duplicates messages nor updates World Canon.
+     */
+    suspend fun addContinuityItem(
+        campaignId: String, type: String, title: String, details: String,
+        openedChapterId: String? = null, sourceJournalEntryId: String? = null
+    ): CampaignContinuityItemEntity = coordinator.withMutation {
+        database.withTransaction {
+            requireNotNull(dao.getCampaign(campaignId)) { "Campaign not found." }
+            require(type in continuityTypes) { "Unsupported Campaign continuity type." }
+            validateContinuityText(title, details)
+            if (type == "ARC") {
+                require(details.trim().isNotBlank()) {
+                    "An arc summary must describe what happened."
+                }
+            }
+            requireContinuitySources(campaignId, openedChapterId, sourceJournalEntryId)
+            CampaignContinuityItemEntity(
+                campaignId = campaignId, itemType = type,
+                title = title.trim(), details = details.trim(),
+                status = if (type == "ARC") "ACTIVE" else "OPEN",
+                openedChapterId = openedChapterId,
+                sourceJournalEntryId = sourceJournalEntryId
+            ).also { dao.insertContinuityItem(it) }
+        }
+    }
+
+    /** Closing an arc or thread updates only the specific Campaign's record.
+     * A user can reopen it later; its previous details and source survive.
+     */
+    suspend fun updateContinuityItem(
+        campaignId: String, itemId: String, title: String, details: String,
+        status: String, resolution: String = "", closedChapterId: String? = null
+    ): CampaignContinuityItemEntity = coordinator.withMutation {
+        database.withTransaction {
+            val existing = requireNotNull(dao.getContinuityItem(itemId)) {
+                "Campaign continuity item not found."
+            }
+            require(existing.campaignId == campaignId) {
+                "Cannot edit another Campaign's continuity."
+            }
+            validateContinuityText(title, details)
+            require(resolution.length <= 12_000) {
+                "Resolution exceeds 12,000 characters."
+            }
+            require(existing.itemType != "ARC" || details.trim().isNotBlank()) {
+                "An arc summary cannot be empty."
+            }
+            val active = if (existing.itemType == "ARC") "ACTIVE" else "OPEN"
+            val complete = if (existing.itemType == "ARC") "COMPLETE" else "RESOLVED"
+            require(status == active || status == complete) {
+                "Invalid state for this Campaign continuity type."
+            }
+            val endChapter = if (status == complete) closedChapterId else null
+            if (endChapter != null) {
+                val end = requireNotNull(dao.getChapter(endChapter)) {
+                    "Closing chapter not found."
+                }
+                require(end.campaignId == campaignId) {
+                    "A Campaign cannot close its arc or thread in another story."
+                }
+                val startOrdinal = existing.openedChapterId
+                    ?.let { dao.getChapter(it)?.ordinal }
+                require(startOrdinal == null || end.ordinal >= startOrdinal) {
+                    "Closing chapter cannot precede the opening chapter."
+                }
+            }
+            existing.copy(
+                title = title.trim(), details = details.trim(),
+                status = status,
+                resolution = if (status == complete) resolution.trim() else "",
+                closedChapterId = endChapter,
+                updatedAt = System.currentTimeMillis()
+            ).also { updated ->
+                require(dao.updateContinuityItem(updated) == 1)
+            }
+        }
+    }
+
+    suspend fun deleteContinuityItem(campaignId: String, itemId: String) =
+        coordinator.withMutation {
+            database.withTransaction {
+                require(dao.getContinuityItem(itemId)?.campaignId == campaignId) {
+                    "Cannot delete another Campaign's continuity."
+                }
+                require(dao.deleteContinuityItem(itemId) == 1)
+            }
+        }
+
+    private suspend fun requireContinuitySources(
+        campaignId: String, chapterId: String?, journalEntryId: String?
+    ) {
+        if (chapterId != null) {
+            require(dao.getChapter(chapterId)?.campaignId == campaignId) {
+                "Opening chapter belongs to another Campaign."
+            }
+        }
+        if (journalEntryId != null) {
+            val journal = requireNotNull(dao.getJournalEntry(journalEntryId)) {
+                "Source Journal entry not found."
+            }
+            require(journal.campaignId == campaignId) {
+                "Source Journal entry belongs to another Campaign."
+            }
+            if (chapterId != null && journal.chapterId != null) {
+                require(journal.chapterId == chapterId) {
+                    "Source Journal and opening chapter do not match."
+                }
+            }
+        }
+    }
+
+    private fun validateContinuityText(title: String, details: String) {
+        require(title.trim().isNotBlank() && title.length <= 200) {
+            "Continuity item title must contain 1–200 characters."
+        }
+        require(details.length <= 12_000) {
+            "Continuity item details exceed 12,000 characters."
+        }
+    }
 
     // Journal and checkpoint records never enter a model prompt implicitly.
     fun observeJournal(campaignId: String) = dao.observeJournal(campaignId)
