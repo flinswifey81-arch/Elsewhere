@@ -571,6 +571,7 @@ fun ElsewhereApp(
                         chatId = chatId,
                         repository = repository,
                         chatRepository = container.chatRepository,
+                        campaignRepository = container.campaignRepository,
                         onNavigateBack = { navController.popBackStack() }
                     )
                 }
