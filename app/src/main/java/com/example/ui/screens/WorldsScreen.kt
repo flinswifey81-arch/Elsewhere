@@ -520,7 +520,8 @@ fun WorldsScreen(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Checkbox(
                             checked = continuityDraftComplete,
-                            onCheckedChange = { continuityDraftComplete = it }
+                            onCheckedChange = { continuityDraftComplete = it },
+                            modifier = Modifier.testTag("campaign_continuity_complete")
                         )
                         Text(if (continuityDraftType == "ARC") "Arc complete" else "Resolved")
                     }
