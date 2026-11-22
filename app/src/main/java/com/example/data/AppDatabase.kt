@@ -7,7 +7,7 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.example.data.model.*
 
-const val APP_DATABASE_VERSION = 24
+const val APP_DATABASE_VERSION = 25
 
 @Database(
     entities = [
@@ -52,7 +52,8 @@ const val APP_DATABASE_VERSION = 24
         CampaignEntity::class,
         CampaignChapterEntity::class,
         CampaignJournalEntryEntity::class,
-        CampaignContinuityItemEntity::class
+        CampaignContinuityItemEntity::class,
+        CampaignMemoryShareEntity::class
     ],
     version = APP_DATABASE_VERSION,
     exportSchema = false
@@ -75,6 +76,30 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun campaignDao(): CampaignDao
 
     companion object {
+        /** Explicit Campaign memory pointers; no existing Story Memory is copied or rewritten. */
+        val MIGRATION_24_25 = object : Migration(24, 25) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS campaign_memory_shares (
+                        campaignId TEXT NOT NULL,
+                        sourceMemoryId TEXT NOT NULL,
+                        sourceChapterId TEXT NOT NULL,
+                        sourceContentSha256 TEXT NOT NULL,
+                        approvedAt INTEGER NOT NULL,
+                        PRIMARY KEY(campaignId, sourceMemoryId),
+                        FOREIGN KEY(campaignId) REFERENCES campaigns(campaignId)
+                            ON UPDATE NO ACTION ON DELETE CASCADE,
+                        FOREIGN KEY(sourceMemoryId) REFERENCES story_memories(memoryId)
+                            ON UPDATE NO ACTION ON DELETE CASCADE,
+                        FOREIGN KEY(sourceChapterId) REFERENCES campaign_chapters(chapterId)
+                            ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_campaign_memory_shares_sourceMemoryId ON campaign_memory_shares(sourceMemoryId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_campaign_memory_shares_sourceChapterId ON campaign_memory_shares(sourceChapterId)")
+            }
+        }
+
         /** Stage 5: additive arcs / promises / threads; no chat mutation. */
         val MIGRATION_23_24 = object : Migration(23, 24) {
             override fun migrate(db: SupportSQLiteDatabase) {
