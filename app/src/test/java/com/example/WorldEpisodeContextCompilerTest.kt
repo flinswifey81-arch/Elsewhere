@@ -133,6 +133,36 @@ class WorldEpisodeContextCompilerTest {
     }
 
     @Test
+    fun explicitCampaignRecallIsLabeledAndNotMistakenForSharedWorldCanon() {
+        val campaign = rememberedCompass().copy(
+            scope = StoryMemoryOwnerScope.CAMPAIGN,
+            ownerId = "the-only-campaign",
+            sourceChatId = "earlier-chapter"
+        )
+        val solo = ContextCompilerV1().compileSoloContext(
+            character = character, persona = persona,
+            chatHistory = emptyList(), currentMessage = greeting,
+            responseProfile = ResponseLengthProfile.NORMAL,
+            customMin = null, customTargetMax = null, customHardMax = null,
+            storyMemories = listOf(campaign)
+        ).first().content
+        assertTrue(solo.contains("RELEVANT CHAT & CAMPAIGN STORY MEMORY"))
+        assertTrue(solo.contains("[CAMPAIGN / PROMISE]"))
+        assertTrue(solo.contains("not universal knowledge"))
+        assertFalse(solo.contains("Accepted prior World continuity: Mara promised"))
+
+        val scenario = ScenarioContextCompiler().compile(
+            scenario = ScenarioDefinition(title = "A journey", premise = "Keep going."),
+            persona = persona, settings = ChatSettingsEntity(chatId = "episode"),
+            history = emptyList(), current = greeting,
+            storyMemories = listOf(campaign)
+        ).first().content
+        assertTrue(scenario.contains("APPROVED CHAT/CAMPAIGN STORY MEMORY"))
+        assertTrue(scenario.contains("[CAMPAIGN / PROMISE]"))
+        assertTrue(scenario.contains("NOT UNIVERSAL NPC KNOWLEDGE"))
+    }
+
+    @Test
     fun scenarioStoryMemoryIsLabeledNarratorOnlyAndNeverCreatesNewTurns() {
         val result = ScenarioContextCompiler().compile(
             scenario = ScenarioDefinition(title = "A journey", premise = "Keep going."),
