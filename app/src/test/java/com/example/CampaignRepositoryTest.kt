@@ -108,6 +108,108 @@ class CampaignRepositoryTest {
         assertNotNull(worlds.getWorld(world.worldId))
     }
 
+    @Test fun checkpointTracksSelectedVariantEditsAndHardWackBoundary() = runBlocking {
+        val world = worlds.createWorld("Memory safety")
+        val first = campaigns.createCampaign(world.worldId, "First story")
+        val second = campaigns.createCampaign(world.worldId, "Separate story")
+        db.chatDao().insertChat(ChatEntity(
+            chatId = "checkpoint-chat", displayName = "The chapter", chatType = ChatType.SOLO
+        ))
+        val chapter = campaigns.addChapter(first.campaignId, "checkpoint-chat", "First chapter")
+        val firstTurn = MessageEntity(
+            messageId = "checkpoint-primary", chatId = "checkpoint-chat",
+            speakerType = SpeakerType.PERSONA, speakerId = "player",
+            speakerDisplayNameSnapshot = "Player", content = "A silver key.",
+            orderIndex = 13L, variantGroupId = "key-choice"
+        )
+        db.messageDao().insertMessage(firstTurn)
+        val saved = campaigns.saveCheckpoint(first.campaignId, chapter.chapterId,
+            "After finding the key", "We are standing in the library.")
+        assertEquals("CHECKPOINT", saved.entryType)
+        assertEquals(firstTurn.messageId, saved.sourceMessageId)
+        assertEquals(firstTurn.variantGroupId, saved.sourceVariantGroupId)
+        assertEquals(CampaignRepository.CheckpointSourceStatus.CURRENT,
+            campaigns.checkpointStatus(first.campaignId, saved.journalEntryId))
+        assertTrue(runCatching {
+            campaigns.checkpointStatus(second.campaignId, saved.journalEntryId)
+        }.isFailure)
+        assertTrue(campaigns.journal(second.campaignId).isEmpty())
+        val alternate = firstTurn.copy(
+            messageId = "checkpoint-alternative", content = "A copper key.",
+            isPrimaryVariant = false
+        )
+        db.messageDao().insertVariantAndSelect(alternate)
+        assertEquals(CampaignRepository.CheckpointSourceStatus.OTHER_VARIANT,
+            campaigns.checkpointStatus(first.campaignId, saved.journalEntryId))
+        db.messageDao().clearPrimaryVariants("key-choice")
+        db.messageDao().setPrimaryVariant(firstTurn.messageId)
+        db.messageDao().updateMessage(firstTurn.copy(content = "A changed silver key."))
+        assertEquals(CampaignRepository.CheckpointSourceStatus.MESSAGE_EDITED,
+            campaigns.checkpointStatus(first.campaignId, saved.journalEntryId))
+        db.chatDao().setContextResetBoundary("checkpoint-chat", 14L, 14L)
+        assertEquals(CampaignRepository.CheckpointSourceStatus.BEFORE_WACK,
+            campaigns.checkpointStatus(first.campaignId, saved.journalEntryId))
+        assertEquals("We are standing in the library.",
+            campaigns.journal(first.campaignId).single().body)
+    }
+
+    @Test fun journalRemainsPrivateAndSourceDeletionDoesNotEraseCheckpoint() = runBlocking {
+        val world = worlds.createWorld("Timeline")
+        val first = campaigns.createCampaign(world.worldId, "A")
+        val second = campaigns.createCampaign(world.worldId, "B")
+        db.chatDao().insertChat(ChatEntity(
+            chatId = "journal-chat", displayName = "Episode A", chatType = ChatType.SOLO
+        ))
+        val chapter = campaigns.addChapter(first.campaignId, "journal-chat", "Opening")
+        val source = MessageEntity(
+            messageId = "journal-source", chatId = "journal-chat",
+            speakerType = SpeakerType.CHARACTER, speakerId = "char",
+            speakerDisplayNameSnapshot = "Char", content = "An old discovery.",
+            orderIndex = 1L
+        )
+        db.messageDao().insertMessage(source)
+        val checkpoint = campaigns.saveCheckpoint(first.campaignId,
+            chapter.chapterId, "Checkpoint", "Source notes")
+        val note = campaigns.addJournalNote(first.campaignId, "An open thread",
+            "Find the observatory.", chapter.chapterId)
+        assertEquals(2, campaigns.journal(first.campaignId).size)
+        assertTrue(campaigns.journal(second.campaignId).isEmpty())
+        assertTrue(runCatching {
+            campaigns.updateJournalEntry(second.campaignId, note.journalEntryId, "Stolen", "")
+        }.isFailure)
+        campaigns.updateJournalEntry(first.campaignId, note.journalEntryId,
+            "An open thread", "Find the observatory after dark.")
+        assertEquals("Find the observatory after dark.",
+            campaigns.journal(first.campaignId).single { it.journalEntryId == note.journalEntryId }.body)
+        db.messageDao().deleteMessageById(source.messageId)
+        assertEquals(CampaignRepository.CheckpointSourceStatus.SOURCE_REMOVED,
+            campaigns.checkpointStatus(first.campaignId, checkpoint.journalEntryId))
+        assertNull(campaigns.journal(first.campaignId)
+            .single { it.journalEntryId == checkpoint.journalEntryId }.sourceMessageId)
+        campaigns.removeChapter(first.campaignId, chapter.chapterId)
+        assertEquals(CampaignRepository.CheckpointSourceStatus.CHAPTER_REMOVED,
+            campaigns.checkpointStatus(first.campaignId, checkpoint.journalEntryId))
+        assertEquals(2, campaigns.journal(first.campaignId).size)
+        assertNotNull(db.chatDao().getChatById("journal-chat"))
+        campaigns.deleteCampaign(first.campaignId)
+        assertTrue(db.campaignDao().getAllJournalEntries().isEmpty())
+        assertNotNull(db.chatDao().getChatById("journal-chat"))
+    }
+
+    @Test fun checkpointWithoutAnyMessageIsExplicitStartOfChapter() = runBlocking {
+        val world = worlds.createWorld("Empty story")
+        val campaign = campaigns.createCampaign(world.worldId, "Beginning")
+        db.chatDao().insertChat(ChatEntity(
+            chatId = "new-story", displayName = "Empty chapter", chatType = ChatType.SOLO
+        ))
+        val chapter = campaigns.addChapter(campaign.campaignId, "new-story", "Start")
+        val entry = campaigns.saveCheckpoint(campaign.campaignId, chapter.chapterId,
+            "Before the first scene")
+        assertEquals(CampaignRepository.CheckpointSourceStatus.START_OF_CHAPTER,
+            campaigns.checkpointStatus(campaign.campaignId, entry.journalEntryId))
+        assertNull(entry.sourceMessageId)
+    }
+
     @Test fun invalidCrossCampaignEditsDoNotMutateOtherCampaignOrChapter() = runBlocking {
         val world = worlds.createWorld("Two timelines")
         val first = campaigns.createCampaign(world.worldId, "Timeline A")
