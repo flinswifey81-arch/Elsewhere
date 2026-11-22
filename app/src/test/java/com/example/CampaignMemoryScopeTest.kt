@@ -201,6 +201,39 @@ class CampaignMemoryScopeTest {
         assertTrue(read("a-later").selected.isEmpty())
     }
 
+    @Test fun unapprovedOrRevokedMemoryNeverEntersCampaignRetrieval() = runBlocking {
+        val source = memories.saveManual("a-early", "The silver compass knows the path.")
+        db.storyMemoryDao().update(source.copy(review = "PENDING_REVIEW"))
+        assertTrue(runCatching {
+            campaigns.shareStoryMemoryWithCampaign(campaignA, "a-early", source.memoryId)
+        }.isFailure)
+        db.storyMemoryDao().update(source.copy(review = "APPROVED"))
+        campaigns.shareStoryMemoryWithCampaign(campaignA, "a-early", source.memoryId)
+        assertEquals(1, read("a-later").selected.size)
+        db.storyMemoryDao().update(source.copy(review = "REJECTED"))
+        assertTrue(read("a-later").selected.isEmpty())
+        db.storyMemoryDao().update(source.copy(review = "APPROVED", lifecycle = "SUPERSEDED"))
+        assertTrue(read("a-later").selected.isEmpty())
+    }
+
+    @Test fun deletingOriginalMessageBlocksItsCampaignMemoryWithoutDestroyingTheMemoryRow() = runBlocking {
+        val message = MessageEntity(
+            messageId = "lost-source-message", chatId = "a-early",
+            speakerType = SpeakerType.CHARACTER, speakerId = "speaker",
+            speakerDisplayNameSnapshot = "Speaker",
+            content = "The silver compass is hidden under stone.",
+            orderIndex = 11L, variantGroupId = "lost-source-choice"
+        )
+        db.messageDao().insertMessage(message)
+        val memory = memories.saveFromMessage("a-early", message.messageId)
+        campaigns.shareStoryMemoryWithCampaign(campaignA, "a-early", memory.memoryId)
+        assertEquals(1, read("a-later").selected.size)
+        db.messageDao().deleteMessageById(message.messageId)
+        assertTrue(read("a-later").selected.isEmpty())
+        assertNotNull(db.storyMemoryDao().get(memory.memoryId))
+        assertEquals(1, db.campaignDao().getAllMemoryShares().size)
+    }
+
     @Test fun WackAlsoBlocksFreshShareOfUnrestoredOldSourceMemory() = runBlocking {
         val note = memories.saveManual("a-early", "The silver compass is missing.")
         db.chatDao().setContextResetBoundary("a-early", 18L, 18L)
