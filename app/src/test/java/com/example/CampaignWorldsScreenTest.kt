@@ -74,7 +74,7 @@ class CampaignWorldsScreenTest {
                 .fetchSemanticsNodes().isNotEmpty()
         }
         compose.onNodeWithTag("edit_campaign_continuity_" + arc.itemId).performClick()
-        compose.onNodeWithText("Arc complete").performClick()
+        compose.onNodeWithTag("campaign_continuity_complete").performClick()
         compose.onNodeWithTag("campaign_continuity_resolution")
             .performTextInput("The conclusion was peaceful.")
         compose.onNodeWithTag("save_campaign_continuity").assertIsEnabled().performClick()
