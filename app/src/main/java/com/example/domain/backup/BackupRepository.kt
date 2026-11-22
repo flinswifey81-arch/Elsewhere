@@ -216,6 +216,7 @@ class BackupRepository internal constructor(
                 campaigns = database.campaignDao().getAllCampaigns(),
                 campaignChapters = database.campaignDao().getAllChapters(),
                 campaignJournalEntries = database.campaignDao().getAllJournalEntries(),
+                campaignContinuityItems = database.campaignDao().getAllContinuityItems(),
                 worldMemberships = database.worldDao().getExportableMemberships(),
                 worldCast = database.worldDao().getAllCast(),
                 worldContinuityEvents = database.worldDao().getAllEvents(),
@@ -475,6 +476,7 @@ class BackupRepository internal constructor(
         // Campaigns RESTRICT World deletion so no private playthrough structure
         // is discarded accidentally. Full restore explicitly clears the old
         // Campaign graph first, inside the same rollback-protected transaction.
+        database.campaignDao().clearContinuityItems()
         database.campaignDao().clearJournalEntries()
         database.campaignDao().clearChapters()
         database.campaignDao().clearCampaigns()
@@ -571,6 +573,9 @@ class BackupRepository internal constructor(
         if (payload.campaignJournalEntries.isNotEmpty()) {
             database.campaignDao().insertJournalEntries(payload.campaignJournalEntries)
         }
+        if (payload.campaignContinuityItems.isNotEmpty()) {
+            database.campaignDao().insertContinuityItems(payload.campaignContinuityItems)
+        }
     }
 
     private fun prepareProfileImages(validated: ValidatedBackup, stageRoot: File) {
@@ -652,7 +657,8 @@ class BackupRepository internal constructor(
             payload.worldContinuityEvents.size,
             payload.campaigns.size,
             payload.campaignChapters.size,
-            payload.campaignJournalEntries.size
+            payload.campaignJournalEntries.size,
+            payload.campaignContinuityItems.size
         ).sumOf(Int::toLong)
         if (entityCount > MAX_TOTAL_ENTITY_RECORDS || payload.messages.size > MAX_MESSAGE_RECORDS) {
             throw BackupValidationException("Backup contains too many data records.")
@@ -668,6 +674,7 @@ class BackupRepository internal constructor(
         unique("Campaign chapter", payload.campaignChapters.map { it.chapterId })
         unique("Campaign chapter chat", payload.campaignChapters.map { it.chatId })
         unique("Campaign journal entry", payload.campaignJournalEntries.map { it.journalEntryId })
+        unique("Campaign continuity item", payload.campaignContinuityItems.map { it.itemId })
         uniqueComposite("Campaign chapter position", payload.campaignChapters.map { "${it.campaignId}\\u0000${it.ordinal}" })
         val worldCastIds = unique("World cast member", payload.worldCast.map { it.worldCharacterId })
         unique("World continuity event", payload.worldContinuityEvents.map { it.eventId })
@@ -868,6 +875,36 @@ class BackupRepository internal constructor(
                     (entry.sourceChatId != null &&
                         (chapter == null || chapter.chatId == entry.sourceChatId)))
         }
+        val journalById = payload.campaignJournalEntries.associateBy { it.journalEntryId }
+        val continuityTypes = setOf(
+            "ARC", "THREAD", "PROMISE", "QUEST", "DISCOVERY", "RELATIONSHIP"
+        )
+        requireRefs(payload.campaignContinuityItems, "Campaign continuity item") { item ->
+            val start = item.openedChapterId?.let(chaptersById::get)
+            val end = item.closedChapterId?.let(chaptersById::get)
+            val source = item.sourceJournalEntryId?.let(journalById::get)
+            val openStatus = if (item.itemType == "ARC") "ACTIVE" else "OPEN"
+            val closeStatus = if (item.itemType == "ARC") "COMPLETE" else "RESOLVED"
+            item.campaignId in campaignIds &&
+                item.itemType in continuityTypes &&
+                item.status in setOf(openStatus, closeStatus) &&
+                item.title.isNotBlank() && item.title.length <= 200 &&
+                item.details.length <= 12_000 &&
+                (item.itemType != "ARC" || item.details.isNotBlank()) &&
+                item.resolution.length <= 12_000 &&
+                (item.openedChapterId == null ||
+                    (start != null && start.campaignId == item.campaignId)) &&
+                (item.closedChapterId == null ||
+                    (end != null && end.campaignId == item.campaignId &&
+                        item.status == closeStatus &&
+                        (start == null || end.ordinal >= start.ordinal))) &&
+                (item.sourceJournalEntryId == null ||
+                    (source != null && source.campaignId == item.campaignId &&
+                        (start == null || source.chapterId == null ||
+                            source.chapterId == start.chapterId))) &&
+                (item.status != openStatus ||
+                    (item.closedChapterId == null && item.resolution.isBlank()))
+        }
         requireRefs(payload.worldCast, "World cast member") { it.worldId in worldIds && it.name.isNotBlank() }
         requireRefs(payload.worldContinuityEvents, "World continuity event") {
             it.worldId in worldIds && it.status in setOf("DRAFT", "ACCEPTED", "NONCANON")
@@ -1055,7 +1092,8 @@ class BackupRepository internal constructor(
         coopWillRestoreOffline = true,
         scenarios = payload.scenarios.size,
         campaigns = payload.campaigns.size,
-        campaignJournalEntries = payload.campaignJournalEntries.size
+        campaignJournalEntries = payload.campaignJournalEntries.size,
+        campaignContinuityItems = payload.campaignContinuityItems.size
     )
 
     private fun BackupAppearanceSettings.toDomain(): AppearanceSettings = AppearanceSettings(
