@@ -140,9 +140,17 @@ class BackupRepositoryTest {
             speakerDisplayNameSnapshot = "NPC", content = "An existing narrative turn.",
             orderIndex = 1L
         ))
+        val checkpoint = campaignRepo.saveCheckpoint(
+            first.campaignId, chapterA.chapterId, "Retain selected branch", "A private checkpoint."
+        )
+        val note = campaignRepo.addJournalNote(
+            second.campaignId, "A different timeline", "Only Campaign B should see this."
+        )
+        assertEquals("campaign-message-a", checkpoint.sourceMessageId)
         val bytes = ByteArrayOutputStream()
         val preview = source.repository.exportEncrypted(bytes, PASSPHRASE.toCharArray())
         assertEquals(2, preview.campaigns)
+        assertEquals(2, preview.campaignJournalEntries)
 
         val target = environment()
         val targetWorld = com.example.domain.repository.WorldRepository(target.database).createWorld("Pre-restore")
@@ -155,6 +163,14 @@ class BackupRepositoryTest {
             target.database.campaignDao().getAllCampaigns())
         assertEquals(source.database.campaignDao().getAllChapters(),
             target.database.campaignDao().getAllChapters())
+        assertEquals(source.database.campaignDao().getAllJournalEntries(),
+            target.database.campaignDao().getAllJournalEntries())
+        assertEquals(1, target.database.campaignDao().journal(first.campaignId).size)
+        assertEquals(1, target.database.campaignDao().journal(second.campaignId).size)
+        assertEquals("A private checkpoint.",
+            target.database.campaignDao().getJournalEntry(checkpoint.journalEntryId)?.body)
+        assertEquals("Only Campaign B should see this.",
+            target.database.campaignDao().getJournalEntry(note.journalEntryId)?.body)
         assertEquals("Private story recap only for A.",
             target.database.campaignDao().chapters(first.campaignId).single().recap)
         assertTrue(target.database.campaignDao().chapters(second.campaignId)
