@@ -32,6 +32,65 @@ class AppDatabaseMigrationTest {
     }
 
     @Test
+    fun migrationFrom24To25PreservesExistingCampaignsAndChatLocalStoryMemory() {
+        val helper = FrameworkSQLiteOpenHelperFactory().create(
+            SupportSQLiteOpenHelper.Configuration.builder(context)
+                .name(databaseName)
+                .callback(object : SupportSQLiteOpenHelper.Callback(24) {
+                    override fun onCreate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                        db.execSQL("""
+                            CREATE TABLE campaigns (
+                                campaignId TEXT NOT NULL PRIMARY KEY, worldId TEXT NOT NULL,
+                                title TEXT NOT NULL
+                            )
+                        """.trimIndent())
+                        db.execSQL("""
+                            CREATE TABLE campaign_chapters (
+                                chapterId TEXT NOT NULL PRIMARY KEY, campaignId TEXT NOT NULL,
+                                chatId TEXT NOT NULL, title TEXT NOT NULL
+                            )
+                        """.trimIndent())
+                        db.execSQL("""
+                            CREATE TABLE story_memories (
+                                memoryId TEXT NOT NULL PRIMARY KEY, chatId TEXT NOT NULL,
+                                content TEXT NOT NULL
+                            )
+                        """.trimIndent())
+                        db.execSQL("INSERT INTO campaigns VALUES ('original-campaign', 'world', 'Keep')")
+                        db.execSQL("INSERT INTO campaign_chapters VALUES ('original-chapter', 'original-campaign', 'original-chat', 'Keep chapter')")
+                        db.execSQL("INSERT INTO story_memories VALUES ('memory-original', 'original-chat', 'Keep chat-only secret')")
+                    }
+                    override fun onUpgrade(
+                        db: androidx.sqlite.db.SupportSQLiteDatabase, oldVersion: Int, newVersion: Int
+                    ) = Unit
+                })
+                .build()
+        )
+        try {
+            val db = helper.writableDatabase
+            AppDatabase.MIGRATION_24_25.migrate(db)
+            db.query("SELECT content FROM story_memories WHERE memoryId='memory-original'")
+                .use { c ->
+                    assertTrue(c.moveToFirst())
+                    assertEquals("Keep chat-only secret", c.getString(0))
+                }
+            db.query("SELECT title FROM campaigns WHERE campaignId='original-campaign'")
+                .use { c ->
+                    assertTrue(c.moveToFirst())
+                    assertEquals("Keep", c.getString(0))
+                }
+            db.query("SELECT * FROM campaign_memory_shares").use { c ->
+                assertEquals(0, c.count)
+            }
+            db.query("PRAGMA index_list('campaign_memory_shares')").use { c ->
+                assertTrue(c.count >= 3)
+            }
+        } finally {
+            helper.close()
+        }
+    }
+
+    @Test
     fun migrationFrom23To24AddsThreadTableWithoutChangingExistingPrivateJournal() {
         val helper = FrameworkSQLiteOpenHelperFactory().create(
             SupportSQLiteOpenHelper.Configuration.builder(context)
