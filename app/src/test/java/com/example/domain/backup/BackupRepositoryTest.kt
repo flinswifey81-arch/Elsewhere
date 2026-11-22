@@ -161,11 +161,18 @@ class BackupRepositoryTest {
         )
         assertEquals("COMPLETE", completedArc.status)
         assertEquals("OPEN", promise.status)
+        val sourceMemory = com.example.domain.repository.StoryMemoryRepository(source.database)
+            .saveManual("campaign-chat-a", "A private silver compass promise.")
+        val share = campaignRepo.shareStoryMemoryWithCampaign(
+            first.campaignId, "campaign-chat-a", sourceMemory.memoryId
+        )
+        assertEquals(sourceMemory.memoryId, share.sourceMemoryId)
         val bytes = ByteArrayOutputStream()
         val preview = source.repository.exportEncrypted(bytes, PASSPHRASE.toCharArray())
         assertEquals(2, preview.campaigns)
         assertEquals(2, preview.campaignJournalEntries)
         assertEquals(2, preview.campaignContinuityItems)
+        assertEquals(1, preview.campaignMemoryShares)
 
         val target = environment()
         val targetWorld = com.example.domain.repository.WorldRepository(target.database).createWorld("Pre-restore")
@@ -182,6 +189,10 @@ class BackupRepositoryTest {
             target.database.campaignDao().getAllJournalEntries())
         assertEquals(source.database.campaignDao().getAllContinuityItems(),
             target.database.campaignDao().getAllContinuityItems())
+        assertEquals(source.database.campaignDao().getAllMemoryShares(),
+            target.database.campaignDao().getAllMemoryShares())
+        assertEquals("A private silver compass promise.",
+            target.database.storyMemoryDao().get(sourceMemory.memoryId)?.content)
         assertEquals(1, target.database.campaignDao().continuityItems(first.campaignId).size)
         assertEquals(1, target.database.campaignDao().continuityItems(second.campaignId).size)
         assertEquals("COMPLETE",
