@@ -11,6 +11,7 @@ import com.example.data.model.StoryMemoryActorEntity
 import com.example.domain.memory.StoryActorKind
 import com.example.domain.memory.StoryActorRef
 import com.example.domain.memory.StoryMemoryClaim
+import com.example.domain.memory.StoryMemoryOwnerScope
 import com.example.domain.memory.StoryMemoryVisibility
 import com.example.domain.repository.AppDataMaintenanceCoordinator
 import com.example.domain.repository.CampaignRepository
@@ -68,6 +69,9 @@ class CampaignMemoryScopeTest {
         assertEquals(campaignA, share.campaignId)
         assertEquals(note.memoryId, share.sourceMemoryId)
         assertEquals(listOf(note.memoryId), read("a-later").selected.map { it.memoryId })
+        assertEquals(StoryMemoryOwnerScope.CAMPAIGN, read("a-later").selected.single().scope)
+        assertEquals(campaignA, read("a-later").selected.single().ownerId)
+        assertEquals("a-early", read("a-later").selected.single().sourceChatId)
         assertTrue(read("b-later").selected.isEmpty())
         assertTrue(read("b-early").selected.isEmpty())
         assertTrue(read("standalone").selected.isEmpty())
