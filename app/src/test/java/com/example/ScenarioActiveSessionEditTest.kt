@@ -128,6 +128,6 @@ class ScenarioActiveSessionEditTest {
             requireNotNull(repository.session(first)).definitionJson)
         // Editing a Scenario session does not itself require schema changes.
         // Compare with the supported database version; Campaigns separately use v22.
-        assertEquals(24, com.example.data.APP_DATABASE_VERSION)
+        assertEquals(25, com.example.data.APP_DATABASE_VERSION)
     }
 }
