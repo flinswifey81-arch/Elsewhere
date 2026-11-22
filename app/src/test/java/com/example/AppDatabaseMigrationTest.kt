@@ -32,6 +32,105 @@ class AppDatabaseMigrationTest {
     }
 
     @Test
+    fun migrationFrom23To24AddsThreadTableWithoutChangingExistingPrivateJournal() {
+        val helper = FrameworkSQLiteOpenHelperFactory().create(
+            SupportSQLiteOpenHelper.Configuration.builder(context)
+                .name(databaseName)
+                .callback(object : SupportSQLiteOpenHelper.Callback(23) {
+                    override fun onCreate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                        db.execSQL("""
+                            CREATE TABLE campaigns (
+                                campaignId TEXT NOT NULL PRIMARY KEY,
+                                worldId TEXT NOT NULL,
+                                title TEXT NOT NULL,
+                                summary TEXT NOT NULL,
+                                createdAt INTEGER NOT NULL,
+                                updatedAt INTEGER NOT NULL
+                            )
+                        """.trimIndent())
+                        db.execSQL("""
+                            CREATE TABLE campaign_chapters (
+                                chapterId TEXT NOT NULL PRIMARY KEY,
+                                campaignId TEXT NOT NULL,
+                                chatId TEXT NOT NULL,
+                                ordinal INTEGER NOT NULL,
+                                title TEXT NOT NULL,
+                                recap TEXT NOT NULL,
+                                state TEXT NOT NULL,
+                                createdAt INTEGER NOT NULL,
+                                updatedAt INTEGER NOT NULL
+                            )
+                        """.trimIndent())
+                        db.execSQL("""
+                            CREATE TABLE campaign_journal_entries (
+                                journalEntryId TEXT NOT NULL PRIMARY KEY,
+                                campaignId TEXT NOT NULL,
+                                chapterId TEXT,
+                                sourceChatId TEXT,
+                                sourceMessageId TEXT,
+                                sourceVariantGroupId TEXT,
+                                sourceOrderIndex INTEGER,
+                                sourceContentSha256 TEXT,
+                                entryType TEXT NOT NULL,
+                                title TEXT NOT NULL,
+                                body TEXT NOT NULL,
+                                createdAt INTEGER NOT NULL,
+                                updatedAt INTEGER NOT NULL
+                            )
+                        """.trimIndent())
+                        db.execSQL("""
+                            INSERT INTO campaigns VALUES
+                            ('campaign-retain', 'world-retain', 'Existing Campaign', '', 10, 11)
+                        """.trimIndent())
+                        db.execSQL("""
+                            INSERT INTO campaign_chapters VALUES
+                            ('chapter-retain', 'campaign-retain', 'chat-retain', 1,
+                            'Existing Chapter', 'Keep private recap', 'ACTIVE', 12, 13)
+                        """.trimIndent())
+                        db.execSQL("""
+                            INSERT INTO campaign_journal_entries VALUES
+                            ('journal-retain', 'campaign-retain', 'chapter-retain', NULL,
+                            NULL, NULL, NULL, NULL, 'JOURNAL', 'Private note',
+                            'Private content must survive', 14, 15)
+                        """.trimIndent())
+                    }
+                    override fun onUpgrade(
+                        db: androidx.sqlite.db.SupportSQLiteDatabase,
+                        oldVersion: Int, newVersion: Int
+                    ) = Unit
+                })
+                .build()
+        )
+        try {
+            val db = helper.writableDatabase
+            AppDatabase.MIGRATION_23_24.migrate(db)
+            db.query("SELECT body FROM campaign_journal_entries WHERE journalEntryId='journal-retain'")
+                .use { c ->
+                    assertTrue(c.moveToFirst())
+                    assertEquals("Private content must survive", c.getString(0))
+                }
+            db.query("SELECT recap FROM campaign_chapters WHERE chapterId='chapter-retain'")
+                .use { c ->
+                    assertTrue(c.moveToFirst())
+                    assertEquals("Keep private recap", c.getString(0))
+                }
+            db.query("SELECT title FROM campaigns WHERE campaignId='campaign-retain'")
+                .use { c ->
+                    assertTrue(c.moveToFirst())
+                    assertEquals("Existing Campaign", c.getString(0))
+                }
+            db.query("SELECT * FROM campaign_continuity_items").use { c ->
+                assertEquals(0, c.count)
+            }
+            db.query("PRAGMA index_list('campaign_continuity_items')").use { c ->
+                assertTrue(c.count >= 4)
+            }
+        } finally {
+            helper.close()
+        }
+    }
+
+    @Test
     fun migrationFrom22To23AddsJournalWithoutChangingExistingCampaignAndChapterRows() {
         val helper = FrameworkSQLiteOpenHelperFactory().create(
             SupportSQLiteOpenHelper.Configuration.builder(context)
