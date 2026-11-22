@@ -7,6 +7,7 @@ import androidx.room.Query
 import androidx.room.Update
 import com.example.data.model.CampaignChapterEntity
 import com.example.data.model.CampaignEntity
+import com.example.data.model.CampaignJournalEntryEntity
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -64,6 +65,33 @@ interface CampaignDao {
 
     @Query("DELETE FROM campaigns WHERE campaignId = :campaignId")
     suspend fun deleteCampaign(campaignId: String): Int
+
+    @Query("SELECT * FROM campaign_journal_entries WHERE campaignId = :campaignId ORDER BY createdAt, journalEntryId")
+    fun observeJournal(campaignId: String): Flow<List<CampaignJournalEntryEntity>>
+
+    @Query("SELECT * FROM campaign_journal_entries WHERE campaignId = :campaignId ORDER BY createdAt, journalEntryId")
+    suspend fun journal(campaignId: String): List<CampaignJournalEntryEntity>
+
+    @Query("SELECT * FROM campaign_journal_entries ORDER BY campaignId, createdAt, journalEntryId")
+    suspend fun getAllJournalEntries(): List<CampaignJournalEntryEntity>
+
+    @Query("SELECT * FROM campaign_journal_entries WHERE journalEntryId = :entryId LIMIT 1")
+    suspend fun getJournalEntry(entryId: String): CampaignJournalEntryEntity?
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertJournalEntry(entry: CampaignJournalEntryEntity)
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertJournalEntries(entries: List<CampaignJournalEntryEntity>)
+
+    @Update
+    suspend fun updateJournalEntry(entry: CampaignJournalEntryEntity): Int
+
+    @Query("DELETE FROM campaign_journal_entries WHERE journalEntryId = :entryId")
+    suspend fun deleteJournalEntry(entryId: String): Int
+
+    @Query("DELETE FROM campaign_journal_entries")
+    suspend fun clearJournalEntries()
 
     @Query("DELETE FROM campaign_chapters")
     suspend fun clearChapters()
