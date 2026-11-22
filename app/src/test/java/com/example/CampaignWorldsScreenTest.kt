@@ -66,6 +66,12 @@ class CampaignWorldsScreenTest {
         compose.waitUntil(20_000) {
             runBlocking { campaigns.continuityItems(campaign.campaignId).size == 1 }
         }
+        // A saved Room row can be visible before the Compose submit coroutine
+        // closes its dialog. Never click an item behind a previous modal.
+        compose.waitUntil(20_000) {
+            compose.onAllNodesWithTag("save_campaign_continuity")
+                .fetchSemanticsNodes().isEmpty()
+        }
         val arc = runBlocking { campaigns.continuityItems(campaign.campaignId).single() }
         assertEquals("ARC", arc.itemType)
         assertEquals("ACTIVE", arc.status)
@@ -73,7 +79,13 @@ class CampaignWorldsScreenTest {
             compose.onAllNodesWithTag("edit_campaign_continuity_" + arc.itemId)
                 .fetchSemanticsNodes().isNotEmpty()
         }
+        compose.onNodeWithTag("worlds_list")
+            .performScrollToNode(hasTestTag("edit_campaign_continuity_" + arc.itemId))
         compose.onNodeWithTag("edit_campaign_continuity_" + arc.itemId).performClick()
+        compose.waitUntil(20_000) {
+            compose.onAllNodesWithTag("campaign_continuity_complete")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
         compose.onNodeWithTag("campaign_continuity_complete").performClick()
         compose.onNodeWithTag("campaign_continuity_resolution")
             .performTextInput("The conclusion was peaceful.")
@@ -129,12 +141,20 @@ class CampaignWorldsScreenTest {
         assertEquals("The observatory is still unexplored.", saved.body)
         assertNotNull(runBlocking { db.chatDao().getChatById("journal-test-chat") })
 
-        compose.waitForIdle()
+        compose.waitUntil(20_000) {
+            compose.onAllNodesWithTag("save_campaign_journal_entry")
+                .fetchSemanticsNodes().isEmpty()
+        }
         compose.onNodeWithTag("worlds_list").performScrollToNode(
             hasTestTag("draft_world_from_journal_" + saved.journalEntryId)
         )
         compose.onNodeWithTag("draft_world_from_journal_" + saved.journalEntryId)
             .assertIsEnabled().performClick()
+        compose.waitUntil(20_000) {
+            compose.onAllNodesWithTag("world_draft_from_campaign_facts")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithTag("world_draft_from_campaign_facts").performScrollTo()
         compose.onNodeWithTag("world_draft_from_campaign_facts").performTextClearance()
         compose.onNodeWithTag("world_draft_from_campaign_facts")
             .performTextInput("Reviewed fact for another Campaign only if explicitly accepted.")
