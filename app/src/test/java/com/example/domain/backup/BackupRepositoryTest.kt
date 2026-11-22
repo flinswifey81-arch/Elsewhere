@@ -147,10 +147,25 @@ class BackupRepositoryTest {
             second.campaignId, "A different timeline", "Only Campaign B should see this."
         )
         assertEquals("campaign-message-a", checkpoint.sourceMessageId)
+        val arc = campaignRepo.addContinuityItem(
+            first.campaignId, "ARC", "Chapter arc",
+            "Only Campaign A had this arc.", chapterA.chapterId, checkpoint.journalEntryId
+        )
+        val promise = campaignRepo.addContinuityItem(
+            second.campaignId, "PROMISE", "Return a letter",
+            "Only Campaign B has this unresolved obligation."
+        )
+        val completedArc = campaignRepo.updateContinuityItem(
+            first.campaignId, arc.itemId, arc.title, arc.details,
+            "COMPLETE", "The arc ended in the first chapter.", chapterA.chapterId
+        )
+        assertEquals("COMPLETE", completedArc.status)
+        assertEquals("OPEN", promise.status)
         val bytes = ByteArrayOutputStream()
         val preview = source.repository.exportEncrypted(bytes, PASSPHRASE.toCharArray())
         assertEquals(2, preview.campaigns)
         assertEquals(2, preview.campaignJournalEntries)
+        assertEquals(2, preview.campaignContinuityItems)
 
         val target = environment()
         val targetWorld = com.example.domain.repository.WorldRepository(target.database).createWorld("Pre-restore")
@@ -165,6 +180,14 @@ class BackupRepositoryTest {
             target.database.campaignDao().getAllChapters())
         assertEquals(source.database.campaignDao().getAllJournalEntries(),
             target.database.campaignDao().getAllJournalEntries())
+        assertEquals(source.database.campaignDao().getAllContinuityItems(),
+            target.database.campaignDao().getAllContinuityItems())
+        assertEquals(1, target.database.campaignDao().continuityItems(first.campaignId).size)
+        assertEquals(1, target.database.campaignDao().continuityItems(second.campaignId).size)
+        assertEquals("COMPLETE",
+            target.database.campaignDao().getContinuityItem(arc.itemId)?.status)
+        assertEquals("OPEN",
+            target.database.campaignDao().getContinuityItem(promise.itemId)?.status)
         assertEquals(1, target.database.campaignDao().journal(first.campaignId).size)
         assertEquals(1, target.database.campaignDao().journal(second.campaignId).size)
         assertEquals("A private checkpoint.",
