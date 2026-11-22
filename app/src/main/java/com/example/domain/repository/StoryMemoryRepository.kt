@@ -1000,15 +1000,16 @@ class StoryMemoryRepository(
             }
         )
         val sharedIds = sharedCandidates.map { it.memoryId }.toSet()
+        val readContext = StoryMemoryReadContext(
+            chatId = chatId, branchId = null,
+            wackBoundaryOrderIndex = chat.contextResetOrderIndex,
+            recipient = recipient, archivedMessages = archived,
+            explicitReturns = returns
+        )
         StoryMemoryLocalRetriever.searchValidated(
             candidates = candidates + sharedCandidates,
             request = StoryMemorySearchRequest(
-                readContext = StoryMemoryReadContext(
-                    chatId = chatId, branchId = null,
-                    wackBoundaryOrderIndex = chat.contextResetOrderIndex,
-                    recipient = recipient, archivedMessages = archived,
-                    explicitReturns = returns
-                ),
+                readContext = readContext,
                 sceneText = sceneText, activeActors = activeActors,
                 maxMemories = maxMemories,
                 maxSelectedTextCharacters = maxSelectedTextCharacters
@@ -1018,14 +1019,7 @@ class StoryMemoryRepository(
                 // Already validated inside this same Room transaction against
                 // SOURCE eligibility, the Campaign link and target Wack.
                 StoryMemoryDecision(StoryMemoryExclusion.ELIGIBLE)
-            } else StoryMemoryEligibilityPolicy.evaluate(
-                record, StoryMemoryReadContext(
-                    chatId = chatId, branchId = null,
-                    wackBoundaryOrderIndex = chat.contextResetOrderIndex,
-                    recipient = recipient, archivedMessages = archived,
-                    explicitReturns = returns
-                )
-            )
+            } else StoryMemoryEligibilityPolicy.evaluate(record, readContext)
         }
     }
 
