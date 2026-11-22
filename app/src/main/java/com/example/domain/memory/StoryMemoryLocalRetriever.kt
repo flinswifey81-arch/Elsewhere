@@ -47,6 +47,20 @@ object StoryMemoryLocalRetriever {
     fun search(
         candidates: List<StoryMemoryRecord>,
         request: StoryMemorySearchRequest
+    ): StoryMemorySearchResult = searchValidated(candidates, request) {
+        StoryMemoryEligibilityPolicy.evaluate(it, request.readContext)
+    }
+
+    /**
+     * The caller has already gated the external candidates against their
+     * SOURCE chat, branch, Wack, selected variant, digest and recipient.
+     * Only use this from the repository's transactional Campaign-memory read;
+     * ordinary chat-local callers continue through search().
+     */
+    internal fun searchValidated(
+        candidates: List<StoryMemoryRecord>,
+        request: StoryMemorySearchRequest,
+        eligibility: (StoryMemoryRecord) -> StoryMemoryDecision
     ): StoryMemorySearchResult {
         require(request.maxMemories in 0..64) { "maxMemories must be between 0 and 64." }
         require(request.maxSelectedTextCharacters in 0..64_000) {
@@ -54,7 +68,7 @@ object StoryMemoryLocalRetriever {
         }
         val excluded = mutableMapOf<StoryMemoryExclusion, Int>()
         val eligible = candidates.filter { record ->
-            val decision = StoryMemoryEligibilityPolicy.evaluate(record, request.readContext)
+            val decision = eligibility(record)
             if (!decision.eligible) {
                 excluded[decision.reason] = (excluded[decision.reason] ?: 0) + 1
             }
