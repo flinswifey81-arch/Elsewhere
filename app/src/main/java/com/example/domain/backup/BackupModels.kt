@@ -89,7 +89,9 @@ data class BackupPayload(
     val storyMemoryPerspectives: List<StoryMemoryPerspectiveEntity> = emptyList(),
     // v22: Campaign organization is optional for historical encrypted backups.
     val campaigns: List<CampaignEntity> = emptyList(),
-    val campaignChapters: List<CampaignChapterEntity> = emptyList()
+    val campaignChapters: List<CampaignChapterEntity> = emptyList(),
+    // v23: source-linked private checkpoints and Campaign Journal entries.
+    val campaignJournalEntries: List<CampaignJournalEntryEntity> = emptyList()
 )
 
 data class BackupPreview(
@@ -109,7 +111,8 @@ data class BackupPreview(
     val includesCoopHistory: Boolean,
     val coopWillRestoreOffline: Boolean,
     val scenarios: Int = 0,
-    val campaigns: Int = 0
+    val campaigns: Int = 0,
+    val campaignJournalEntries: Int = 0
 )
 
 data class BackupInspection(
