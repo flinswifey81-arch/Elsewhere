@@ -78,6 +78,32 @@ class CampaignWorldsScreenTest {
         assertEquals("First Discovery", saved.title)
         assertEquals("The observatory is still unexplored.", saved.body)
         assertNotNull(runBlocking { db.chatDao().getChatById("journal-test-chat") })
+
+        compose.waitForIdle()
+        compose.onNodeWithTag("worlds_list").performScrollToNode(
+            hasTestTag("draft_world_from_journal_" + saved.journalEntryId)
+        )
+        compose.onNodeWithTag("draft_world_from_journal_" + saved.journalEntryId)
+            .assertIsEnabled().performClick()
+        compose.onNodeWithTag("world_draft_from_campaign_facts").performTextClearance()
+        compose.onNodeWithTag("world_draft_from_campaign_facts")
+            .performTextInput("Reviewed fact for another Campaign only if explicitly accepted.")
+        compose.onNodeWithTag("propose_world_draft_from_campaign")
+            .assertIsEnabled().performClick()
+        compose.waitUntil(20_000) {
+            runBlocking { worlds.getEvents(world.worldId).size == 1 }
+        }
+        val draft = runBlocking { worlds.getEvents(world.worldId).single() }
+        assertEquals("DRAFT", draft.status)
+        assertEquals("First Discovery", draft.title)
+        assertEquals(
+            "Reviewed fact for another Campaign only if explicitly accepted.",
+            draft.facts
+        )
+        assertEquals(saved.body, runBlocking {
+            campaigns.journal(campaign.campaignId).single().body
+        })
+        assertNotNull(runBlocking { db.chatDao().getChatById("journal-test-chat") })
     }
 
     @Test fun creatingACampaignThroughWorldUiPreservesStandaloneChat() {
