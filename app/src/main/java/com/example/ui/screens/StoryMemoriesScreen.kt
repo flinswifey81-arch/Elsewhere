@@ -32,6 +32,8 @@ import com.example.domain.memory.StoryMemoryReview
 import com.example.domain.memory.StoryMemoryExclusion
 import com.example.domain.repository.ChatRepository
 import com.example.domain.repository.StoryMemoryRepository
+import com.example.domain.repository.CampaignRepository
+import com.example.data.model.CampaignEntity
 import com.example.ui.components.elsewhereTopAppBarColors
 import kotlinx.coroutines.launch
 
@@ -46,11 +48,16 @@ fun StoryMemoriesScreen(
     repository: StoryMemoryRepository,
     chatRepository: ChatRepository,
     onNavigateBack: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    campaignRepository: CampaignRepository? = null
 ) {
     val scope = rememberCoroutineScope()
     var memories by remember(chatId) { mutableStateOf<List<StoryMemoryEntity>>(emptyList()) }
     var loading by remember(chatId) { mutableStateOf(true) }
+    var owningCampaign by remember(chatId) { mutableStateOf<CampaignEntity?>(null) }
+    var campaignShareIds by remember(chatId) { mutableStateOf<Set<String>>(emptySet()) }
+    var shareMemoryTarget by remember { mutableStateOf<StoryMemoryEntity?>(null) }
+    var unshareMemoryTarget by remember { mutableStateOf<StoryMemoryEntity?>(null) }
     var working by remember { mutableStateOf(false) }
     var boundary by remember(chatId) { mutableStateOf<Long?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -88,6 +95,8 @@ fun StoryMemoriesScreen(
 
     LaunchedEffect(chatId) {
         val summary = chatRepository.getChatSummaryById(chatId)
+        owningCampaign = campaignRepository?.campaignForChat(chatId)
+        campaignShareIds = campaignRepository?.sharedMemoryIdsForChat(chatId).orEmpty()
         boundary = summary?.chat?.contextResetOrderIndex
         characters = summary?.characters.orEmpty()
         participantChoices =
@@ -128,8 +137,12 @@ fun StoryMemoriesScreen(
         if (working) return
         scope.launch {
             working = true
-            try { action() }
-            catch (failure: Exception) { error = failure.message ?: "Unable to update story memory." }
+            try {
+                action()
+                campaignShareIds = campaignRepository?.sharedMemoryIdsForChat(chatId).orEmpty()
+            } catch (failure: Exception) {
+                error = failure.message ?: "Unable to update story memory."
+            }
             finally { working = false }
         }
     }
@@ -144,6 +157,69 @@ fun StoryMemoriesScreen(
     fun actorLabel(actor: StoryActorRef): String =
         participantChoices.firstOrNull { it.first == actor }?.second
             ?: "${actor.kind.name.lowercase()}: ${actor.stableId}"
+
+    shareMemoryTarget?.let { memory ->
+        val campaign = owningCampaign
+        if (campaign != null && campaignRepository != null) AlertDialog(
+            onDismissRequest = { if (!working) shareMemoryTarget = null },
+            title = { Text("Share with this Campaign?") },
+            text = {
+                Text(
+                    "Share this approved Story Memory with later chapters of " +
+                        campaign.title + "? The original chat memory stays unchanged. " +
+                        "This does not give every Character knowledge of it: only " +
+                        "approved recipients may recall it, and source variants, " +
+                        "edits and Wack boundaries still apply. No extra model call."
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = !working,
+                    modifier = Modifier.testTag("confirm_campaign_memory_share"),
+                    onClick = {
+                        applyChange {
+                            campaignRepository.shareStoryMemoryWithCampaign(
+                                campaign.campaignId, chatId, memory.memoryId
+                            )
+                            shareMemoryTarget = null
+                        }
+                    }
+                ) { Text("Share memory") }
+            },
+            dismissButton = {
+                TextButton(onClick = { shareMemoryTarget = null }) { Text("Cancel") }
+            }
+        )
+    }
+
+    unshareMemoryTarget?.let { memory ->
+        val campaign = owningCampaign
+        if (campaign != null && campaignRepository != null) AlertDialog(
+            onDismissRequest = { if (!working) unshareMemoryTarget = null },
+            title = { Text("Stop sharing with Campaign?") },
+            text = {
+                Text(
+                    "Remove this memory's Campaign link? The original Story Memory " +
+                        "and chat will remain. Later chapters will no longer use it."
+                )
+            },
+            confirmButton = {
+                TextButton(enabled = !working, onClick = {
+                    applyChange {
+                        campaignRepository.revokeCampaignMemoryShare(
+                            campaign.campaignId, chatId, memory.memoryId
+                        )
+                        unshareMemoryTarget = null
+                    }
+                }, modifier = Modifier.testTag("confirm_campaign_memory_unshare")) {
+                    Text("Stop sharing")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { unshareMemoryTarget = null }) { Text("Cancel") }
+            }
+        )
+    }
 
     if (createDialog || editing != null) AlertDialog(
         onDismissRequest = { if (!working) { createDialog = false; editing = null } },
@@ -1011,6 +1087,24 @@ fun StoryMemoriesScreen(
                                             applyChange { repository.update(chatId, memory.memoryId, hidden = !memory.hidden) }
                                         }
                                     ) { Text(if (memory.hidden) "Show" else "Hide") }
+                                }
+                                if (owningCampaign != null && campaignRepository != null) {
+                                    val shared = memory.memoryId in campaignShareIds
+                                    TextButton(
+                                        modifier = Modifier.testTag(
+                                            "campaign_memory_share_" + memory.memoryId
+                                        ),
+                                        enabled = !working && (shared ||
+                                            (memory.scope == "CHAT" &&
+                                            memory.review == StoryMemoryReview.APPROVED.name)),
+                                        onClick = {
+                                            if (shared) unshareMemoryTarget = memory
+                                            else shareMemoryTarget = memory
+                                        }
+                                    ) {
+                                        Text(if (shared) "Stop Campaign sharing"
+                                            else "Share with Campaign")
+                                    }
                                 }
                             }
                             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
