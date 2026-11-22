@@ -335,6 +335,105 @@ class CampaignRepositoryTest {
         assertEquals("CHECKPOINT", campaigns.journal(campaign.campaignId).single().entryType)
     }
 
+    @Test fun arcsAndPromiseThreadsAreIndependentAndOnlyResolveOnPlayerAction() = runBlocking {
+        val world = worlds.createWorld("Long-running AU")
+        val first = campaigns.createCampaign(world.worldId, "Story A")
+        val second = campaigns.createCampaign(world.worldId, "Story B")
+        db.chatDao().insertChat(ChatEntity(
+            chatId = "arc-story-a", displayName = "Arc A", chatType = ChatType.SOLO
+        ))
+        db.chatDao().insertChat(ChatEntity(
+            chatId = "arc-story-b", displayName = "Arc B", chatType = ChatType.SOLO
+        ))
+        val opening = campaigns.addChapter(first.campaignId, "arc-story-a", "An arrival")
+        val other = campaigns.addChapter(second.campaignId, "arc-story-b", "Different timeline")
+        val journal = campaigns.addJournalNote(
+            first.campaignId, "Original clue", "A locked observatory.", opening.chapterId
+        )
+        val arc = campaigns.addContinuityItem(
+            first.campaignId, "ARC", "The Observatory Arc",
+            "The travelers arrived and found a locked observatory.",
+            opening.chapterId, journal.journalEntryId
+        )
+        val promise = campaigns.addContinuityItem(
+            first.campaignId, "PROMISE", "Return the silver compass",
+            "The promise is still unfulfilled.", opening.chapterId
+        )
+        assertEquals("ACTIVE", arc.status)
+        assertEquals("OPEN", promise.status)
+        assertEquals(listOf(arc.itemId, promise.itemId),
+            campaigns.continuityItems(first.campaignId).map { it.itemId })
+        assertTrue(campaigns.continuityItems(second.campaignId).isEmpty())
+        assertTrue(runCatching {
+            campaigns.addContinuityItem(second.campaignId,
+                "DISCOVERY", "Secret from A", "A locked observatory.",
+                other.chapterId, journal.journalEntryId)
+        }.isFailure)
+        assertTrue(runCatching {
+            campaigns.updateContinuityItem(second.campaignId, promise.itemId,
+                "Hijacked", "This should fail", "RESOLVED", "Stolen")
+        }.isFailure)
+        assertTrue(runCatching {
+            campaigns.updateContinuityItem(first.campaignId, promise.itemId,
+                "Return the silver compass", "Still open",
+                "RESOLVED", "This ending belongs to B.", other.chapterId)
+        }.isFailure)
+
+        val closed = campaigns.updateContinuityItem(
+            first.campaignId, promise.itemId, "Return the silver compass",
+            "The promise was finally honored.", "RESOLVED",
+            "Returned to its owner.", opening.chapterId
+        )
+        assertEquals("RESOLVED", closed.status)
+        assertEquals("Returned to its owner.", closed.resolution)
+        assertEquals("ACTIVE", campaigns.continuityItems(first.campaignId)
+            .single { it.itemId == arc.itemId }.status)
+        val reopened = campaigns.updateContinuityItem(
+            first.campaignId, promise.itemId, "Return the silver compass",
+            "A new obligation emerged.", "OPEN"
+        )
+        assertEquals("OPEN", reopened.status)
+        assertEquals("", reopened.resolution)
+        assertNull(reopened.closedChapterId)
+        val finishedArc = campaigns.updateContinuityItem(
+            first.campaignId, arc.itemId, "The Observatory Arc",
+            "The observatory was explored.", "COMPLETE",
+            "The expedition safely returned.", opening.chapterId
+        )
+        assertEquals("COMPLETE", finishedArc.status)
+        assertTrue(worlds.getEvents(world.worldId).isEmpty())
+        assertNotNull(db.chatDao().getChatById("arc-story-a"))
+        assertNotNull(db.chatDao().getChatById("arc-story-b"))
+    }
+
+    @Test fun chapterAndJournalRemovalPreservePlayerAuthoredArcAndOpenThreads() = runBlocking {
+        val world = worlds.createWorld("Deleted link")
+        val campaign = campaigns.createCampaign(world.worldId, "Private RP")
+        db.chatDao().insertChat(ChatEntity(
+            chatId = "retained-chat", displayName = "Saved chat", chatType = ChatType.SOLO
+        ))
+        val chapter = campaigns.addChapter(campaign.campaignId, "retained-chat", "Opening")
+        val source = campaigns.addJournalNote(
+            campaign.campaignId, "Source event", "A discovery.", chapter.chapterId
+        )
+        val thread = campaigns.addContinuityItem(
+            campaign.campaignId, "DISCOVERY", "Unsolved map",
+            "There is a map to find.", chapter.chapterId, source.journalEntryId
+        )
+        campaigns.deleteJournalEntry(campaign.campaignId, source.journalEntryId)
+        val withoutSource = campaigns.continuityItems(campaign.campaignId).single()
+        assertNull(withoutSource.sourceJournalEntryId)
+        assertEquals(thread.title, withoutSource.title)
+        campaigns.removeChapter(campaign.campaignId, chapter.chapterId)
+        val orphan = campaigns.continuityItems(campaign.campaignId).single()
+        assertNull(orphan.openedChapterId)
+        assertEquals("OPEN", orphan.status)
+        assertNotNull(db.chatDao().getChatById("retained-chat"))
+        campaigns.deleteCampaign(campaign.campaignId)
+        assertTrue(db.campaignDao().getAllContinuityItems().isEmpty())
+        assertNotNull(db.chatDao().getChatById("retained-chat"))
+    }
+
     @Test fun invalidCrossCampaignEditsDoNotMutateOtherCampaignOrChapter() = runBlocking {
         val world = worlds.createWorld("Two timelines")
         val first = campaigns.createCampaign(world.worldId, "Timeline A")
