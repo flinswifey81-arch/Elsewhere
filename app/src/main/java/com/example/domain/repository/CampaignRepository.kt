@@ -6,6 +6,8 @@ import com.example.data.model.CampaignChapterEntity
 import com.example.data.model.CampaignEntity
 import com.example.data.model.CampaignJournalEntryEntity
 import com.example.data.model.CampaignContinuityItemEntity
+import com.example.data.model.CampaignMemoryShareEntity
+import com.example.domain.memory.StoryMemoryEligibilityPolicy
 import com.example.data.model.WorldContinuityEventEntity
 import java.security.MessageDigest
 import com.example.data.model.WorldMembershipEntity
@@ -25,6 +27,106 @@ class CampaignRepository(
     suspend fun forWorld(worldId: String) = dao.forWorld(worldId)
     suspend fun chapters(campaignId: String) = dao.chapters(campaignId)
     suspend fun getCampaign(campaignId: String) = dao.getCampaign(campaignId)
+
+    /** A chat with no Campaign remains a completely independent story. */
+    suspend fun campaignForChat(chatId: String): CampaignEntity? {
+        val chapter = dao.chapterForChat(chatId) ?: return null
+        return dao.getCampaign(chapter.campaignId)
+    }
+
+    suspend fun sharedMemoryIdsForChat(chatId: String): Set<String> {
+        val campaign = campaignForChat(chatId) ?: return emptySet()
+        val memories = database.storyMemoryDao().forChat(chatId).map { it.memoryId }.toSet()
+        return dao.memorySharesForCampaign(campaign.campaignId)
+            .mapNotNull { it.sourceMemoryId.takeIf(memories::contains) }.toSet()
+    }
+
+    /**
+     * One explicit user confirmation; keep the source chat-local Story Memory
+     * unchanged. A digest invalidates this approval on subsequent text edits.
+     * Knowledge grants and selected variants remain owned by the source chat.
+     */
+    suspend fun shareStoryMemoryWithCampaign(
+        campaignId: String, chatId: String, memoryId: String
+    ): CampaignMemoryShareEntity = coordinator.withMutation {
+        database.withTransaction {
+            val chapter = requireNotNull(dao.chapterForChat(chatId)) {
+                "Only chats linked as Campaign chapters can share memory."
+            }
+            require(chapter.campaignId == campaignId) {
+                "This chapter belongs to another Campaign."
+            }
+            requireNotNull(dao.getCampaign(campaignId)) { "Campaign not found." }
+            val source = requireNotNull(database.storyMemoryDao().get(memoryId)) {
+                "Story Memory not found."
+            }
+            require(source.chatId == chatId && source.ownerId == chatId &&
+                source.scope == "CHAT" && source.branchId == null) {
+                "Only this chapter's chat-local Story Memories can be shared."
+            }
+            require(source.review == "APPROVED" && !source.hidden &&
+                source.lifecycle != "SUPERSEDED" && source.content.isNotBlank()) {
+                "Approve and show this Story Memory before sharing it."
+            }
+            val wack = database.chatDao().getChatById(chatId)?.contextResetOrderIndex
+            if (wack != null && source.sourceOrderIndex <= wack) {
+                require(database.storyMemoryDao().returns(memoryId).any {
+                    it.chatId == chatId &&
+                        it.resetBoundaryOrderIndex == wack &&
+                        it.approvedAtOrderIndex > wack &&
+                        it.initiatedByUser && it.branchId == null
+                }) {
+                    "Restore this specific Story Memory after Wack before sharing it."
+                }
+            }
+            if (source.originKind == "MESSAGE") {
+                val message = requireNotNull(
+                    source.sourceMessageId?.let { database.messageDao().getMessageById(it) }
+                ) { "The original message no longer exists." }
+                require(message.chatId == chatId && message.isPrimaryVariant &&
+                    message.variantGroupId == source.sourceVariantGroupId &&
+                    message.orderIndex == source.sourceOrderIndex &&
+                    message.speakerType.name == source.sourceSpeakerType &&
+                    message.speakerId == source.sourceSpeakerId &&
+                    message.createdAt == source.sourceCreatedAtEpochMillis &&
+                    message.editedAt == null && (
+                        source.sourceSha256 == null ||
+                        StoryMemoryEligibilityPolicy.sha256(message.content) == source.sourceSha256
+                    )
+                ) { "The source message changed or its variant is no longer selected." }
+            } else {
+                require(source.originKind == "MANUAL") {
+                    "Cannot share a Story Memory with unknown provenance."
+                }
+            }
+            require(dao.getMemoryShare(campaignId, memoryId) == null) {
+                "This memory has already been shared with this Campaign."
+            }
+            CampaignMemoryShareEntity(
+                campaignId = campaignId, sourceMemoryId = memoryId,
+                sourceChapterId = chapter.chapterId,
+                sourceContentSha256 = StoryMemoryEligibilityPolicy.sha256(source.content)
+            ).also { dao.insertMemoryShare(it) }
+        }
+    }
+
+    suspend fun revokeCampaignMemoryShare(
+        campaignId: String, chatId: String, memoryId: String
+    ) = coordinator.withMutation {
+        database.withTransaction {
+            val chapter = requireNotNull(dao.chapterForChat(chatId)) {
+                "This chat is not a Campaign chapter."
+            }
+            require(chapter.campaignId == campaignId) { "Wrong Campaign." }
+            val source = requireNotNull(database.storyMemoryDao().get(memoryId)) {
+                "Source memory no longer exists."
+            }
+            require(source.chatId == chatId) { "Cannot revoke another chat's share." }
+            require(dao.getMemoryShare(campaignId, memoryId)?.sourceChapterId ==
+                chapter.chapterId) { "Campaign memory share no longer exists." }
+            require(dao.deleteMemoryShare(campaignId, memoryId) == 1)
+        }
+    }
 
     // Each Campaign's arcs/threads are local notes, never implicit prompt input.
     fun observeContinuityItems(campaignId: String) = dao.observeContinuityItems(campaignId)
