@@ -297,11 +297,11 @@ def rehearsal(old: Path, new: Path, test_apk: Path, fixture: Path) -> None:
                      "class", "com.example.UpgradeRehearsalInstrumentedTest,com.example.ChatPdfExportInstrumentedTest", runner)
         result = output.decode("utf-8", "replace")
         if "OK (2 tests)" not in result or "INSTRUMENTATION_CODE: -1" not in result:
-            raise RuntimeError("Native v23 migration and real Android PDF instrumentation did not pass")
+            raise RuntimeError("Native v24 migration and real Android PDF instrumentation did not pass")
         adb(serial, "shell", "am", "force-stop", PRODUCTION_PACKAGE)
         new_version, _, new_digests = snapshot(copy_device_database(serial, after), columns)
-        if new_version != 23:
-            raise RuntimeError(f"Emulator Room migration ended on schema {new_version}, not v23")
+        if new_version != 24:
+            raise RuntimeError(f"Emulator Room migration ended on schema {new_version}, not v24")
         changed = sorted(table for table, digest in old_digests.items()
                          if new_digests.get(table) != digest)
         if changed:
@@ -310,7 +310,7 @@ def rehearsal(old: Path, new: Path, test_apk: Path, fixture: Path) -> None:
             raise RuntimeError("Original private file disappeared after app migration")
         print(f"ANDROID_EMULATOR_V15_TO_V21_UPGRADE_PASS: in-place adb install -r; "
               f"{len(old_digests)} original v15 tables' original columns and rows preserved; "
-              "schema v23; app-private file retained; no owner data or production signer")
+              "schema v24; app-private file retained; no owner data or production signer")
 
 
 def main():
