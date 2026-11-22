@@ -436,6 +436,193 @@ fun WorldsScreen(
         )
     }
 
+    if (continuityDialogOpen && chosenCampaign != null && campaignRepository != null) AlertDialog(
+        onDismissRequest = { if (!busy) continuityDialogOpen = false },
+        title = {
+            Text(
+                when {
+                    continuityEditTarget != null -> "Edit Campaign continuity"
+                    continuityDraftType == "ARC" -> "New arc summary"
+                    else -> "New ongoing story thread"
+                }
+            )
+        },
+        text = {
+            Column(
+                modifier = Modifier.heightIn(max = 440.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    "This is private, player-authored Campaign continuity. No automatic quests, " +
+                        "OpenRouter calls, World Canon changes or cross-Campaign memory sharing.",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                if (continuityEditTarget == null && continuityDraftType != "ARC") {
+                    Box {
+                        OutlinedButton(onClick = { continuityTypePickerOpen = true }) {
+                            Text("Type: " + continuityDraftType)
+                        }
+                        DropdownMenu(expanded = continuityTypePickerOpen,
+                            onDismissRequest = { continuityTypePickerOpen = false }) {
+                            listOf("THREAD", "PROMISE", "QUEST", "DISCOVERY", "RELATIONSHIP")
+                                .forEach { kind ->
+                                    DropdownMenuItem(text = { Text(kind) }, onClick = {
+                                        continuityDraftType = kind
+                                        continuityTypePickerOpen = false
+                                    })
+                                }
+                        }
+                    }
+                } else {
+                    Text("Type: " + continuityDraftType, style = MaterialTheme.typography.labelMedium)
+                }
+                OutlinedTextField(
+                    value = continuityDraftTitle,
+                    onValueChange = { continuityDraftTitle = it.take(200) },
+                    label = { Text("Arc or thread title") },
+                    modifier = Modifier.testTag("campaign_continuity_title")
+                )
+                OutlinedTextField(
+                    value = continuityDraftDetails,
+                    onValueChange = { continuityDraftDetails = it.take(12_000) },
+                    label = {
+                        Text(if (continuityDraftType == "ARC") "Arc summary" else "What is ongoing?")
+                    },
+                    minLines = 3, maxLines = 8,
+                    modifier = Modifier.testTag("campaign_continuity_details")
+                )
+                if (continuityEditTarget == null) {
+                    Box {
+                        OutlinedButton(onClick = { continuityOpenChapterPickerOpen = true }) {
+                            Text("Opened in: " +
+                                (chapters.firstOrNull { it.chapterId == continuityDraftOpenChapter }
+                                    ?.title ?: "No linked chapter"))
+                        }
+                        DropdownMenu(expanded = continuityOpenChapterPickerOpen,
+                            onDismissRequest = { continuityOpenChapterPickerOpen = false }) {
+                            DropdownMenuItem(text = { Text("No linked chapter") }, onClick = {
+                                continuityDraftOpenChapter = null
+                                continuityOpenChapterPickerOpen = false
+                            })
+                            chapters.forEach { chapter ->
+                                DropdownMenuItem(
+                                    text = { Text("Chapter " + chapter.ordinal + ": " + chapter.title) },
+                                    onClick = {
+                                        continuityDraftOpenChapter = chapter.chapterId
+                                        continuityOpenChapterPickerOpen = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+                if (continuityEditTarget != null) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(
+                            checked = continuityDraftComplete,
+                            onCheckedChange = { continuityDraftComplete = it }
+                        )
+                        Text(if (continuityDraftType == "ARC") "Arc complete" else "Resolved")
+                    }
+                    if (continuityDraftComplete) {
+                        OutlinedTextField(
+                            value = continuityDraftResolution,
+                            onValueChange = { continuityDraftResolution = it.take(12_000) },
+                            label = {
+                                Text(if (continuityDraftType == "ARC") "Arc ending" else "How was this resolved?")
+                            },
+                            minLines = 2, maxLines = 6,
+                            modifier = Modifier.testTag("campaign_continuity_resolution")
+                        )
+                        Box {
+                            OutlinedButton(onClick = { continuityCloseChapterPickerOpen = true }) {
+                                Text("Closed in: " +
+                                    (chapters.firstOrNull { it.chapterId == continuityDraftCloseChapter }
+                                        ?.title ?: "No linked chapter"))
+                            }
+                            DropdownMenu(expanded = continuityCloseChapterPickerOpen,
+                                onDismissRequest = { continuityCloseChapterPickerOpen = false }) {
+                                DropdownMenuItem(text = { Text("No linked chapter") }, onClick = {
+                                    continuityDraftCloseChapter = null
+                                    continuityCloseChapterPickerOpen = false
+                                })
+                                chapters.forEach { chapter ->
+                                    DropdownMenuItem(
+                                        text = { Text("Chapter " + chapter.ordinal + ": " + chapter.title) },
+                                        onClick = {
+                                            continuityDraftCloseChapter = chapter.chapterId
+                                            continuityCloseChapterPickerOpen = false
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                modifier = Modifier.testTag("save_campaign_continuity"),
+                enabled = !busy && continuityDraftTitle.isNotBlank() &&
+                    (continuityDraftType != "ARC" || continuityDraftDetails.isNotBlank()),
+                onClick = {
+                    submit {
+                        val prior = continuityEditTarget
+                        if (prior == null) {
+                            campaignRepository.addContinuityItem(
+                                chosenCampaign.campaignId, continuityDraftType,
+                                continuityDraftTitle, continuityDraftDetails,
+                                continuityDraftOpenChapter
+                            )
+                        } else {
+                            campaignRepository.updateContinuityItem(
+                                chosenCampaign.campaignId, prior.itemId,
+                                continuityDraftTitle, continuityDraftDetails,
+                                if (continuityDraftComplete) {
+                                    if (prior.itemType == "ARC") "COMPLETE" else "RESOLVED"
+                                } else {
+                                    if (prior.itemType == "ARC") "ACTIVE" else "OPEN"
+                                },
+                                continuityDraftResolution, continuityDraftCloseChapter
+                            )
+                        }
+                        continuityEditTarget = null
+                        continuityDialogOpen = false
+                    }
+                }
+            ) { Text("Save") }
+        },
+        dismissButton = {
+            TextButton(onClick = {
+                continuityDialogOpen = false
+                continuityEditTarget = null
+            }) { Text("Cancel") }
+        }
+    )
+
+    deleteContinuityTarget?.let { target ->
+        if (campaignRepository != null) AlertDialog(
+            onDismissRequest = { if (!busy) deleteContinuityTarget = null },
+            title = { Text("Delete Campaign continuity item?") },
+            text = {
+                Text("This deletes only the player-authored Campaign note. " +
+                    "Existing chat messages, variants, chapter recaps and World Canon survive.")
+            },
+            confirmButton = {
+                TextButton(enabled = !busy, onClick = {
+                    submit {
+                        campaignRepository.deleteContinuityItem(target.campaignId, target.itemId)
+                        deleteContinuityTarget = null
+                    }
+                }) { Text("Delete note") }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleteContinuityTarget = null }) { Text("Cancel") }
+            }
+        )
+    }
+
     worldDraftJournalTarget?.let { target ->
         val campaign = campaigns.firstOrNull { it.campaignId == target.campaignId }
         if (campaign != null && campaignRepository != null && selected?.worldId == campaign.worldId) {
