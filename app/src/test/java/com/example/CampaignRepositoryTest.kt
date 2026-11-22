@@ -289,6 +289,13 @@ class CampaignRepositoryTest {
             .single { it.eventId == baseline.eventId }.status)
         assertEquals(listOf(baseline.eventId), worlds.getEvents(world.worldId)
             .filter { it.status == "ACCEPTED" }.map { it.eventId })
+        val worldContextBeforeAcceptance = requireNotNull(
+            com.example.domain.repository.ScenarioRepository(db).worldContextForChat("campaign-b-chat")
+        )
+        assertTrue(worldContextBeforeAcceptance.contains("Old baseline remains accepted."))
+        assertFalse(worldContextBeforeAcceptance.contains("Reviewed setting fact"))
+        assertFalse(worldContextBeforeAcceptance.contains("player-approved fact"))
+        assertFalse(worldContextBeforeAcceptance.contains("confidential speculation"))
         assertTrue(campaigns.journal(second.campaignId).isEmpty())
         assertEquals(privateEntry.body,
             campaigns.journal(first.campaignId).single().body)
@@ -299,6 +306,12 @@ class CampaignRepositoryTest {
         worlds.acceptEvent(world.worldId, proposal.eventId)
         assertEquals("ACCEPTED", worlds.getEvents(world.worldId)
             .single { it.eventId == proposal.eventId }.status)
+        val worldContextAfterAcceptance = requireNotNull(
+            com.example.domain.repository.ScenarioRepository(db).worldContextForChat("campaign-b-chat")
+        )
+        assertTrue(worldContextAfterAcceptance.contains("Reviewed setting fact"))
+        assertTrue(worldContextAfterAcceptance.contains("player-approved fact"))
+        assertFalse(worldContextAfterAcceptance.contains("confidential speculation"))
         assertEquals(privateEntry.body,
             campaigns.journal(first.campaignId).single().body)
     }
