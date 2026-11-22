@@ -196,6 +196,38 @@ class CampaignRepositoryTest {
         assertNotNull(db.chatDao().getChatById("journal-chat"))
     }
 
+    @Test fun savingCheckpointAfterWackNeverSelectsOldVisibleHistory() = runBlocking {
+        val world = worlds.createWorld("Reset safety")
+        val campaign = campaigns.createCampaign(world.worldId, "Reset RP")
+        db.chatDao().insertChat(ChatEntity(
+            chatId = "reset-story", displayName = "Reset", chatType = ChatType.SOLO
+        ))
+        val chapter = campaigns.addChapter(campaign.campaignId, "reset-story", "Restart")
+        db.messageDao().insertMessage(MessageEntity(
+            messageId = "pre-wack-source", chatId = "reset-story",
+            speakerType = SpeakerType.PERSONA, speakerId = "player",
+            speakerDisplayNameSnapshot = "Player", content = "The old timeline.",
+            orderIndex = 1L
+        ))
+        db.chatDao().setContextResetBoundary("reset-story", 2L, 2L)
+        val blank = campaigns.saveCheckpoint(campaign.campaignId, chapter.chapterId,
+            "After Wack")
+        assertNull(blank.sourceMessageId)
+        assertEquals(CampaignRepository.CheckpointSourceStatus.START_OF_CHAPTER,
+            campaigns.checkpointStatus(campaign.campaignId, blank.journalEntryId))
+        db.messageDao().insertMessage(MessageEntity(
+            messageId = "after-wack-source", chatId = "reset-story",
+            speakerType = SpeakerType.PERSONA, speakerId = "player",
+            speakerDisplayNameSnapshot = "Player", content = "The new timeline.",
+            orderIndex = 3L
+        ))
+        val next = campaigns.saveCheckpoint(campaign.campaignId, chapter.chapterId,
+            "New continuity")
+        assertEquals("after-wack-source", next.sourceMessageId)
+        assertEquals(CampaignRepository.CheckpointSourceStatus.CURRENT,
+            campaigns.checkpointStatus(campaign.campaignId, next.journalEntryId))
+    }
+
     @Test fun checkpointWithoutAnyMessageIsExplicitStartOfChapter() = runBlocking {
         val world = worlds.createWorld("Empty story")
         val campaign = campaigns.createCampaign(world.worldId, "Beginning")
