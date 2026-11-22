@@ -992,6 +992,87 @@ fun WorldsScreen(
                                         }
                                     }
                                     HorizontalDivider()
+                                    Text(
+                                        "Arcs & ongoing threads (" + continuityItems.size + ")",
+                                        style = MaterialTheme.typography.titleSmall
+                                    )
+                                    Text(
+                                        "Organize long-running arcs, promises, quests, discoveries and relationships " +
+                                            "without mandatory game mechanics. Each entry belongs only to this Campaign.",
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        TextButton(
+                                            modifier = Modifier.testTag("campaign_new_arc"),
+                                            onClick = {
+                                                continuityEditTarget = null
+                                                continuityDraftType = "ARC"
+                                                continuityDraftTitle = ""
+                                                continuityDraftDetails = ""
+                                                continuityDraftResolution = ""
+                                                continuityDraftComplete = false
+                                                continuityDraftOpenChapter = null
+                                                continuityDraftCloseChapter = null
+                                                continuityDialogOpen = true
+                                            }
+                                        ) { Text("New arc") }
+                                        TextButton(
+                                            modifier = Modifier.testTag("campaign_new_thread"),
+                                            onClick = {
+                                                continuityEditTarget = null
+                                                continuityDraftType = "THREAD"
+                                                continuityDraftTitle = ""
+                                                continuityDraftDetails = ""
+                                                continuityDraftResolution = ""
+                                                continuityDraftComplete = false
+                                                continuityDraftOpenChapter = null
+                                                continuityDraftCloseChapter = null
+                                                continuityDialogOpen = true
+                                            }
+                                        ) { Text("Track thread") }
+                                    }
+                                    continuityItems.forEach { item ->
+                                        Column(
+                                            modifier = Modifier.fillMaxWidth()
+                                                .testTag("campaign_continuity_" + item.itemId),
+                                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                                        ) {
+                                            Text(
+                                                item.itemType + " • " + item.status + " — " + item.title,
+                                                style = MaterialTheme.typography.titleSmall
+                                            )
+                                            if (item.details.isNotBlank()) Text(
+                                                item.details, style = MaterialTheme.typography.bodySmall,
+                                                maxLines = 4
+                                            )
+                                            if (item.resolution.isNotBlank()) Text(
+                                                "Ending: " + item.resolution,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                maxLines = 4
+                                            )
+                                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                                TextButton(
+                                                    modifier = Modifier.testTag("edit_campaign_continuity_" + item.itemId),
+                                                    onClick = {
+                                                        continuityEditTarget = item
+                                                        continuityDraftType = item.itemType
+                                                        continuityDraftTitle = item.title
+                                                        continuityDraftDetails = item.details
+                                                        continuityDraftResolution = item.resolution
+                                                        continuityDraftComplete = item.status == "COMPLETE" ||
+                                                            item.status == "RESOLVED"
+                                                        continuityDraftOpenChapter = item.openedChapterId
+                                                        continuityDraftCloseChapter = item.closedChapterId
+                                                        continuityDialogOpen = true
+                                                    }
+                                                ) { Text("Edit / resolve") }
+                                                TextButton(onClick = {
+                                                    deleteContinuityTarget = item
+                                                }) { Text("Delete") }
+                                            }
+                                        }
+                                    }
+                                    HorizontalDivider()
                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                         Text("Campaign Journal (" + journalEntries.size + ")",
                                             style = MaterialTheme.typography.titleSmall,
