@@ -51,6 +51,7 @@ class CampaignMemoryScopeTest {
         campaigns.addChapter(campaignA, "a-later", "First continuation")
         campaigns.addChapter(campaignB, "b-early", "Other opening")
         campaigns.addChapter(campaignB, "b-later", "Other continuation")
+        Unit
     }
 
     @After fun tearDown() = db.close()
