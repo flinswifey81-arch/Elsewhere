@@ -133,10 +133,10 @@ def require_rooted_disposable_emulator(serial: str) -> None:
     # userdebug/eng checks; never relax those checks or accept a real device.
     root_ready = False
     for attempt in range(4):
-        command = subprocess.run(
-            ["adb", "-s", serial, "root"], capture_output=True, check=False
-        )
-        if command.returncode == 0:
+        # Use the same verified target, error handling and injectable ADB
+        # wrapper as every other QA step. Direct subprocess calls here made
+        # the offline safety tests accidentally try to execute real adb.
+        if adb(serial, "root", optional=True) is not None:
             root_ready = True
             break
         if attempt < 3:
