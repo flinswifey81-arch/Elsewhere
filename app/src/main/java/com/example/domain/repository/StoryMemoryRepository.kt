@@ -931,6 +931,65 @@ class StoryMemoryRepository(
                 )
             } catch (_: IllegalArgumentException) { null }
         }
+        // Campaign history is opt-in per memory and only flows forward to
+        // LATER chapters. A Wack in the receiving chat cuts off all imported
+        // Campaign history until a future explicitly reviewed per-memory
+        // restore feature exists; it must never silently cross that boundary.
+        val sharedCandidates = mutableListOf<StoryMemoryRecord>()
+        if (chat.contextResetOrderIndex == null) {
+            val shareRows = database.campaignDao().memorySharesForLaterChapter(chatId, 128)
+            for (share in shareRows) {
+                val memory = dao.get(share.sourceMemoryId) ?: continue
+                val sourceChapter = database.campaignDao().getChapter(share.sourceChapterId)
+                    ?: continue
+                if (sourceChapter.campaignId != share.campaignId ||
+                    sourceChapter.chatId != memory.chatId ||
+                    memory.chatId == chatId ||
+                    memory.scope != "CHAT" ||
+                    memory.ownerId != memory.chatId ||
+                    memory.branchId != null ||
+                    StoryMemoryEligibilityPolicy.sha256(memory.content) != share.sourceContentSha256
+                ) continue
+                val sourceChat = database.chatDao().getChatById(memory.chatId) ?: continue
+                // Source provenance, chosen variant, source Wack, review state,
+                // visibility and recipient knowledge are all checked against
+                // the ORIGINAL story. A Campaign link never grants knowledge.
+                val eligible = try {
+                    eligibility(memory, memory.chatId,
+                        sourceChat.contextResetOrderIndex, recipient).eligible
+                } catch (_: IllegalArgumentException) {
+                    false // Unknown imported metadata must fail closed.
+                }
+                if (!eligible) continue
+                val record = try {
+                    recordFor(memory, dao.actors(memory.memoryId))
+                } catch (_: IllegalArgumentException) { continue }
+                val adjusted = if (recipient.kind == StoryActorKind.CHARACTER) {
+                    val perspective = dao.currentPerspectivesForMemory(memory.memoryId)
+                        .firstOrNull { it.characterId == recipient.stableId }
+                    if (perspective == null) record
+                    else {
+                        // A source edit invalidates both the Campaign share
+                        // and any previously authorized character perspective.
+                        if (perspective.contentSha256 !=
+                            StoryMemoryEligibilityPolicy.sha256(memory.content)) continue
+                        val stance = try {
+                            StoryCharacterPerspective.valueOf(perspective.stance)
+                        } catch (_: IllegalArgumentException) { continue }
+                        if (stance == StoryCharacterPerspective.UNAWARE) continue
+                        record.copy(
+                            perspectives = mapOf(recipient to stance),
+                            content = if (stance in setOf(
+                                StoryCharacterPerspective.BELIEVES,
+                                StoryCharacterPerspective.SUSPECTS
+                            )) stance.wrapForCharacter(record.content) else record.content
+                        )
+                    }
+                } else record
+                sharedCandidates += adjusted
+            }
+        }
+
         val archived = MemoryProvenanceReader(database.messageDao()).read(
             chatId = chatId,
             sourceMessageIds = candidates.mapNotNull {
@@ -940,8 +999,9 @@ class StoryMemoryRepository(
                 (it.origin as? StoryMemoryOrigin.Message)?.variantGroupId
             }
         )
-        StoryMemoryLocalRetriever.search(
-            candidates = candidates,
+        val sharedIds = sharedCandidates.map { it.memoryId }.toSet()
+        StoryMemoryLocalRetriever.searchValidated(
+            candidates = candidates + sharedCandidates,
             request = StoryMemorySearchRequest(
                 readContext = StoryMemoryReadContext(
                     chatId = chatId, branchId = null,
@@ -953,7 +1013,20 @@ class StoryMemoryRepository(
                 maxMemories = maxMemories,
                 maxSelectedTextCharacters = maxSelectedTextCharacters
             )
-        )
+        ) { record ->
+            if (record.memoryId in sharedIds) {
+                // Already validated inside this same Room transaction against
+                // SOURCE eligibility, the Campaign link and target Wack.
+                StoryMemoryDecision(StoryMemoryExclusion.ELIGIBLE)
+            } else StoryMemoryEligibilityPolicy.evaluate(
+                record, StoryMemoryReadContext(
+                    chatId = chatId, branchId = null,
+                    wackBoundaryOrderIndex = chat.contextResetOrderIndex,
+                    recipient = recipient, archivedMessages = archived,
+                    explicitReturns = returns
+                )
+            )
+        }
     }
 
     suspend fun eligibility(
