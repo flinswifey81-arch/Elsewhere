@@ -495,6 +495,16 @@ fun WorldsScreen(
                 } else {
                     Text("Type: " + continuityDraftType, style = MaterialTheme.typography.labelMedium)
                 }
+                if (continuityEditTarget != null) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(
+                            checked = continuityDraftComplete,
+                            onCheckedChange = { continuityDraftComplete = it },
+                            modifier = Modifier.testTag("campaign_continuity_complete")
+                        )
+                        Text(if (continuityDraftType == "ARC") "Arc complete" else "Resolved")
+                    }
+                }
                 OutlinedTextField(
                     value = continuityDraftTitle,
                     onValueChange = { continuityDraftTitle = it.take(200) },
@@ -536,14 +546,6 @@ fun WorldsScreen(
                     }
                 }
                 if (continuityEditTarget != null) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Checkbox(
-                            checked = continuityDraftComplete,
-                            onCheckedChange = { continuityDraftComplete = it },
-                            modifier = Modifier.testTag("campaign_continuity_complete")
-                        )
-                        Text(if (continuityDraftType == "ARC") "Arc complete" else "Resolved")
-                    }
                     if (continuityDraftComplete) {
                         OutlinedTextField(
                             value = continuityDraftResolution,
@@ -650,13 +652,14 @@ fun WorldsScreen(
                 onDismissRequest = { if (!busy) worldDraftJournalTarget = null },
                 title = { Text("Propose for shared World Canon?") },
                 text = {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Column(
+                        modifier = Modifier.heightIn(max = 440.dp).verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
                         Text(
-                            "This creates a DRAFT in " + selected.title +
-                                ". It will not affect World Canon or any other Campaign " +
-                                "until you separately review and choose Accept as Canon. " +
-                                "Only the text shown below is copied; check it for " +
-                                "private details, spoilers and character secrets.",
+                            "Only the reviewed text below becomes a World DRAFT. " +
+                                "It is not accepted canon until you separately choose Accept as Canon. " +
+                                "Check carefully for spoilers and private Character information.",
                             style = MaterialTheme.typography.bodySmall
                         )
                         OutlinedTextField(
