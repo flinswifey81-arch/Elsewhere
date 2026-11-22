@@ -986,7 +986,13 @@ class StoryMemoryRepository(
                         )
                     }
                 } else record
-                sharedCandidates += adjusted
+                // The source remains CHAT-owned in storage. The generated
+                // recipient sees an explicitly approved Campaign-scope view
+                // with the original sourceChatId/provenance intact.
+                sharedCandidates += adjusted.copy(
+                    scope = StoryMemoryOwnerScope.CAMPAIGN,
+                    ownerId = share.campaignId
+                )
             }
         }
 
