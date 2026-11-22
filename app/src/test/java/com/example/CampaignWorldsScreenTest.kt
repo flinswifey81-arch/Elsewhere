@@ -40,6 +40,46 @@ class CampaignWorldsScreenTest {
     }
     @After fun tearDown() = db.close()
 
+    @Test fun campaignJournalCanBeSavedThroughWorldUiWithoutChangingChat() {
+        val world = runBlocking { worlds.createWorld("Journal World") }
+        val campaign = runBlocking {
+            campaigns.createCampaign(world.worldId, "Campaign A")
+        }
+        runBlocking {
+            db.chatDao().insertChat(ChatEntity(
+                chatId = "journal-test-chat", displayName = "Original RP", chatType = ChatType.SOLO
+            ))
+        }
+        compose.setContent {
+            MaterialTheme {
+                WorldsScreen(worlds, chatRepository = chats, campaignRepository = campaigns)
+            }
+        }
+        compose.waitUntil(20_000) {
+            compose.onAllNodesWithTag("world_card_" + world.worldId)
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithTag("world_card_" + world.worldId).performClick()
+        compose.onNodeWithTag("worlds_list")
+            .performScrollToNode(hasTestTag("open_campaign_" + campaign.campaignId))
+        compose.onNodeWithTag("open_campaign_" + campaign.campaignId).performClick()
+        compose.onNodeWithTag("worlds_list")
+            .performScrollToNode(hasTestTag("add_campaign_journal"))
+        compose.onNodeWithTag("add_campaign_journal").assertIsEnabled().performClick()
+        compose.onNodeWithTag("campaign_journal_title").performTextInput("First Discovery")
+        compose.onNodeWithTag("campaign_journal_body")
+            .performTextInput("The observatory is still unexplored.")
+        compose.onNodeWithTag("save_campaign_journal_entry").assertIsEnabled().performClick()
+        compose.waitUntil(20_000) {
+            runBlocking { campaigns.journal(campaign.campaignId).size == 1 }
+        }
+        val saved = runBlocking { campaigns.journal(campaign.campaignId).single() }
+        assertEquals("JOURNAL", saved.entryType)
+        assertEquals("First Discovery", saved.title)
+        assertEquals("The observatory is still unexplored.", saved.body)
+        assertNotNull(runBlocking { db.chatDao().getChatById("journal-test-chat") })
+    }
+
     @Test fun creatingACampaignThroughWorldUiPreservesStandaloneChat() {
         val world = runBlocking { worlds.createWorld("Independent setting") }
         runBlocking {
