@@ -103,6 +103,53 @@ class StoryMemoriesScreenTest {
     }
 
     @Test
+    fun CampaignMemoryRequiresExplicitConfirmationAndCanBeRevokedWithoutDeletingSource() {
+        val campaignRepository = com.example.domain.repository.CampaignRepository(database)
+        val worldRepository = com.example.domain.repository.WorldRepository(database)
+        val saved = runBlocking {
+            val world = worldRepository.createWorld("Test World")
+            val campaign = campaignRepository.createCampaign(world.worldId, "My Playthrough")
+            campaignRepository.addChapter(campaign.campaignId, "ui-story", "Opening")
+            repository.saveManual("ui-story", "The silver compass belongs to Mara.")
+        }
+        composeRule.setContent {
+            MaterialTheme {
+                StoryMemoriesScreen(
+                    "ui-story", repository, chats, onNavigateBack = {},
+                    campaignRepository = campaignRepository
+                )
+            }
+        }
+        composeRule.waitUntil(20_000) {
+            composeRule.onAllNodesWithTag("campaign_memory_share_" + saved.memoryId)
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithTag("campaign_memory_share_" + saved.memoryId)
+            .performScrollTo().assertIsEnabled().performClick()
+        composeRule.onNodeWithTag("confirm_campaign_memory_share")
+            .assertIsEnabled().performClick()
+        composeRule.waitUntil(20_000) {
+            runBlocking { database.campaignDao().getAllMemoryShares().size == 1 }
+        }
+        composeRule.waitUntil(20_000) {
+            runCatching {
+                composeRule.onNodeWithText("Stop Campaign sharing").assertIsEnabled()
+            }.isSuccess
+        }
+        composeRule.onNodeWithTag("campaign_memory_share_" + saved.memoryId)
+            .performScrollTo().performClick()
+        composeRule.onNodeWithTag("confirm_campaign_memory_unshare")
+            .assertIsEnabled().performClick()
+        composeRule.waitUntil(20_000) {
+            runBlocking { database.campaignDao().getAllMemoryShares().isEmpty() }
+        }
+        assertEquals("The silver compass belongs to Mara.", runBlocking {
+            database.storyMemoryDao().get(saved.memoryId)?.content
+        })
+        assertTrue(runBlocking { database.chatDao().getChatById("ui-story") != null })
+    }
+
+    @Test
     fun restoreAfterWackRequiresAnExplicitConfirmationAndRestoresOnlyOneMemory() {
         runBlocking {
             database.chatDao().insertChat(
