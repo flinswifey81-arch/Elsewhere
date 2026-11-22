@@ -17,6 +17,7 @@ import com.example.domain.story.StorySegmentType
 import com.example.domain.story.StoryResponseCodec
 import com.example.domain.story.StorySpeakerIdentity
 import com.example.domain.memory.StoryMemoryRecord
+import com.example.domain.memory.StoryMemoryOwnerScope
 import com.example.domain.memory.promptClaimLabel
 
 class ContextCompilerV1 {
@@ -214,10 +215,19 @@ class ContextCompilerV1 {
             }
 
             if (storyMemories.isNotEmpty()) {
-                appendLine("--- RELEVANT CHAT STORY MEMORY (RECIPIENT APPROVED) ---")
-                appendLine("Only the responding Character may treat these approved local memories as known. Do not transfer private knowledge to other Characters, override later events, or promote them to shared World canon.")
+                val hasCampaign = storyMemories.any {
+                    it.scope == StoryMemoryOwnerScope.CAMPAIGN
+                }
+                appendLine(
+                    if (hasCampaign)
+                        "--- RELEVANT CHAT & CAMPAIGN STORY MEMORY (RECIPIENT APPROVED) ---"
+                    else "--- RELEVANT CHAT STORY MEMORY (RECIPIENT APPROVED) ---"
+                )
+                appendLine("Only the responding Character may treat these approved local memories as known. Campaign memories are player-shared history from earlier chapters of THIS Campaign, not universal knowledge. Do not transfer private knowledge to other Characters, override later events, or promote them to shared World canon.")
                 storyMemories.forEach { memory ->
-                    appendLine("- [${memory.promptClaimLabel()}] ${memory.content}")
+                    val scopeLabel = if (memory.scope == StoryMemoryOwnerScope.CAMPAIGN)
+                        "CAMPAIGN / " else ""
+                    appendLine("- [${scopeLabel}${memory.promptClaimLabel()}] ${memory.content}")
                 }
                 appendLine()
             }
