@@ -28,6 +28,26 @@ interface MessageDao {
     @Query("SELECT * FROM messages WHERE chatId = :chatId ORDER BY orderIndex ASC")
     suspend fun getMessagesForChatOnce(chatId: String): List<MessageEntity>
 
+    /**
+     * Local reader-only search over selected saved turns, including visible pre-Wack
+     * transcript. Never use these results as generation context or Character knowledge.
+     *
+     * instr() treats %, _ and other punctuation literally. The chat and primary-
+     * variant predicates run in SQLite, before a bounded result is returned.
+     * This first pass scans matching chat content; a separately reviewed indexed
+     * implementation can replace it without changing the UI contract.
+     */
+    @Query("""
+        SELECT * FROM messages
+        WHERE chatId = :chatId AND isPrimaryVariant = 1
+          AND instr(lower(content), lower(:phrase)) > 0
+        ORDER BY orderIndex DESC, rowid DESC
+        LIMIT :limit
+    """)
+    suspend fun searchSelectedHistoryForReader(
+        chatId: String, phrase: String, limit: Int
+    ): List<MessageEntity>
+
     /** All saved, selected turns—including pre-Wack history—for the PDF picker. */
     @Query("SELECT COUNT(*) FROM messages WHERE chatId = :chatId AND isPrimaryVariant = 1")
     suspend fun countSelectedTurnsForPdf(chatId: String): Int

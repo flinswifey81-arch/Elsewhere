@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.Bookmarks
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Groups
@@ -208,6 +209,7 @@ fun ChatDetailScreen(
     }
 
     var showChatMenu by remember { mutableStateOf(false) }
+    var showHistorySearch by rememberSaveable(chatId) { mutableStateOf(false) }
     var showWackConfirm by remember { mutableStateOf(false) }
     val imagePicker = rememberLauncherForActivityResult(
         ActivityResultContracts.PickVisualMedia()
@@ -293,6 +295,14 @@ fun ChatDetailScreen(
             dismissButton = {
                 TextButton(onClick = { showPdfExport = false }) { Text("Cancel") }
             }
+        )
+    }
+
+    if (showHistorySearch) {
+        ChatHistorySearchDialog(
+            chatId = chatId,
+            messageRepository = appContainer.messageRepository,
+            onDismiss = { showHistorySearch = false }
         )
     }
 
@@ -392,6 +402,15 @@ fun ChatDetailScreen(
                                 onClick = {
                                     showChatMenu = false
                                     onNavigateToInspector((uiState as? ChatUiState.Success)?.selectedGroupCharacterId)
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Search chat history") },
+                                leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+                                modifier = Modifier.testTag("search_chat_history"),
+                                onClick = {
+                                    showChatMenu = false
+                                    showHistorySearch = true
                                 }
                             )
                             DropdownMenuItem(

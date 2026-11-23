@@ -36,6 +36,22 @@ class MessageRepository(
     suspend fun getMessagesForChatOnce(chatId: String): List<MessageEntity> =
         messageDao.getMessagesForChatOnce(chatId)
 
+    /**
+     * User-visible transcript lookup only: results are NOT eligible memory or
+     * automatically injected into a Character's prompt. Wack preserves readable
+     * history, but remains a hard boundary for generation and memory retrieval.
+     */
+    suspend fun searchSelectedHistoryForReader(
+        chatId: String,
+        phrase: String,
+        maxResults: Int = 30
+    ): List<MessageEntity> {
+        val cleaned = phrase.trim()
+        require(cleaned.length in 2..120) { "Search for 2–120 characters." }
+        require(maxResults in 1..50) { "History search must return 1–50 results." }
+        return messageDao.searchSelectedHistoryForReader(chatId, cleaned, maxResults)
+    }
+
     /** Unlike chat scrollback, counts the full selected archived transcript. */
     suspend fun countSelectedTurnsForPdf(chatId: String): Int =
         messageDao.countSelectedTurnsForPdf(chatId)
