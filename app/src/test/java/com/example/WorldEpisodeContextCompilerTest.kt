@@ -89,6 +89,34 @@ class WorldEpisodeContextCompilerTest {
         assertFalse(prompt.first().content.contains("The archway was repaired."))
     }
 
+    @Test
+    fun scenarioEpisodeGetsOnlyItsExplicitlyLinkedWorldBaseline() {
+        val scenario = ScenarioDefinition(title = "Night Watch", premise = "Patrol the city")
+        val current = greeting.copy(
+            messageId = "persona-turn", speakerType = SpeakerType.PERSONA,
+            speakerId = persona.personaId,
+            speakerDisplayNameSnapshot = persona.displayName,
+            content = "What happened at the archway?"
+        )
+        val compiler = ScenarioContextCompiler()
+        val withWorld = compiler.compile(
+            scenario = scenario, persona = persona,
+            settings = ChatSettingsEntity(chatId = "episode"),
+            history = emptyList(), current = current, worldContext = sharedWorld
+        )
+        assertEquals(Role.SYSTEM, withWorld.first().role)
+        assertTrue(withWorld.first().content.contains("--- SHARED WORLD BASELINE ---"))
+        assertTrue(withWorld.first().content.contains("The archway was repaired."))
+        assertTrue(withWorld.first().content.contains("Hidden information is not automatically known to every NPC"))
+        val unlinked = compiler.compile(
+            scenario, persona, ChatSettingsEntity(chatId = "episode"),
+            history = emptyList(), current = current
+        )
+        assertFalse(unlinked.first().content.contains("The archway was repaired."))
+        assertFalse(unlinked.first().content.contains("--- SHARED WORLD BASELINE ---"))
+    }
+}
+
     private fun rememberedCompass(): StoryMemoryRecord = StoryMemoryRecord(
         memoryId = "silver-compass", content = "Mara promised Rowan the silver compass.",
         createdAtEpochMillis = 10L, updatedAtEpochMillis = 10L,
