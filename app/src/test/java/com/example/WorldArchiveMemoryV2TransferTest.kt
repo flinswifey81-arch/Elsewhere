@@ -200,6 +200,110 @@ class WorldArchiveMemoryV2TransferTest {
         assertEquals(firstMemoryId, original.single { it.memoryId == firstMemoryId }.memoryId)
     }
 
+    @Test
+    fun encryptedWorldRoundTripPreservesCampaignChaptersJournalAndMemoryShares() = runBlocking {
+        seedStoryWorld()
+        val secondChat = "second-chapter-$nonce"
+        db.backupDao().insertChats(listOf(ChatEntity(
+            chatId = secondChat, chatType = ChatType.SOLO, displayName = "The sequel"
+        )))
+        db.backupDao().insertChatSettings(listOf(ChatSettingsEntity(secondChat)))
+        db.backupDao().insertChatParticipants(listOf(
+            ChatParticipantEntity(secondChat, characterId)
+        ))
+        db.worldDao().insertMembership(
+            WorldMembershipEntity(worldId, WorldResourceType.CHAT.name, secondChat)
+        )
+        val campaignId = "campaign-$nonce"
+        val firstChapterId = "first-chapter-$nonce"
+        val secondChapterId = "second-chapter-$nonce"
+        val journalId = "checkpoint-$nonce"
+        val threadId = "thread-$nonce"
+        val memory = db.storyMemoryDao().get(firstMemoryId)!!
+        val campaigns = db.campaignDao()
+        campaigns.insertCampaigns(listOf(
+            CampaignEntity(campaignId = campaignId, worldId = worldId,
+                title = "Varka's Journey")
+        ))
+        campaigns.insertChapters(listOf(
+            CampaignChapterEntity(chapterId = firstChapterId, campaignId = campaignId,
+                chatId = chatId, ordinal = 1L, title = "The promise"),
+            CampaignChapterEntity(chapterId = secondChapterId, campaignId = campaignId,
+                chatId = secondChat, ordinal = 2L, title = "The return")
+        ))
+        campaigns.insertJournalEntries(listOf(CampaignJournalEntryEntity(
+            journalEntryId = journalId, campaignId = campaignId,
+            chapterId = firstChapterId, sourceChatId = chatId,
+            sourceMessageId = messageId,
+            sourceVariantGroupId = db.messageDao().getMessageById(messageId)!!.variantGroupId,
+            sourceOrderIndex = 1L, sourceContentSha256 = digest("I promised I would come back."),
+            entryType = "CHECKPOINT", title = "Keep the promise",
+            body = "Our private milestone"
+        )))
+        campaigns.insertContinuityItems(listOf(CampaignContinuityItemEntity(
+            itemId = threadId, campaignId = campaignId, itemType = "THREAD",
+            title = "Varka returns", openedChapterId = firstChapterId,
+            sourceJournalEntryId = journalId
+        )))
+        campaigns.insertMemoryShares(listOf(CampaignMemoryShareEntity(
+            campaignId = campaignId, sourceChapterId = firstChapterId,
+            sourceMemoryId = firstMemoryId, sourceContentSha256 = digest(memory.content)
+        )))
+
+        val preview = transfer.previewExport(worldId)
+        assertEquals(1, preview.campaigns)
+        assertEquals(2, preview.campaignChapters)
+        assertEquals(1, preview.journalEntries)
+        assertEquals(1, preview.campaignContinuityItems)
+        assertEquals(1, preview.sharedMemories)
+        assertTrue(preview.containsPrivateMaterial)
+        assertTrue(runCatching {
+            transfer.exportReviewed(preview, ByteArrayOutputStream(),
+                "private archive passphrase".toCharArray(), false)
+        }.isFailure)
+        val exported = ByteArrayOutputStream()
+        transfer.exportReviewed(preview, exported,
+            "private archive passphrase".toCharArray(), true)
+        val importedWorldId = transfer.inspectForImport(
+            ByteArrayInputStream(exported.toByteArray()),
+            "private archive passphrase".toCharArray()
+        ).use { opened ->
+            assertEquals(1, opened.preview.campaigns)
+            assertEquals(2, opened.preview.campaignChapters)
+            assertEquals(1, opened.preview.journalEntries)
+            assertEquals(1, opened.preview.sharedMemories)
+            transfer.importReviewed(opened, "private archive passphrase".toCharArray()).worldId
+        }
+        assertNotEquals(worldId, importedWorldId)
+        val copy = campaigns.forWorld(importedWorldId).single()
+        assertNotEquals(campaignId, copy.campaignId)
+        val chapters = campaigns.chapters(copy.campaignId)
+        assertEquals(listOf(1L, 2L), chapters.map { it.ordinal })
+        assertEquals(2, chapters.map { it.chatId }.distinct().size)
+        assertTrue(chapters.all { it.chatId !in setOf(chatId, secondChat) })
+        val importedJournal = campaigns.journal(copy.campaignId).single()
+        assertNotEquals(journalId, importedJournal.journalEntryId)
+        assertEquals(chapters[0].chapterId, importedJournal.chapterId)
+        assertEquals(chapters[0].chatId, importedJournal.sourceChatId)
+        val copiedMessage = db.messageDao().getMessageById(
+            importedJournal.sourceMessageId!!
+        )!!
+        assertEquals(chapters[0].chatId, copiedMessage.chatId)
+        assertEquals(digest(copiedMessage.content), importedJournal.sourceContentSha256)
+        val importedThread = campaigns.continuityItems(copy.campaignId).single()
+        assertEquals(importedJournal.journalEntryId, importedThread.sourceJournalEntryId)
+        assertEquals(chapters[0].chapterId, importedThread.openedChapterId)
+        val link = campaigns.memorySharesForCampaign(copy.campaignId).single()
+        assertEquals(chapters[0].chapterId, link.sourceChapterId)
+        val importedMemory = db.storyMemoryDao().get(link.sourceMemoryId)!!
+        assertEquals(chapters[0].chatId, importedMemory.chatId)
+        assertEquals(digest(importedMemory.content), link.sourceContentSha256)
+        // Copying a World never edits the source Campaign or its approval.
+        assertEquals(1, campaigns.memorySharesForCampaign(campaignId).size)
+        assertEquals(2, campaigns.chapters(campaignId).size)
+        assertEquals(messageId, db.messageDao().getMessageById(messageId)?.messageId)
+    }
+
     @Test fun worldExportDoesNotLeakMemoriesFromUnlinkedChats() = runBlocking {
         seedStoryWorld()
         val unrelated = "unlinked-$nonce"

@@ -46,6 +46,16 @@ data class WorldArchiveStateV1(
     val storyMemoryKnowledgeChanges: List<StoryMemoryKnowledgeChangeEntity> = emptyList(),
     @Json(name = "story_memory_perspectives")
     val storyMemoryPerspectives: List<StoryMemoryPerspectiveEntity> = emptyList(),
+    // Optional v1 extension: one Campaign's private story remains distinct from World canon.
+    // Old encrypted Worlds lacking these fields still deserialize to empty lists.
+    val campaigns: List<CampaignEntity> = emptyList(),
+    @Json(name = "campaign_chapters") val campaignChapters: List<CampaignChapterEntity> = emptyList(),
+    @Json(name = "campaign_journal_entries")
+    val campaignJournalEntries: List<CampaignJournalEntryEntity> = emptyList(),
+    @Json(name = "campaign_continuity_items")
+    val campaignContinuityItems: List<CampaignContinuityItemEntity> = emptyList(),
+    @Json(name = "campaign_memory_shares")
+    val campaignMemoryShares: List<CampaignMemoryShareEntity> = emptyList(),
     @Json(name = "conversation_summaries") val conversationSummaries: List<ConversationSummaryEntity> = emptyList(),
     val relationships: List<RelationshipEntity> = emptyList(),
     val lorebooks: List<LorebookEntity> = emptyList(),

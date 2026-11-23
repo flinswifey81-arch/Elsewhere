@@ -339,6 +339,58 @@ object WorldArchiveStateCodec {
                 item.contentSha256.matches(sha256Pattern)
         }) { "Story Memory perspective is malformed or refers to another World" }
 
+        // Campaigns are independent, private histories. Never infer links by a
+        // shared World or reuse a chapter/message ID from a sibling Campaign.
+        val campaignIds = ids(state.campaigns, "Campaigns") { it.campaignId }
+        val chapterIds = ids(state.campaignChapters, "Campaign chapters") { it.chapterId }
+        val chaptersById = state.campaignChapters.associateBy { it.chapterId }
+        val journalIds = ids(state.campaignJournalEntries, "Campaign journal entries") {
+            it.journalEntryId
+        }
+        ids(state.campaignContinuityItems, "Campaign continuity items") { it.itemId }
+        require(state.campaigns.all { it.worldId == state.worldId && it.title.isNotBlank() }) {
+            "Campaign belongs to another World or lacks a title"
+        }
+        requireUniqueComposite(state.campaignChapters, "Campaign chat links") { it.chatId }
+        requireUniqueComposite(state.campaignChapters, "Campaign ordinals") {
+            "${it.campaignId}|${it.ordinal}"
+        }
+        require(state.campaignChapters.all {
+            it.campaignId in campaignIds && it.chatId in chats && it.ordinal > 0L
+        }) { "Campaign chapter refers to an unselected chat or Campaign" }
+        require(state.campaignJournalEntries.all { row ->
+            row.campaignId in campaignIds &&
+                (row.chapterId == null || chaptersById[row.chapterId]?.campaignId == row.campaignId) &&
+                (row.sourceMessageId == null || messageById[row.sourceMessageId]?.let { source ->
+                    row.sourceChatId == source.chatId &&
+                        (row.sourceVariantGroupId == null ||
+                            row.sourceVariantGroupId == source.variantGroupId)
+                } == true) &&
+                (row.sourceContentSha256 == null || row.sourceContentSha256.matches(sha256Pattern))
+        }) { "Campaign journal contains an invalid chapter or source message" }
+        require(state.campaignContinuityItems.all { row ->
+            row.campaignId in campaignIds &&
+                (row.openedChapterId == null ||
+                    chaptersById[row.openedChapterId]?.campaignId == row.campaignId) &&
+                (row.closedChapterId == null ||
+                    chaptersById[row.closedChapterId]?.campaignId == row.campaignId) &&
+                (row.sourceJournalEntryId == null || state.campaignJournalEntries.any {
+                    it.journalEntryId == row.sourceJournalEntryId && it.campaignId == row.campaignId
+                })
+        }) { "Campaign continuity points into another playthrough" }
+        requireUniqueComposite(state.campaignMemoryShares, "Campaign memory approvals") {
+            "${it.campaignId}|${it.sourceMemoryId}"
+        }
+        require(state.campaignMemoryShares.all { share ->
+            val chapter = chaptersById[share.sourceChapterId]
+            val memory = memoryById[share.sourceMemoryId]
+            share.campaignId in campaignIds && chapter != null && memory != null &&
+                chapter.campaignId == share.campaignId &&
+                memory.chatId == chapter.chatId &&
+                memory.ownerId == memory.chatId && memory.scope == "CHAT" &&
+                share.sourceContentSha256.matches(sha256Pattern)
+        }) { "Campaign memory approval lost its original chapter, memory or digest" }
+
         require(state.relationships.all { relation ->
             relation.sourceCharacterId in characters &&
                 relation.targetCharacterId in characters &&

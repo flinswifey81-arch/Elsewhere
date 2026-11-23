@@ -52,7 +52,12 @@ class WorldArchiveTransferCoordinator(
         val attachmentCount: Int,
         val containsPrivateMaterial: Boolean,
         val containsUnsentDrafts: Boolean,
-        internal val fingerprint: String
+        internal val fingerprint: String,
+        val campaigns: Int = 0,
+        val campaignChapters: Int = 0,
+        val journalEntries: Int = 0,
+        val campaignContinuityItems: Int = 0,
+        val sharedMemories: Int = 0
     )
 
     class ImportCandidate internal constructor(
@@ -187,12 +192,6 @@ class WorldArchiveTransferCoordinator(
     private suspend fun captureWorld(worldId: String): Source {
         val dao = database.backupDao()
         val payload = database.withTransaction {
-            // Until Campaign-aware encrypted World transfer and semantic ID
-            // remapping exist, refuse rather than silently exporting only the
-            // World and dropping its separate playthrough organization.
-            require(database.campaignDao().forWorld(worldId).isEmpty()) {
-                "This World contains Campaigns. Encrypted World archives cannot carry them yet; use whole-app encrypted backup."
-            }
             BackupPayload(
                 characters = dao.getCharacters(),
                 personas = dao.getPersonas(),
@@ -211,6 +210,11 @@ class WorldArchiveTransferCoordinator(
                 storyMemoryReturns = database.storyMemoryDao().getAllReturns(),
                 storyMemoryKnowledgeChanges = database.storyMemoryDao().getAllKnowledgeChanges(),
                 storyMemoryPerspectives = database.storyMemoryDao().getAllPerspectives(),
+                campaigns = database.campaignDao().getAllCampaigns(),
+                campaignChapters = database.campaignDao().getAllChapters(),
+                campaignJournalEntries = database.campaignDao().getAllJournalEntries(),
+                campaignContinuityItems = database.campaignDao().getAllContinuityItems(),
+                campaignMemoryShares = database.campaignDao().getAllMemoryShares(),
                 conversationSummaries = dao.getConversationSummaries(),
                 lorebooks = dao.getLorebooks(),
                 lorebookEntries = dao.getLorebookEntries(),
@@ -262,13 +266,22 @@ class WorldArchiveTransferCoordinator(
             scenarios = state.scenarios.size,
             npcDossiers = state.npcDossiers.size,
             attachmentCount = state.messageAttachments.size,
+            campaigns = state.campaigns.size,
+            campaignChapters = state.campaignChapters.size,
+            journalEntries = state.campaignJournalEntries.size,
+            campaignContinuityItems = state.campaignContinuityItems.size,
+            sharedMemories = state.campaignMemoryShares.size,
             containsPrivateMaterial =
                 state.characters.any { !it.authorNotesJson.isNullOrBlank() } ||
                 state.personas.any { !it.privateNotesJson.isNullOrBlank() } ||
                 state.npcDossiers.any { it.secrets.isNotBlank() || it.authorNotes.isNotBlank() } ||
                 state.npcLibraryEntries.any { it.secrets.isNotBlank() || it.authorNotes.isNotBlank() } ||
                 state.lorebookEntries.any { it.notes.isNotBlank() } ||
-                state.storyMemories.isNotEmpty(),
+                state.storyMemories.isNotEmpty() ||
+                state.campaigns.isNotEmpty() ||
+                state.campaignJournalEntries.isNotEmpty() ||
+                state.campaignContinuityItems.isNotEmpty() ||
+                state.campaignMemoryShares.isNotEmpty(),
             containsUnsentDrafts = state.chatSettings.any { !it.draftMessage.isNullOrBlank() } ||
                 state.messageAttachments.any { it.messageId == null },
             fingerprint = MessageDigest.getInstance("SHA-256").digest(bytes).hex()

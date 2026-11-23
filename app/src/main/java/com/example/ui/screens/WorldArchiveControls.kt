@@ -210,9 +210,13 @@ fun WorldArchiveControls(
                     Text("${preview.characters} Characters · ${preview.personas} Personas · " +
                         "${preview.scenarios} Scenarios · ${preview.npcDossiers} NPC dossiers")
                     Text("${preview.storyMemories} Story Memories (including knowledge and perspectives)")
+                    Text("${preview.campaigns} private Campaigns · ${preview.campaignChapters} chapters · " +
+                        "${preview.journalEntries} journal entries · " +
+                        "${preview.campaignContinuityItems} arcs/threads · " +
+                        "${preview.sharedMemories} approved memory links")
                     if (preview.containsPrivateMaterial || preview.containsUnsentDrafts) {
                         Text(
-                            "Includes Story Memories, private notes, NPC secrets or unsent drafts. " +
+                            "Includes private Campaign history, Story Memories, notes, NPC secrets or unsent drafts. " +
                                 "Only include these in an encrypted file you control.",
                             color = MaterialTheme.colorScheme.error
                         )
@@ -221,7 +225,7 @@ fun WorldArchiveControls(
                                 checked = includePrivate, onCheckedChange = { includePrivate = it },
                                 enabled = !busy
                             )
-                            Text("Include Story Memories, private notes, secrets and drafts")
+                            Text("Include Campaigns, Story Memories, private notes, secrets and drafts")
                         }
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -348,10 +352,14 @@ fun WorldArchiveControls(
                     Text("${preview.messageAttachments} chat images · " +
                         "${preview.otherImageFiles} profile images")
                     Text("${preview.storyMemories} Story Memories with permissions and history")
+                    Text("${preview.campaigns} private Campaigns · ${preview.campaignChapters} chapters · " +
+                        "${preview.journalEntries} journal entries · " +
+                        "${preview.campaignContinuityItems} arcs/threads · " +
+                        "${preview.sharedMemories} approved memory links")
                     if (preview.containsUnsentDrafts || preview.containsPrivateNotes ||
                         preview.containsNpcSecrets) {
                         Text(
-                            "This archive contains Story Memories, drafts, private notes, or NPC secrets. " +
+                            "This archive contains private Campaign history, Story Memories, drafts, private notes or NPC secrets. " +
                                 "They will be restored into this device's private storage.",
                             color = MaterialTheme.colorScheme.error,
                             style = MaterialTheme.typography.bodySmall

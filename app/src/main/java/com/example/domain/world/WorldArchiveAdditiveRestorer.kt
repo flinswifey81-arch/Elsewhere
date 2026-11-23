@@ -324,6 +324,20 @@ class WorldArchiveAdditiveRestorer(
         if (state.memberships.isNotEmpty()) world.insertMemberships(state.memberships)
         if (state.cast.isNotEmpty()) world.insertCast(state.cast)
         if (state.continuity.isNotEmpty()) world.insertEvents(state.continuity)
+        // Preserve private Campaign organization after World/chat/memory parents exist.
+        // Every row remains inside this same rollback-safe Room transaction.
+        val campaign = database.campaignDao()
+        if (state.campaigns.isNotEmpty()) campaign.insertCampaigns(state.campaigns)
+        if (state.campaignChapters.isNotEmpty()) campaign.insertChapters(state.campaignChapters)
+        if (state.campaignJournalEntries.isNotEmpty()) {
+            campaign.insertJournalEntries(state.campaignJournalEntries)
+        }
+        if (state.campaignContinuityItems.isNotEmpty()) {
+            campaign.insertContinuityItems(state.campaignContinuityItems)
+        }
+        if (state.campaignMemoryShares.isNotEmpty()) {
+            campaign.insertMemoryShares(state.campaignMemoryShares)
+        }
     }
 
     private fun journalFile(worldId: String): File {

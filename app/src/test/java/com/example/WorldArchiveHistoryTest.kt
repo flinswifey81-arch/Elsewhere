@@ -106,6 +106,138 @@ class WorldArchiveHistoryTest {
     )
 
     @Test
+    fun selectingOnlyOneChapterRejectsPartialCampaignExportWithoutLosingJournal() {
+        val nextChat = chat.copy(chatId = "chat-next", displayName = "Continuation")
+        val campaign = CampaignEntity(campaignId = "campaign-complete", worldId = world.worldId,
+            title = "A complete playthrough")
+        val payload = sourcePayload().copy(
+            chats = listOf(chat, nextChat),
+            chatSettings = listOf(
+                ChatSettingsEntity(chat.chatId), ChatSettingsEntity(nextChat.chatId)
+            ),
+            worldMemberships = listOf(
+                WorldMembershipEntity(world.worldId, "CHAT", chat.chatId),
+                WorldMembershipEntity(world.worldId, "CHAT", nextChat.chatId)
+            ),
+            campaigns = listOf(campaign),
+            campaignChapters = listOf(
+                CampaignChapterEntity(chapterId = "chapter-1",
+                    campaignId = campaign.campaignId, chatId = chat.chatId,
+                    ordinal = 1L, title = "Opening"),
+                CampaignChapterEntity(chapterId = "chapter-2",
+                    campaignId = campaign.campaignId, chatId = nextChat.chatId,
+                    ordinal = 2L, title = "Return")
+            ),
+            campaignJournalEntries = listOf(CampaignJournalEntryEntity(
+                journalEntryId = "journal-complete", campaignId = campaign.campaignId,
+                chapterId = "chapter-2", title = "Important private ending"
+            ))
+        )
+        assertThrows(IllegalArgumentException::class.java) {
+            WorldArchiveSnapshotSelector.select(
+                payload, world.worldId,
+                selectedChatIds = setOf(chat.chatId), privateDataReviewed = true
+            )
+        }
+        val complete = WorldArchiveSnapshotSelector.select(
+            payload, world.worldId, privateDataReviewed = true
+        )
+        assertEquals(1, complete.campaigns.size)
+        assertEquals(2, complete.campaignChapters.size)
+        assertEquals("Important private ending",
+            complete.campaignJournalEntries.single().title)
+        assertThrows(IllegalArgumentException::class.java) {
+            WorldArchiveSnapshotSelector.select(
+                payload, world.worldId, privateDataReviewed = false
+            )
+        }
+    }
+
+    @Test
+    fun campaignWorldArchivePreservesPrivateHistoryAndRemapsEveryLink() {
+        val campaign = CampaignEntity(campaignId = "campaign-a", worldId = world.worldId,
+            title = "First playthrough")
+        val chapter = CampaignChapterEntity(
+            chapterId = "chapter-a", campaignId = campaign.campaignId,
+            chatId = chat.chatId, ordinal = 1L, title = "The beginning"
+        )
+        val promise = StoryMemoryEntity(
+            memoryId = "campaign-memory-a", chatId = chat.chatId, ownerId = chat.chatId,
+            originKind = "MANUAL", sourceOrderIndex = 3L,
+            content = "Varka promised to return."
+        )
+        val journal = CampaignJournalEntryEntity(
+            journalEntryId = "checkpoint-a", campaignId = campaign.campaignId,
+            chapterId = chapter.chapterId, sourceChatId = chat.chatId,
+            sourceMessageId = reply.messageId,
+            sourceVariantGroupId = reply.variantGroupId, sourceOrderIndex = reply.orderIndex,
+            sourceContentSha256 = java.security.MessageDigest.getInstance("SHA-256")
+            .digest(reply.content.toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it.toInt() and 0xff) },
+            entryType = "CHECKPOINT", title = "A promise"
+        )
+        val thread = CampaignContinuityItemEntity(
+            itemId = "thread-a", campaignId = campaign.campaignId,
+            itemType = "THREAD", title = "Find Varka",
+            openedChapterId = chapter.chapterId,
+            sourceJournalEntryId = journal.journalEntryId
+        )
+        val share = CampaignMemoryShareEntity(
+            campaignId = campaign.campaignId, sourceMemoryId = promise.memoryId,
+            sourceChapterId = chapter.chapterId,
+            sourceContentSha256 = "a".repeat(64)
+        )
+        val original = state().copy(
+            storyMemories = listOf(promise), campaigns = listOf(campaign),
+            campaignChapters = listOf(chapter),
+            campaignJournalEntries = listOf(journal),
+            campaignContinuityItems = listOf(thread),
+            campaignMemoryShares = listOf(share)
+        )
+        WorldArchiveStateCodec.validate(original)
+        assertEquals(original, WorldArchiveStateCodec.parse(
+            WorldArchiveStateCodec.encode(original)
+        ))
+        val plan = WorldArchiveIdPlanner.plan(
+            original, namespace = "campaign-world-import-2026"
+        )
+        val rewritten = WorldArchiveSemanticRemapper.rewrite(original, plan).state
+        WorldArchiveStateCodec.validate(rewritten)
+        val newCampaign = rewritten.campaigns.single()
+        val newChapter = rewritten.campaignChapters.single()
+        val newJournal = rewritten.campaignJournalEntries.single()
+        val newThread = rewritten.campaignContinuityItems.single()
+        val newShare = rewritten.campaignMemoryShares.single()
+        val newMemory = rewritten.storyMemories.single()
+        assertNotEquals(campaign.campaignId, newCampaign.campaignId)
+        assertEquals(rewritten.worldId, newCampaign.worldId)
+        assertEquals(newCampaign.campaignId, newChapter.campaignId)
+        assertEquals(rewritten.chats.single().chatId, newChapter.chatId)
+        assertEquals(newChapter.chapterId, newJournal.chapterId)
+        assertEquals(rewritten.messages.single { it.content == reply.content }.messageId,
+            newJournal.sourceMessageId)
+        assertEquals(newCampaign.campaignId, newThread.campaignId)
+        assertEquals(newJournal.journalEntryId, newThread.sourceJournalEntryId)
+        assertEquals(newCampaign.campaignId, newShare.campaignId)
+        assertEquals(newChapter.chapterId, newShare.sourceChapterId)
+        assertEquals(newMemory.memoryId, newShare.sourceMemoryId)
+        assertEquals(share.sourceContentSha256, newShare.sourceContentSha256)
+        assertNotEquals(original.worldId, rewritten.worldId)
+
+        // Invalid links fail closed instead of carrying secrets across Campaigns.
+        assertThrows(IllegalArgumentException::class.java) {
+            WorldArchiveStateCodec.validate(original.copy(
+                campaignMemoryShares = listOf(share.copy(sourceChapterId = "foreign-chapter"))
+            ))
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            WorldArchiveStateCodec.validate(original.copy(
+                campaignChapters = listOf(chapter.copy(chatId = "unselected-chat"))
+            ))
+        }
+    }
+
+    @Test
     fun roundTripPreservesBothVariantsAndExactNpcRevisionProvenance() {
         val original = state()
         val encoded = WorldArchiveStateCodec.encode(original)

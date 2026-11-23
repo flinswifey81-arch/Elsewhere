@@ -17,6 +17,10 @@ private fun scopedScenarioNpcKey(scenarioId: String, npcId: String): String =
 enum class WorldArchiveIdKind {
     WORLD,
     WORLD_CAST,
+    CAMPAIGN,
+    CAMPAIGN_CHAPTER,
+    CAMPAIGN_JOURNAL,
+    CAMPAIGN_CONTINUITY,
     CONTINUITY_EVENT,
     CHARACTER,
     PERSONA,
@@ -91,11 +95,13 @@ object WorldArchiveIdPlanner {
         // without manufacturing any missing Room rows or turning them eligible.
         val messages = (
             state.messages.map { it.messageId } +
-                state.storyMemories.mapNotNull { it.sourceMessageId }
+                state.storyMemories.mapNotNull { it.sourceMessageId } +
+                state.campaignJournalEntries.mapNotNull { it.sourceMessageId }
         ).toSet()
         val variantGroups = (
             state.messages.map { it.variantGroupId } +
-                state.storyMemories.mapNotNull { it.sourceVariantGroupId }
+                state.storyMemories.mapNotNull { it.sourceVariantGroupId } +
+                state.campaignJournalEntries.mapNotNull { it.sourceVariantGroupId }
         ).toSet()
         val storyMemoryIds = (
             state.storyMemories.map { it.memoryId } +
@@ -116,6 +122,14 @@ object WorldArchiveIdPlanner {
         val sourceIds: Map<WorldArchiveIdKind, Set<String>> = linkedMapOf(
             WorldArchiveIdKind.WORLD to setOf(state.worldId),
             WorldArchiveIdKind.WORLD_CAST to state.cast.map { it.worldCharacterId }.toSet(),
+            WorldArchiveIdKind.CAMPAIGN to state.campaigns.map { it.campaignId }.toSet(),
+            WorldArchiveIdKind.CAMPAIGN_CHAPTER to state.campaignChapters.map { it.chapterId }.toSet(),
+            WorldArchiveIdKind.CAMPAIGN_JOURNAL to state.campaignJournalEntries.map {
+                it.journalEntryId
+            }.toSet(),
+            WorldArchiveIdKind.CAMPAIGN_CONTINUITY to state.campaignContinuityItems.map {
+                it.itemId
+            }.toSet(),
             WorldArchiveIdKind.CONTINUITY_EVENT to state.continuity.map { it.eventId }.toSet(),
             WorldArchiveIdKind.CHARACTER to (
                 state.characters.map { it.characterId } +
@@ -129,7 +143,10 @@ object WorldArchiveIdPlanner {
             ).toSet(),
             WorldArchiveIdKind.SCENARIO to state.scenarios.map { it.scenarioId }.toSet(),
             WorldArchiveIdKind.SCENARIO_NPC to scenarioNpcIds,
-            WorldArchiveIdKind.CHAT to state.chats.map { it.chatId }.toSet(),
+            WorldArchiveIdKind.CHAT to (
+                state.chats.map { it.chatId } +
+                    state.campaignJournalEntries.mapNotNull { it.sourceChatId }
+            ).toSet(),
             WorldArchiveIdKind.MESSAGE to messages,
             WorldArchiveIdKind.MEMORY to state.roleplayMemories.map { it.memoryId }.toSet(),
             WorldArchiveIdKind.STORY_MEMORY to storyMemoryIds,

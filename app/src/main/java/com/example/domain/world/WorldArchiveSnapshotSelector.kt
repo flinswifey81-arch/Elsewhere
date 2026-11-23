@@ -99,6 +99,33 @@ object WorldArchiveSnapshotSelector {
         val storyMemoryPerspectives = source.storyMemoryPerspectives.filter {
             it.memoryId in storyMemoryIds
         }
+        // A Campaign is a private playthrough, not World canon. If ANY chapter is
+        // exported, require ALL its chapters. Partial Campaign export would silently
+        // lose journal/arc provenance or private memory sharing permissions.
+        val worldCampaigns = source.campaigns.filter { it.worldId == worldId }
+        val worldCampaignIds = worldCampaigns.map { it.campaignId }.toSet()
+        val worldChapters = source.campaignChapters.filter { it.campaignId in worldCampaignIds }
+        val chosenCampaignIds = if (selectedChatIds == null) worldCampaignIds
+            else worldChapters.filter { it.chatId in includedChatIds }
+                .map { it.campaignId }.toSet()
+        val campaigns = worldCampaigns.filter { it.campaignId in chosenCampaignIds }
+        val campaignChapters = worldChapters.filter { it.campaignId in chosenCampaignIds }
+        require(campaignChapters.all { it.chatId in includedChatIds }) {
+            "Select every chapter of each Campaign or exclude that Campaign from this World export."
+        }
+        val chapterIds = campaignChapters.map { it.chapterId }.toSet()
+        val campaignJournalEntries = source.campaignJournalEntries.filter {
+            it.campaignId in chosenCampaignIds
+        }
+        val campaignContinuityItems = source.campaignContinuityItems.filter {
+            it.campaignId in chosenCampaignIds
+        }
+        val campaignMemoryShares = source.campaignMemoryShares.filter {
+            it.campaignId in chosenCampaignIds
+        }
+        require(campaignMemoryShares.all {
+            it.sourceChapterId in chapterIds && it.sourceMemoryId in storyMemoryIds
+        }) { "Campaign memory approvals require their source chapter and Story Memory" }
         val npcDossiers = source.npcDossiers.filter { it.chatId in includedChatIds }
         val npcUpdates = source.npcDossierUpdates.filter { it.chatId in includedChatIds }
 
@@ -192,7 +219,9 @@ object WorldArchiveSnapshotSelector {
                 npcLibraryEntries.none { it.authorNotes.isNotBlank() || it.secrets.isNotBlank() } &&
                 loreEntries.none { it.notes.isNotBlank() } &&
                 selectedSettings.none { !it.draftMessage.isNullOrBlank() } &&
-                storyMemories.isEmpty()
+                storyMemories.isEmpty() &&
+                campaigns.isEmpty() && campaignJournalEntries.isEmpty() &&
+                campaignContinuityItems.isEmpty() && campaignMemoryShares.isEmpty()
             ) {
                 "World archive contains private notes, secrets or drafts. Require explicit inclusion review."
             }
@@ -223,6 +252,11 @@ object WorldArchiveSnapshotSelector {
             storyMemoryReturns = storyMemoryReturns,
             storyMemoryKnowledgeChanges = storyMemoryKnowledgeChanges,
             storyMemoryPerspectives = storyMemoryPerspectives,
+            campaigns = campaigns,
+            campaignChapters = campaignChapters,
+            campaignJournalEntries = campaignJournalEntries,
+            campaignContinuityItems = campaignContinuityItems,
+            campaignMemoryShares = campaignMemoryShares,
             conversationSummaries = source.conversationSummaries.filter { it.chatId in includedChatIds },
             relationships = relationships,
             lorebooks = lorebooks,

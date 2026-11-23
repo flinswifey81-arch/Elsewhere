@@ -436,6 +436,71 @@ object WorldArchiveSemanticRemapper {
                     characterId = id(WorldArchiveIdKind.CHARACTER, it.characterId)
                 )
             },
+            campaigns = source.campaigns.map { row ->
+                row.copy(
+                    campaignId = id(WorldArchiveIdKind.CAMPAIGN, row.campaignId),
+                    worldId = freshWorldId
+                )
+            },
+            campaignChapters = source.campaignChapters.map { row ->
+                row.copy(
+                    chapterId = id(WorldArchiveIdKind.CAMPAIGN_CHAPTER, row.chapterId),
+                    campaignId = id(WorldArchiveIdKind.CAMPAIGN, row.campaignId),
+                    chatId = id(WorldArchiveIdKind.CHAT, row.chatId)
+                )
+            },
+            campaignJournalEntries = source.campaignJournalEntries.map { row ->
+                row.copy(
+                    journalEntryId = id(WorldArchiveIdKind.CAMPAIGN_JOURNAL, row.journalEntryId),
+                    campaignId = id(WorldArchiveIdKind.CAMPAIGN, row.campaignId),
+                    chapterId = optional(WorldArchiveIdKind.CAMPAIGN_CHAPTER, row.chapterId),
+                    sourceChatId = optional(WorldArchiveIdKind.CHAT, row.sourceChatId),
+                    sourceMessageId = optional(WorldArchiveIdKind.MESSAGE, row.sourceMessageId),
+                    sourceVariantGroupId = optional(
+                        WorldArchiveIdKind.VARIANT_GROUP, row.sourceVariantGroupId
+                    ),
+                    // Structured response IDs can change on import. Re-hash only a
+                    // previously valid checkpoint; stale checkpoints stay stale.
+                    sourceContentSha256 = row.sourceContentSha256?.let { originalHash ->
+                        val sourceMessage = row.sourceMessageId?.let(sourceMessageById::get)
+                        if (sourceMessage != null &&
+                            originalHash == StoryMemoryEligibilityPolicy.sha256(sourceMessage.content)
+                        ) {
+                            StoryMemoryEligibilityPolicy.sha256(
+                                content(sourceMessage.chatId, sourceMessage.content)
+                            )
+                        } else originalHash
+                    }
+                )
+            },
+            campaignContinuityItems = source.campaignContinuityItems.map { row ->
+                row.copy(
+                    itemId = id(WorldArchiveIdKind.CAMPAIGN_CONTINUITY, row.itemId),
+                    campaignId = id(WorldArchiveIdKind.CAMPAIGN, row.campaignId),
+                    openedChapterId = optional(
+                        WorldArchiveIdKind.CAMPAIGN_CHAPTER, row.openedChapterId
+                    ),
+                    closedChapterId = optional(
+                        WorldArchiveIdKind.CAMPAIGN_CHAPTER, row.closedChapterId
+                    ),
+                    sourceJournalEntryId = optional(
+                        WorldArchiveIdKind.CAMPAIGN_JOURNAL, row.sourceJournalEntryId
+                    )
+                )
+            },
+            campaignMemoryShares = source.campaignMemoryShares.map { row ->
+                row.copy(
+                    campaignId = id(WorldArchiveIdKind.CAMPAIGN, row.campaignId),
+                    sourceChapterId = id(
+                        WorldArchiveIdKind.CAMPAIGN_CHAPTER, row.sourceChapterId
+                    ),
+                    sourceMemoryId = id(
+                        WorldArchiveIdKind.STORY_MEMORY, row.sourceMemoryId
+                    )
+                    // Digest stays attached to the same Story Memory content, not a
+                    // fabricated cross-Campaign grant. Source gates still apply.
+                )
+            },
             conversationSummaries = source.conversationSummaries.map {
                 it.copy(chatId = id(WorldArchiveIdKind.CHAT, it.chatId))
             },
