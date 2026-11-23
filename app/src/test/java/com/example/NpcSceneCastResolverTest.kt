@@ -58,4 +58,34 @@ class NpcSceneCastResolverTest {
     @Test fun noHistoryMeansNotConfirmedPresent() {
         assertEquals(NpcScenePresence.UNKNOWN, NpcSceneCastResolver.resolve(listOf(npc()), emptyList()).single().presence)
     }
+
+
+    @Test fun recoveredCharacterPovConfirmsPresenceWithoutSpendingAnotherGeneration() {
+        val oldReply = MessageEntity(
+            chatId = "chat", speakerType = SpeakerType.CHARACTER,
+            speakerId = "flins", speakerDisplayNameSnapshot = "Flins",
+            content = """
+                *Flins set down his teacup and glanced toward the door.*
+
+                ---
+
+                *Mara had been mid-sentence when the door opened.*
+
+                "Look over here," *she said.*
+            """.trimIndent(),
+            orderIndex = 0
+        )
+        assertEquals(
+            NpcScenePresence.PRESENT,
+            NpcSceneCastResolver.resolve(listOf(npc()), listOf(oldReply)).single().presence
+        )
+        // Never re-attribute Persona prose as an NPC response just because it uses a divider.
+        assertEquals(
+            NpcScenePresence.UNKNOWN,
+            NpcSceneCastResolver.resolve(
+                listOf(npc()),
+                listOf(oldReply.copy(speakerType = SpeakerType.PERSONA))
+            ).single().presence
+        )
+    }
 }
