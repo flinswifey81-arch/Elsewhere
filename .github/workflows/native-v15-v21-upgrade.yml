@@ -157,4 +157,9 @@ jobs:
               for test in ET.parse(file).getroot().iter('testcase'):
                 if test.find('failure') is not None or test.find('error') is not None:
                   print("FAIL",test.get('classname'),test.get('name'))
+                  if test.get('classname')=='com.example.FullSchemaV15ToV21MigrationTest':
+                    failure=test.find('failure')
+                    if failure is None: failure=test.find('error')
+                    if failure is not None:
+                      print("MIGRATION_ERROR", (failure.get('message') or '')[:800])
           PY
