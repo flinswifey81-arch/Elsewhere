@@ -69,6 +69,7 @@ jobs:
             --tests com.example.NpcSpeakerPortraitResolverTest \
             --tests com.example.NpcStructuredOutputParserTest \
             --tests com.example.StoryResponseTest \
+            --tests com.example.EnsembleNarrationUiTest \
             --tests com.example.domain.backup.BackupRepositoryTest \
             --tests com.example.ProfileImageRepositoryTest \
             --tests com.example.ChatMessageReadingUiTest \
