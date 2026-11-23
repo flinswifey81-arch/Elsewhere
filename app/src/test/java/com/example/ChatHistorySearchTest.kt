@@ -106,20 +106,20 @@ class ChatHistorySearchTest {
         db.chatDao().insertChat(ChatEntity(chatId = "main", displayName = "Main", chatType = ChatType.SOLO))
         save("main", "old", "A copper lantern rested on the table.", 5)
         assertEquals(listOf("old"),
-            repository.searchSelectedHistoryForReader("main", "copper lantern")
+            repository.searchSelectedIndexedWordsForReader("main", "copper lantern")
                 .map { it.messageId })
         val old = requireNotNull(db.messageDao().getMessageById("old"))
         db.messageDao().updateMessage(old.copy(content = "A glass compass rested on the table."))
-        assertTrue(repository.searchSelectedHistoryForReader("main", "copper lantern").isEmpty())
+        assertTrue(repository.searchSelectedIndexedWordsForReader("main", "copper lantern").isEmpty())
         assertEquals(listOf("old"),
-            repository.searchSelectedHistoryForReader("main", "glass compass")
+            repository.searchSelectedIndexedWordsForReader("main", "glass compass")
                 .map { it.messageId })
         save("main", "new", "A copper lantern was found again.", 12)
         assertEquals(listOf("new"),
-            repository.searchSelectedHistoryForReader("main", "copper lantern")
+            repository.searchSelectedIndexedWordsForReader("main", "copper lantern")
                 .map { it.messageId })
         db.messageDao().deleteMessageById("new")
-        assertTrue(repository.searchSelectedHistoryForReader("main", "copper lantern").isEmpty())
+        assertTrue(repository.searchSelectedIndexedWordsForReader("main", "copper lantern").isEmpty())
     }
 
     @Test fun indexIsUsedAndDoesNotHydrateWholeLongTranscript() = runBlocking {
@@ -129,7 +129,7 @@ class ChatHistorySearchTest {
                 "She hid the violet locket beneath the old staircase."
                 else "A routine passage on the road.", n.toLong())
         }
-        val actual = repository.searchSelectedHistoryForReader("main", "violet locket")
+        val actual = repository.searchSelectedIndexedWordsForReader("main", "violet locket")
         assertEquals(listOf("turn-18"), actual.map { it.messageId })
         db.openHelper.readableDatabase.query("""
             EXPLAIN QUERY PLAN
@@ -152,7 +152,21 @@ class ChatHistorySearchTest {
         save("main", "literal", "A strange note said OR NEAR exactly.", 3)
         save("main", "other", "A strange note said OR nothing.", 4)
         assertEquals(listOf("literal"),
-            repository.searchSelectedHistoryForReader("main", "OR NEAR").map { it.messageId })
+            repository.searchSelectedIndexedWordsForReader("main", "OR NEAR").map { it.messageId })
+    }
+
+    @Test fun exactSearchStillFindsPartialWordsExcludedByTheIndex() = runBlocking {
+        db.chatDao().insertChat(ChatEntity(
+            chatId = "main", displayName = "Main", chatType = ChatType.SOLO
+        ))
+        save("main", "partial", "The newsletter arrived at dawn.", 3)
+        save("main", "whole", "The letter arrived at dusk.", 5)
+        assertEquals(listOf("whole", "partial"),
+            repository.searchSelectedHistoryForReader("main", "letter")
+                .map { it.messageId })
+        assertEquals(listOf("whole"),
+            repository.searchSelectedIndexedWordsForReader("main", "letter")
+                .map { it.messageId })
     }
 
     @Test fun newestResultsAreBoundedAndBadQueriesAreRejected() = runBlocking {
