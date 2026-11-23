@@ -213,10 +213,6 @@ class FullSchemaV15ToV21MigrationTest {
                     legacy.rowDigests, digestRows(sql, table, legacy.columns)
                 )
             }
-            sql.rawQuery("PRAGMA integrity_check", null).use { cursor ->
-                assertTrue(cursor.moveToFirst())
-                assertEquals("ok", cursor.getString(0))
-            }
             val newTables = listOf(
                 "story_memories", "story_memory_actors", "story_memory_returns",
                 "story_memory_knowledge_changes", "story_memory_perspectives"
@@ -227,6 +223,20 @@ class FullSchemaV15ToV21MigrationTest {
                     assertEquals("V15 must not manufacture player decisions in $table",
                         0, cursor.getInt(0))
                 }
+            }
+        }
+        // FTS4 external-content index validation can write internal scratch state.
+        // Running PRAGMA integrity_check through OPEN_READONLY reports
+        // "attempt to write a readonly database" even for a valid index. Keep
+        // all original-row comparisons read-only; only the synthetic test-copy
+        // database's integrity check opens writable. Never omit this check.
+        SQLiteDatabase.openDatabase(
+            file.absolutePath, null, SQLiteDatabase.OPEN_READWRITE
+        ).use { writable ->
+            writable.rawQuery("PRAGMA integrity_check", null).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals("Migrated synthetic v15 database must pass full SQLite/FTS integrity",
+                    "ok", cursor.getString(0))
             }
         }
     }
