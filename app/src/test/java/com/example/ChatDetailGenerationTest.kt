@@ -2572,6 +2572,277 @@ class ChatDetailGenerationTest {
             harness.npcRepository.getProjectedDossiers(harness.chatId).single().npcId)
     }
 
+    @Test
+    fun freshEmptyChatHydratesHistoryBeforeAnyMessageOrProviderCall() = runBlocking {
+        val provider = CountingProvider()
+        val harness = createHarness(provider, ResponseLengthProfile.NORMAL)
+        val state = harness.viewModel.uiState.value as ChatUiState.Success
+        assertTrue("A new empty chat must finish the initial history query", state.historyLoaded)
+        assertTrue(state.messages.isEmpty())
+        assertTrue(withTimeout(5_000) {
+            harness.messageRepository.getMessagesForChat(harness.chatId).first().isEmpty()
+        })
+        assertEquals(0, provider.requestCount)
+    }
+
+    private data class Harness(
+        val chatId: String,
+        val viewModel: ChatDetailViewModel,
+        val chatRepository: ChatRepository,
+        val messageRepository: MessageRepository,
+        val memoryRepository: MemoryRepository,
+        val attachmentRepository: MessageAttachmentRepository,
+        val npcRepository: NpcRepository,
+        val lorebookRepository: LorebookRepository
+    )
+
+    private suspend fun createHarness(
+        provider: ModelProvider,
+        responseLengthProfile: ResponseLengthProfile,
+        routingMode: ProviderRoutingMode = ProviderRoutingMode.AUTO,
+        providerEndpoint: String? = null,
+        narratorEnabled: Boolean = false,
+        narratorInstructions: String = "",
+        npcBankEnabledInitially: Boolean = false,
+        initialStoredCharacterContent: String? = null,
+        storyOutputParserFactory: () -> StoryOutputParser = ::StoryOutputParser
+    ): Harness {
+        val moshi = Moshi.Builder().addLast(KotlinJsonAdapterFactory()).build()
+        val characterRepository = CharacterRepository(database.characterDao(), moshi, dataCoordinator = dataCoordinator)
+        val personaRepository = PersonaRepository(database.personaDao(), moshi, dataCoordinator = dataCoordinator)
+        val chatRepository = ChatRepository(database.chatDao(), dataCoordinator = dataCoordinator)
+        val messageRepository = MessageRepository(database.messageDao(), dataCoordinator)
+        val attachmentRepository = MessageAttachmentRepository(context, database, dataCoordinator)
+        val npcRepository = NpcRepository(database, moshi, dataCoordinator)
+        val npcParser = NpcStructuredOutputParser(moshi)
+        val memoryRepository = MemoryRepository(database.memoryDao(), dataCoordinator)
+        val lorebookRepository = LorebookRepository(database.lorebookDao(), moshi, dataCoordinator)
+        database.characterDao().insertCharacter(character())
+        database.personaDao().insertPersona(persona())
+        val chatId = chatRepository.createSoloChat("Cutoff Test", "persona-1", "character-1")
+        chatRepository.insertChatSettings(
+            ChatSettingsEntity(
+                chatId = chatId,
+                selectedModelId = "mock/model",
+                providerRoutingMode = routingMode,
+                providerEndpoint = providerEndpoint,
+                responseLengthProfile = responseLengthProfile,
+                narratorEnabled = narratorEnabled,
+                narratorInstructions = narratorInstructions
+            )
+        )
+        if (npcBankEnabledInitially) npcRepository.setEnabled(chatId, true)
+        initialStoredCharacterContent?.let { content ->
+            messageRepository.insertMessage(
+                MessageEntity(
+                    chatId = chatId,
+                    speakerType = SpeakerType.CHARACTER,
+                    speakerId = "character-1",
+                    speakerDisplayNameSnapshot = "Character",
+                    content = content,
+                    orderIndex = 1L
+                )
+            )
+        }
+        val viewModel = viewModels.create(ChatDetailViewModel::class.java) {
+            ChatDetailViewModel(
+                chatId,
+                chatRepository,
+                messageRepository,
+                characterRepository,
+                personaRepository,
+                provider,
+                memoryRepository,
+                lorebookRepository = lorebookRepository,
+                messageAttachmentRepository = attachmentRepository,
+                npcRepository = npcRepository,
+                npcOutputParser = npcParser,
+                dataCoordinator = dataCoordinator,
+                storyOutputParserFactory = storyOutputParserFactory
+            )
+        }
+        // ChatUiState.Success is emitted before the Room history collector delivers its
+        // first value. Tests must not send messages or invoke tools during that loading
+        // window; otherwise their expected events can race initial history hydration.
+        try {
+            withTimeout(15_000) {
+                viewModel.uiState.first { it is ChatUiState.Success && it.historyLoaded }
+            }
+        } catch (timeout: kotlinx.coroutines.TimeoutCancellationException) {
+            // Distinguish Room history hydration from success-state readiness.
+            // Preserve this failure as an actual regression until diagnosed.
+            val snapshot = viewModel.uiState.value
+            val status = if (snapshot is ChatUiState.Success) {
+                "Success(historyLoaded=${snapshot.historyLoaded}, messageCount=${snapshot.messages.size}, isGenerating=${snapshot.isGenerating})"
+            } else snapshot::class.java.simpleName
+            val persistedCount = messageRepository.getMessagesForChatOnce(chatId).size
+            // Probe a NEW independent Room collector only after the existing
+            // ViewModel hydration wait has failed. Running it beforehand could
+            // accidentally hide the timing issue we are trying to isolate.
+            val directFlowCount = kotlinx.coroutines.withTimeoutOrNull(3_000) {
+                messageRepository.getMessagesForChat(chatId).first().size
+            }
+            val settingsFlowReady = kotlinx.coroutines.withTimeoutOrNull(3_000) {
+                chatRepository.getChatSettingsFlow(chatId).filterNotNull().first().chatId == chatId
+            }
+            val viewModelScopeActive = viewModel.viewModelScope.coroutineContext[kotlinx.coroutines.Job]?.isActive
+            throw AssertionError(
+                "Chat test ViewModel never loaded history: state=$status, " +
+                    "persistedMessages=$persistedCount, " +
+                    "independentMessageFlowCount=${directFlowCount ?: "TIMED_OUT"}, " +
+                    "independentSettingsFlowReady=${settingsFlowReady ?: "TIMED_OUT"}, " +
+                    "viewModelScopeActive=$viewModelScopeActive",
+                timeout
+            )
+        }
+        return Harness(
+            chatId,
+            viewModel,
+            chatRepository,
+            messageRepository,
+            memoryRepository,
+            attachmentRepository,
+            npcRepository,
+            lorebookRepository
+        )
+    }
+
+    private class RecordingStreamingProvider : ModelProvider {
+        lateinit var messages: List<RoleplayMessage>
+        lateinit var options: GenerationOptions
+        val requests = mutableListOf<List<RoleplayMessage>>()
+
+        override suspend fun getModels(): List<OpenRouterModel> = emptyList()
+        override suspend fun getEndpoints(modelId: String): List<ProviderEndpoint> = emptyList()
+        override suspend fun supportsImageInput(modelId: String): Boolean = true
+
+        override fun streamResponse(
+            messages: List<RoleplayMessage>,
+            options: GenerationOptions
+        ): Flow<StreamEvent> = flow {
+            this@RecordingStreamingProvider.messages = messages
+            this@RecordingStreamingProvider.options = options
+            requests += messages
+            emit(StreamEvent.Content("A quiet "))
+            emit(StreamEvent.Content("answer."))
+            emit(StreamEvent.Done(null))
+        }
+    }
+
+    private class ScriptedStreamingProvider(
+        private val events: List<StreamEvent>
+    ) : ModelProvider {
+        lateinit var options: GenerationOptions
+
+        override suspend fun getModels(): List<OpenRouterModel> = emptyList()
+        override suspend fun getEndpoints(modelId: String): List<ProviderEndpoint> = emptyList()
+
+        override fun streamResponse(
+            messages: List<RoleplayMessage>,
+            options: GenerationOptions
+        ): Flow<StreamEvent> = flow {
+            this@ScriptedStreamingProvider.options = options
+            events.forEach { emit(it) }
+        }
+    }
+
+    private class SequentialResponseProvider(
+        private val responses: List<String>
+    ) : ModelProvider {
+        val requests = mutableListOf<List<RoleplayMessage>>()
+        private var responseIndex = 0
+
+        override suspend fun getModels(): List<OpenRouterModel> = emptyList()
+        override suspend fun getEndpoints(modelId: String): List<ProviderEndpoint> = emptyList()
+
+        override fun streamResponse(
+            messages: List<RoleplayMessage>,
+            options: GenerationOptions
+        ): Flow<StreamEvent> = flow {
+            requests += messages
+            emit(StreamEvent.Content(responses[responseIndex++]))
+            emit(StreamEvent.Done(null))
+        }
+    }
+
+    private class RequestSequenceProvider(
+        private val scripts: List<List<StreamEvent>>
+    ) : ModelProvider {
+        val requests = mutableListOf<List<RoleplayMessage>>()
+        private var index = 0
+
+        override suspend fun getModels(): List<OpenRouterModel> = emptyList()
+        override suspend fun getEndpoints(modelId: String): List<ProviderEndpoint> = emptyList()
+        override suspend fun supportsImageInput(modelId: String): Boolean = true
+
+        override fun streamResponse(
+            messages: List<RoleplayMessage>,
+            options: GenerationOptions
+        ): Flow<StreamEvent> = flow {
+            requests += messages
+            scripts[index++].forEach { emit(it) }
+        }
+    }
+
+    private class CountingProvider : ModelProvider {
+        var requestCount = 0
+
+        override suspend fun getModels(): List<OpenRouterModel> = emptyList()
+        override suspend fun getEndpoints(modelId: String): List<ProviderEndpoint> = emptyList()
+
+        override fun streamResponse(
+            messages: List<RoleplayMessage>,
+            options: GenerationOptions
+        ): Flow<StreamEvent> = flow {
+            requestCount += 1
+        }
+    }
+
+    private class ThrowingProvider : ModelProvider {
+        var requestCount = 0
+
+        override suspend fun getModels(): List<OpenRouterModel> = emptyList()
+        override suspend fun getEndpoints(modelId: String): List<ProviderEndpoint> = emptyList()
+
+        override fun streamResponse(
+            messages: List<RoleplayMessage>,
+            options: GenerationOptions
+        ): Flow<StreamEvent> = flow {
+            requestCount += 1
+            error("provider failed before first chunk")
+        }
+    }
+
+    private class CancellablePartialProvider(
+        private val content: String = "Partial response"
+    ) : ModelProvider {
+        var requestCount = 0
+        override suspend fun getModels(): List<OpenRouterModel> = emptyList()
+        override suspend fun getEndpoints(modelId: String): List<ProviderEndpoint> = emptyList()
+
+        override fun streamResponse(
+            messages: List<RoleplayMessage>,
+            options: GenerationOptions
+        ): Flow<StreamEvent> = flow {
+            requestCount += 1
+            emit(StreamEvent.Content(content))
+            awaitCancellation()
+        }
+    }
+
+    private class TextOnlyProvider : ModelProvider {
+        var requestCount = 0
+
+        override suspend fun getModels(): List<OpenRouterModel> = emptyList()
+        override suspend fun getEndpoints(modelId: String): List<ProviderEndpoint> = emptyList()
+        override suspend fun supportsImageInput(modelId: String): Boolean = false
+
+        override fun streamResponse(
+            messages: List<RoleplayMessage>,
+            options: GenerationOptions
+        ): Flow<StreamEvent> = flow { requestCount++ }
+    }
+
     private data class Harness(
         val chatId: String,
         val viewModel: ChatDetailViewModel,
