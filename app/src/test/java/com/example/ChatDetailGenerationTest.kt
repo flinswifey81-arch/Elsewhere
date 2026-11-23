@@ -1785,6 +1785,13 @@ class ChatDetailGenerationTest {
             }
         } as ChatUiState.Success
         assertTrue(failed.generationError.orEmpty().contains("vision-capable"))
+        // The earlier draft-image import may finish after the newer model-capability error.
+        // Its delayed callback must not erase that actionable failure.
+        kotlinx.coroutines.delay(100)
+        assertTrue(
+            (harness.viewModel.uiState.value as? ChatUiState.Success)
+                ?.generationError?.contains("does not support image input") == true
+        )
         assertEquals(0, provider.requestCount)
         assertEquals(listOf(SpeakerType.PERSONA), harness.messageRepository.getMessagesForChatOnce(harness.chatId).map { it.speakerType })
         source.delete()
