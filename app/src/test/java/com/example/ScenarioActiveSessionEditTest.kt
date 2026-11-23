@@ -126,8 +126,8 @@ class ScenarioActiveSessionEditTest {
             requireNotNull(repository.session(sibling)).definitionJson)
         assertNotEquals(oldSnapshot.definitionJson,
             requireNotNull(repository.session(first)).definitionJson)
-        // Editing a Scenario session does not itself require schema changes.
-        // Compare with the supported database version; Campaigns separately use v22.
-        assertEquals(25, com.example.data.APP_DATABASE_VERSION)
+        // Editing a Scenario session does not itself require a schema migration.
+        // The current FTS-only database bump is version 26.
+        assertEquals(26, com.example.data.APP_DATABASE_VERSION)
     }
 }
