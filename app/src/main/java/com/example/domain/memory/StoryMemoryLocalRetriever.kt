@@ -105,12 +105,15 @@ object StoryMemoryLocalRetriever {
                     record.claim == StoryMemoryClaim.UNRESOLVED_THREAD)
             // Resolved promises remain historical facts, but should not compete
             // with open obligations as though both still require action.
-            // A relationship entry is not automatically the current state:
-            // without a durable supersession link we rank, never rewrite it.
+            // A relationship entry is not automatically the current state.
+            // Unlike open promises, an unrelated active relationship must not
+            // enter every prompt solely because it is marked ACTIVE.
+            // Without a durable supersession link we rank, never rewrite it.
             val continuityBonus = when {
                 isOpenThread -> 8
                 record.claim == StoryMemoryClaim.RELATIONSHIP &&
-                    record.lifecycle == StoryMemoryLifecycle.ACTIVE -> 6
+                    record.lifecycle == StoryMemoryLifecycle.ACTIVE &&
+                    (overlap > 0 || actorMatches > 0) -> 6
                 record.lifecycle == StoryMemoryLifecycle.RESOLVED -> 0
                 else -> 0
             }

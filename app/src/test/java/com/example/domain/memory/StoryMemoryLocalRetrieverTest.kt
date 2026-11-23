@@ -170,6 +170,37 @@ class StoryMemoryLocalRetrieverTest {
         assertFalse(result.selected.any { it.memoryId == "idle" })
     }
 
+    @Test fun unrelatedActiveRelationshipCannotRideAlongOnAPromiseQuestion() {
+        val completedPromise = manual(
+            "promise-outcome",
+            "Rowan fulfilled his promise to Mara and returned the silver compass at dawn.",
+            order = 50, claim = StoryMemoryClaim.PROMISE
+        ).copy(lifecycle = StoryMemoryLifecycle.RESOLVED)
+        val unrelatedRelationship = manual(
+            "unrelated-relationship",
+            "Ari and Bea reconciled by the telescope.",
+            order = 80, claim = StoryMemoryClaim.RELATIONSHIP
+        )
+        val read = search(
+            listOf(unrelatedRelationship, completedPromise),
+            text = "What oath did Rowan make to Mara about the compass?",
+            limit = 8
+        )
+        assertEquals(
+            listOf("promise-outcome"),
+            read.selected.map { it.memoryId }
+        )
+        assertEquals(2, read.eligibleCount)
+
+        // Mentioning the actual relationship should still recall it normally.
+        assertEquals(
+            listOf("unrelated-relationship"),
+            search(listOf(unrelatedRelationship),
+                text = "How did Ari and Bea reconcile near the telescope?")
+                .selected.map { it.memoryId }
+        )
+    }
+
     @Test fun invalidLimitsAreRejectedInsteadOfSilentlyExpandingContext() {
         val memory = manual("a", "compass")
         assertTrue(runCatching { search(listOf(memory), limit = -1) }.isFailure)
