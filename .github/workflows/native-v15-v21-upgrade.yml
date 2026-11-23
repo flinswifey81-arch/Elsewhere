@@ -62,9 +62,26 @@ jobs:
       - name: Build authentic native full-schema v15 SQLite database with linked synthetic records
         working-directory: pinned-original-v15
         run: |
-          bash ./gradlew :app:testDebugUnitTest --no-daemon \
-            --tests com.example.FullV15RoomFixtureExportTest \
-            --tests com.example.OriginalV15EncryptedBackupExportTest
+          # Maven Central occasionally responds HTTP 429 to fresh Robolectric
+          # runtime downloads. Retry ONLY that infrastructure status; never
+          # swallow compilation, assertion or other Gradle failures.
+          set -o pipefail
+          for attempt in 1 2 3; do
+            attempt_log="$RUNNER_TEMP/native-v15-fixture-attempt-${attempt}.log"
+            if bash ./gradlew :app:testDebugUnitTest --no-daemon --no-configuration-cache \
+                --tests com.example.FullV15RoomFixtureExportTest \
+                --tests com.example.OriginalV15EncryptedBackupExportTest 2>&1 | tee "$attempt_log"; then
+              break
+            fi
+            if [ "$attempt" -eq 3 ] ||
+                ! grep -Eq 'HTTP 429|status code 429|Too Many Requests' "$attempt_log" ||
+                grep -Eq 'There were failing tests|[1-9][0-9]* tests? failed|Compilation error|^e: ' "$attempt_log"; then
+              echo "Native v15 fixture failed without a retryable Maven-only rate limit."
+              exit 1
+            fi
+            echo "Maven HTTP 429 fetching the pinned Robolectric runtime; retrying the exact same fixture."
+            sleep $((attempt * 20))
+          done
           test -s "$ELSEWHERE_V15_FIXTURE_PATH"
           test -s "$ELSEWHERE_V15_ENCRYPTED_PATH"
 
