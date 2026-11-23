@@ -1,11 +1,11 @@
 package com.example.domain.npc
 
 import com.example.data.model.MessageEntity
-import com.example.data.model.SpeakerType
-import com.example.domain.story.StorySpeakerIdentity
-import com.example.domain.compiler.RecentPrimaryMessageWindow
 import com.example.data.model.NpcDossier
 import com.example.data.model.NpcSceneMode
+import com.example.data.model.SpeakerType
+import com.example.domain.compiler.RecentPrimaryMessageWindow
+import com.example.domain.story.StorySpeakerIdentity
 import com.example.domain.story.StoryResponseCodec
 import java.util.Locale
 
