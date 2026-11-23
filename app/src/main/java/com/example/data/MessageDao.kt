@@ -50,7 +50,7 @@ interface MessageDao {
         chatId: String, indexedPhrase: String, phrase: String, limit: Int
     ): List<MessageEntity>
 
-    /** Punctuation-only reader searches cannot be tokenized by unicode61. */
+    /** Exact substring search: preserves partial-word and punctuation matches. */
     @Query("""
         SELECT * FROM messages
         WHERE chatId = :chatId AND isPrimaryVariant = 1
@@ -58,7 +58,7 @@ interface MessageDao {
         ORDER BY orderIndex DESC, rowid DESC
         LIMIT :limit
     """)
-    suspend fun searchLiteralPunctuationForReader(
+    suspend fun searchExactSelectedHistoryForReader(
         chatId: String, phrase: String, limit: Int
     ): List<MessageEntity>
 
