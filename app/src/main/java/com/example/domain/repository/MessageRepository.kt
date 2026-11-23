@@ -49,21 +49,29 @@ class MessageRepository(
         val cleaned = phrase.trim()
         require(cleaned.length in 2..120) { "Search for 2–120 characters." }
         require(maxResults in 1..50) { "History search must return 1–50 results." }
-        // Always quote extracted Unicode tokens, never forward raw player text
-        // to FTS MATCH (which supports its own operators and query syntax).
-        // Whole words / contiguous phrases use the index. Punctuation-only
-        // searches keep the literal fallback and never interpret '%' or '_'
-        // as a wildcard.
+        return messageDao.searchExactSelectedHistoryForReader(chatId, cleaned, maxResults)
+    }
+
+    /**
+     * Separate fast whole-word/word-phrase search. Raw player input is never
+     * accepted as FTS query syntax. A reading result cannot authorize a memory.
+     */
+    suspend fun searchSelectedIndexedWordsForReader(
+        chatId: String,
+        words: String,
+        maxResults: Int = 30
+    ): List<MessageEntity> {
+        val cleaned = words.trim()
+        require(cleaned.length in 2..120) { "Search for 2–120 characters." }
+        require(maxResults in 1..50) { "History search must return 1–50 results." }
         val tokens = Regex("[\\p{L}\\p{N}]+").findAll(cleaned)
-            .map { it.value }
-            .toList()
-        if (tokens.isEmpty()) {
-            return messageDao.searchLiteralPunctuationForReader(chatId, cleaned, maxResults)
-        }
-        val indexedPhrase = "\"" + tokens.joinToString(" ") + "\""
+            .map { it.value }.toList()
+        require(tokens.isNotEmpty()) { "Search for a word rather than punctuation." }
         return messageDao.searchIndexedSelectedHistoryForReader(
-            chatId = chatId, indexedPhrase = indexedPhrase,
-            phrase = cleaned, limit = maxResults
+            chatId = chatId,
+            indexedPhrase = "\"" + tokens.joinToString(" ") + "\"",
+            phrase = cleaned,
+            limit = maxResults
         )
     }
 
