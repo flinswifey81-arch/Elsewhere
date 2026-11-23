@@ -115,7 +115,6 @@ class WorldEpisodeContextCompilerTest {
         assertFalse(unlinked.first().content.contains("The archway was repaired."))
         assertFalse(unlinked.first().content.contains("--- SHARED WORLD BASELINE ---"))
     }
-}
 
     private fun rememberedCompass(): StoryMemoryRecord = StoryMemoryRecord(
         memoryId = "silver-compass", content = "Mara promised Rowan the silver compass.",
