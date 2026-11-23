@@ -51,6 +51,7 @@ jobs:
             --tests com.example.domain.RecentPrimaryMessageWindowTest \
             --tests com.example.domain.HistoricalGenerationWindowTest \
             --tests com.example.ChatHistoryPaginationTest \
+            --tests com.example.ChatHistoryFlowIsolationTest \
             --tests com.example.ChatImageMetadataPaginationTest \
             --tests com.example.MessageAttachmentRepositoryTest \
             --tests com.example.domain.PagedHistoricalActionTest \
