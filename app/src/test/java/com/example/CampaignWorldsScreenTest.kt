@@ -81,6 +81,9 @@ class CampaignWorldsScreenTest {
         }
         compose.onNodeWithTag("worlds_list")
             .performScrollToNode(hasTestTag("edit_campaign_continuity_" + arc.itemId))
+        // performScrollToNode scrolls the outer LazyColumn item, not necessarily
+        // this deep child in a Campaign card that is taller than the viewport.
+        compose.onNodeWithTag("edit_campaign_continuity_" + arc.itemId).performScrollTo()
         compose.onNodeWithTag("edit_campaign_continuity_" + arc.itemId).performClick()
         compose.waitUntil(20_000) {
             compose.onAllNodesWithTag("campaign_continuity_complete")
@@ -148,6 +151,9 @@ class CampaignWorldsScreenTest {
         compose.onNodeWithTag("worlds_list").performScrollToNode(
             hasTestTag("draft_world_from_journal_" + saved.journalEntryId)
         )
+        // The journal action also sits deep inside a tall Campaign card.
+        compose.onNodeWithTag("draft_world_from_journal_" + saved.journalEntryId)
+            .performScrollTo()
         compose.onNodeWithTag("draft_world_from_journal_" + saved.journalEntryId)
             .assertIsEnabled().performClick()
         compose.waitUntil(20_000) {
