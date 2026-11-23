@@ -1,18 +1,24 @@
-# Memory V2 — reader-only historical transcript search checkpoint
+# Memory V2 — historical transcript search and indexed word lookup
 
-Branch: draft PR #49, not production.
-Status: IMPLEMENTED on the development branch; automated and device verification remain separate gates.
+Branch: draft PR #49. No release approval.
 
-## Behavior
-- Chat menu > Search chat history searches **persisted selected-primary messages in this chat**, even outside the current 100-group UI window.
-- Search is local, uses a Room-managed FTS4 Unicode text index for whole-word and contiguous-phrase candidates, then checks the literal phrase. Punctuation-only searches use a bounded-result SQLite fallback. Returns up to the 30 newest matches; the repository enforces 2–120 search characters and 1–50 returned rows.
-- The reader shows speaker labels and an excerpt; tapping a match shows its saved full text. This is an inspection tool, not an instruction to the model.
-- Past Wack transcript remains readable, as already required for normal history/PDF; **no** search result is used by generation, reintroduced as Story Memory, or granted to a Character. A manual Save as Memory action still requires the separate explicit review/eligibility path.
-- No network or paid calls, no schema migration, no bulk hydration of 10,000 messages into the UI.
+## Player-visible behavior
 
-## Quality evidence and limitations
-- `ChatHistorySearchTest` exercises real in-memory Room queries for earlier-than-window matches, chat isolation, excluded regenerations, variant switching, literal percent/underscore search, newest-first ordering, edit/insert/delete index sync, SQL plan selection, bounded results and safely quoted operators. `AppDatabaseMigrationTest` now checks v25→v26 transcript preservation and initial FTS backfill.
-- Database v26 introduces an external-content FTS4 index on messages, with a one-time migration rebuild. The original messages, branches, Wack boundaries and selected variants remain unchanged. Room's generated triggers keep the index synchronized as content is edited, inserted, or deleted. The search query filters chat ID and primary selection when reading results. Whole-word / contiguous-phrase matching does not guarantee arbitrary mid-word substring matches. Punctuation-only fallback can still scan chat text.
-- SQLite's default `lower()` is not full Unicode case folding; non-ASCII case variations may be missed.
-- FTS migration and live index correctness require exact-head CI verification; a standalone SQLite smoke check of the external-content index/query-plan has run. Android UI interaction and actual model-response continuity remain unverified.
-- PR #49 remains draft; do not merge, sign a production release, install over the owner's app, or treat this as release approval.
+- Chat menu > Search chat history searches saved selected messages from the current chat, including older messages outside the visible scrollback.
+- **Exact text** is the default and preserves the original case-insensitive literal substring search, including punctuation and partial words. It can scan the selected transcript.
+- **Indexed words** uses an FTS4 unicode61 word/phrase index with a literal phrase post-filter. Search tokens are safely quoted so input never becomes FTS operators.
+- Both modes return at most 30 newest matches. The live chat and selected-primary variant predicates apply on every indexed hit; discarded regenerations and other chats stay excluded.
+- Pre-Wack messages remain visible *only to the player*. Searching them does not reintroduce memories, grant Character knowledge, or send historical messages to OpenRouter.
+
+## Storage and safety
+
+- An additive Room **v25 → v26** migration adds `messages_search_fts` and backfills previous transcripts without modifying original messages, branches, variants or Wack boundaries.
+- Room-managed FTS synchronization follows insert, edit and deletion; selected-variant filtering is based on canonical message rows at query time.
+- The indexed path improves whole-word lookup but is not equivalent to exact substring search. Both are retained intentionally.
+- Current tests cover Room index use, historical backfill, edits/inserts/deletes, chat/variant isolation, exact-text preservation, operator safety and bounded results. Exact-head CI and emulator runs remain required evidence; their status must be checked on the latest commit, not inherited from an earlier green run.
+- External-content FTS uses the SQLite message rowid, which is not declared as an immutable INTEGER PRIMARY KEY. Investigate VACUUM/rebuild stability before release.
+- This is not automatic historical memory injection, not measured real-model continuity and not Stage 3 opt-in AI extraction. No paid provider calls were added.
+
+## Release boundary
+
+Keep PR #49 draft. No merge, production signing, or installation over the owner's app without explicit approval and complete migration/backup/device acceptance.
