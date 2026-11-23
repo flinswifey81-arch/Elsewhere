@@ -74,6 +74,7 @@ import com.example.data.model.NpcDossier
 import com.example.domain.npc.NpcSpeakerPortraitResolver
 import com.example.domain.story.StoryResponse
 import com.example.domain.story.StoryResponseCodec
+import com.example.domain.story.StorySpeakerIdentity
 import com.example.domain.story.StorySegmentType
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -1249,7 +1250,18 @@ fun MessageBubble(
 ) {
     val message = group.primaryMessage
     val isUser = message.speakerType == SpeakerType.PERSONA
-    val ensembleStory = remember(message.content) { StoryResponseCodec.decode(message.content) }
+    val ensembleStory = remember(
+        message.content, message.speakerId, message.speakerDisplayNameSnapshot, npcDossiers
+    ) {
+        if (message.speakerType != SpeakerType.CHARACTER) null
+        else StoryResponseCodec.recoverForDisplay(
+            content = message.content,
+            primaryCharacter = StorySpeakerIdentity(
+                message.speakerId.orEmpty(), message.speakerDisplayNameSnapshot
+            ),
+            knownNpcs = npcDossiers.map { StorySpeakerIdentity(it.npcId, it.displayName) }
+        )
+    }
     if (ensembleStory != null && message.speakerType == SpeakerType.CHARACTER) {
         EnsembleMessageBubble(
             group = group,
