@@ -92,8 +92,8 @@ fun ChatHistorySearchDialog(
             } else {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(
-                        "Searches only the selected messages in this chat. Older, pre-Wack " +
-                            "messages remain readable here, but never enter AI context.",
+                        "Finds whole words and consecutive phrases in selected messages. " +
+                            "Older, pre-Wack messages remain readable here, but never enter AI context.",
                         style = MaterialTheme.typography.bodySmall
                     )
                     OutlinedTextField(

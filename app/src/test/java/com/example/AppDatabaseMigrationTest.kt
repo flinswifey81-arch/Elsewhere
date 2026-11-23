@@ -32,6 +32,58 @@ class AppDatabaseMigrationTest {
     }
 
     @Test
+    fun migrationFrom25To26BuildsReadOnlyFullTextIndexWithoutChangingTranscript() {
+        val helper = FrameworkSQLiteOpenHelperFactory().create(
+            SupportSQLiteOpenHelper.Configuration.builder(context).name(databaseName)
+                .callback(object : SupportSQLiteOpenHelper.Callback(25) {
+                    override fun onCreate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                        db.execSQL("""
+                            CREATE TABLE messages (
+                                messageId TEXT NOT NULL PRIMARY KEY,
+                                chatId TEXT NOT NULL,
+                                content TEXT NOT NULL,
+                                orderIndex INTEGER NOT NULL,
+                                isPrimaryVariant INTEGER NOT NULL
+                            )
+                        """.trimIndent())
+                        db.execSQL("""
+                            INSERT INTO messages VALUES
+                            ('old', 'main', 'The hidden silver key was discovered.', 4, 1),
+                            ('alternate', 'main', 'A discarded alternate silver key.', 5, 0),
+                            ('private', 'other', 'Private silver key.', 6, 1)
+                        """.trimIndent())
+                    }
+                    override fun onUpgrade(
+                        db: androidx.sqlite.db.SupportSQLiteDatabase,
+                        oldVersion: Int, newVersion: Int
+                    ) = Unit
+                }).build()
+        )
+        try {
+            val db = helper.writableDatabase
+            AppDatabase.MIGRATION_25_26.migrate(db)
+            db.query("""
+                SELECT m.messageId FROM messages AS m
+                JOIN messages_search_fts AS f ON m.rowid = f.rowid
+                WHERE messages_search_fts MATCH '"silver key"'
+                  AND m.chatId='main' AND m.isPrimaryVariant=1
+            """.trimIndent()).use {
+                assertTrue(it.moveToFirst())
+                assertEquals("old", it.getString(0))
+                assertTrue(!it.moveToNext())
+            }
+            db.query("SELECT COUNT(*) FROM messages").use {
+                assertTrue(it.moveToFirst())
+                assertEquals(3, it.getInt(0))
+            }
+            db.query("SELECT content FROM messages WHERE messageId='old'").use {
+                assertTrue(it.moveToFirst())
+                assertEquals("The hidden silver key was discovered.", it.getString(0))
+            }
+        } finally { helper.close() }
+    }
+
+    @Test
     fun migrationFrom24To25PreservesExistingCampaignsAndChatLocalStoryMemory() {
         val helper = FrameworkSQLiteOpenHelperFactory().create(
             SupportSQLiteOpenHelper.Configuration.builder(context)

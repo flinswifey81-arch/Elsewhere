@@ -49,7 +49,22 @@ class MessageRepository(
         val cleaned = phrase.trim()
         require(cleaned.length in 2..120) { "Search for 2–120 characters." }
         require(maxResults in 1..50) { "History search must return 1–50 results." }
-        return messageDao.searchSelectedHistoryForReader(chatId, cleaned, maxResults)
+        // Always quote extracted Unicode tokens, never forward raw player text
+        // to FTS MATCH (which supports its own operators and query syntax).
+        // Whole words / contiguous phrases use the index. Punctuation-only
+        // searches keep the literal fallback and never interpret '%' or '_'
+        // as a wildcard.
+        val tokens = Regex("[\\p{L}\\p{N}]+").findAll(cleaned)
+            .map { it.value }
+            .toList()
+        if (tokens.isEmpty()) {
+            return messageDao.searchLiteralPunctuationForReader(chatId, cleaned, maxResults)
+        }
+        val indexedPhrase = "\"" + tokens.joinToString(" ") + "\""
+        return messageDao.searchIndexedSelectedHistoryForReader(
+            chatId = chatId, indexedPhrase = indexedPhrase,
+            phrase = cleaned, limit = maxResults
+        )
     }
 
     /** Unlike chat scrollback, counts the full selected archived transcript. */

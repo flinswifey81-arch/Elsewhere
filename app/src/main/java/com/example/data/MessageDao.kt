@@ -29,14 +29,28 @@ interface MessageDao {
     suspend fun getMessagesForChatOnce(chatId: String): List<MessageEntity>
 
     /**
-     * Local reader-only search over selected saved turns, including visible pre-Wack
-     * transcript. Never use these results as generation context or Character knowledge.
+     * Reader-only FTS search. The virtual table indexes both variants locally;
+     * the persisted selected-primary and chat ownership predicates are checked
+     * before rows are exposed. This never becomes generation context.
      *
-     * instr() treats %, _ and other punctuation literally. The chat and primary-
-     * variant predicates run in SQLite, before a bounded result is returned.
-     * This first pass scans matching chat content; a separately reviewed indexed
-     * implementation can replace it without changing the UI contract.
+     * MATCH is always a safely quoted, program-built token phrase. instr()
+     * keeps matching literal (%, _, punctuation) instead of interpreting
+     * FTS syntax or SQL LIKE wildcards as player intent.
      */
+    @Query("""
+        SELECT m.* FROM messages AS m
+        JOIN messages_search_fts AS f ON m.rowid = f.rowid
+        WHERE messages_search_fts MATCH :indexedPhrase
+          AND m.chatId = :chatId AND m.isPrimaryVariant = 1
+          AND instr(lower(m.content), lower(:phrase)) > 0
+        ORDER BY m.orderIndex DESC, m.rowid DESC
+        LIMIT :limit
+    """)
+    suspend fun searchIndexedSelectedHistoryForReader(
+        chatId: String, indexedPhrase: String, phrase: String, limit: Int
+    ): List<MessageEntity>
+
+    /** Punctuation-only reader searches cannot be tokenized by unicode61. */
     @Query("""
         SELECT * FROM messages
         WHERE chatId = :chatId AND isPrimaryVariant = 1
@@ -44,7 +58,7 @@ interface MessageDao {
         ORDER BY orderIndex DESC, rowid DESC
         LIMIT :limit
     """)
-    suspend fun searchSelectedHistoryForReader(
+    suspend fun searchLiteralPunctuationForReader(
         chatId: String, phrase: String, limit: Int
     ): List<MessageEntity>
 

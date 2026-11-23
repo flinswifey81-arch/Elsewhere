@@ -102,6 +102,59 @@ class ChatHistorySearchTest {
             repository.searchSelectedHistoryForReader("main", "unknown"))
     }
 
+    @Test fun indexedSearchReflectsEditsNewInsertsAndDeletesWithoutStaleHits() = runBlocking {
+        db.chatDao().insertChat(ChatEntity(chatId = "main", displayName = "Main", chatType = ChatType.SOLO))
+        save("main", "old", "A copper lantern rested on the table.", 5)
+        assertEquals(listOf("old"),
+            repository.searchSelectedHistoryForReader("main", "copper lantern")
+                .map { it.messageId })
+        val old = requireNotNull(db.messageDao().getMessageById("old"))
+        db.messageDao().updateMessage(old.copy(content = "A glass compass rested on the table."))
+        assertTrue(repository.searchSelectedHistoryForReader("main", "copper lantern").isEmpty())
+        assertEquals(listOf("old"),
+            repository.searchSelectedHistoryForReader("main", "glass compass")
+                .map { it.messageId })
+        save("main", "new", "A copper lantern was found again.", 12)
+        assertEquals(listOf("new"),
+            repository.searchSelectedHistoryForReader("main", "copper lantern")
+                .map { it.messageId })
+        db.messageDao().deleteMessageById("new")
+        assertTrue(repository.searchSelectedHistoryForReader("main", "copper lantern").isEmpty())
+    }
+
+    @Test fun indexIsUsedAndDoesNotHydrateWholeLongTranscript() = runBlocking {
+        db.chatDao().insertChat(ChatEntity(chatId = "main", displayName = "Main", chatType = ChatType.SOLO))
+        for (n in 1..2000) {
+            save("main", "turn-$n", if (n == 18)
+                "She hid the violet locket beneath the old staircase."
+                else "A routine passage on the road.", n.toLong())
+        }
+        val actual = repository.searchSelectedHistoryForReader("main", "violet locket")
+        assertEquals(listOf("turn-18"), actual.map { it.messageId })
+        db.openHelper.readableDatabase.query("""
+            EXPLAIN QUERY PLAN
+            SELECT m.messageId FROM messages AS m
+            JOIN messages_search_fts AS f ON m.rowid = f.rowid
+            WHERE messages_search_fts MATCH '"violet locket"'
+              AND m.chatId = 'main' AND m.isPrimaryVariant = 1
+        """.trimIndent()).use { cursor ->
+            assertTrue(cursor.moveToFirst())
+            val plan = buildList {
+                do { add(cursor.getString(3)) } while (cursor.moveToNext())
+            }.joinToString(" ")
+            assertTrue("FTS must provide the matching row IDs: $plan",
+                plan.contains("VIRTUAL TABLE INDEX"))
+        }
+    }
+
+    @Test fun adversarialFtsOperatorsCannotEscapeLiteralPlayerSearch() = runBlocking {
+        db.chatDao().insertChat(ChatEntity(chatId = "main", displayName = "Main", chatType = ChatType.SOLO))
+        save("main", "literal", "A strange note said OR NEAR exactly.", 3)
+        save("main", "other", "A strange note said OR nothing.", 4)
+        assertEquals(listOf("literal"),
+            repository.searchSelectedHistoryForReader("main", "OR NEAR").map { it.messageId })
+    }
+
     @Test fun newestResultsAreBoundedAndBadQueriesAreRejected() = runBlocking {
         db.chatDao().insertChat(ChatEntity(chatId = "main", displayName = "Main", chatType = ChatType.SOLO))
         for (n in 1..45) save("main", "turn-$n", "A hidden letter appears.", n.toLong())

@@ -7,7 +7,7 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.example.data.model.*
 
-const val APP_DATABASE_VERSION = 25
+const val APP_DATABASE_VERSION = 26
 
 @Database(
     entities = [
@@ -17,6 +17,7 @@ const val APP_DATABASE_VERSION = 25
         ChatParticipantEntity::class,
         ChatPersonaParticipantEntity::class,
         MessageEntity::class,
+        MessageSearchFtsEntity::class,
         RelationshipEntity::class,
         ChatSettingsEntity::class,
         GenerationMetadataEntity::class,
@@ -76,6 +77,24 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun campaignDao(): CampaignDao
 
     companion object {
+        /**
+         * Stage 2 local historical search index. Additive only: the existing
+         * messages/variants stay untouched. Existing messages are indexed once
+         * during migration; Room owns the content-sync triggers afterwards.
+         * External-content FTS avoids duplicating the transcript itself.
+         */
+        val MIGRATION_25_26 = object : Migration(25, 26) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE VIRTUAL TABLE IF NOT EXISTS `messages_search_fts`
+                    USING FTS4(`content` TEXT, content=`messages`, tokenize=unicode61)
+                """.trimIndent())
+                db.execSQL(
+                    "INSERT INTO `messages_search_fts`(`messages_search_fts`) VALUES('rebuild')"
+                )
+            }
+        }
+
         /** Explicit Campaign memory pointers; no existing Story Memory is copied or rewritten. */
         val MIGRATION_24_25 = object : Migration(24, 25) {
             override fun migrate(db: SupportSQLiteDatabase) {
