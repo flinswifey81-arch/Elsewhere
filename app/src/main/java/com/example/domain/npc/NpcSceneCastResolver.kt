@@ -1,6 +1,8 @@
 package com.example.domain.npc
 
 import com.example.data.model.MessageEntity
+import com.example.data.model.SpeakerType
+import com.example.domain.story.StorySpeakerIdentity
 import com.example.domain.compiler.RecentPrimaryMessageWindow
 import com.example.data.model.NpcDossier
 import com.example.data.model.NpcSceneMode
@@ -56,7 +58,13 @@ object NpcSceneCastResolver {
             if (latest != null) return latest
             // An attributed, persisted NPC dialogue segment confirms participation.
             // Plain mentions and Character/Narrator prose do not.
-            val segments = StoryResponseCodec.decode(message.content)?.segments.orEmpty()
+            val segments = if (message.speakerType == SpeakerType.CHARACTER) {
+                StoryResponseCodec.recoverForDisplay(
+                    message.content,
+                    StorySpeakerIdentity(message.speakerId.orEmpty(), message.speakerDisplayNameSnapshot),
+                    listOf(StorySpeakerIdentity(npc.npcId, npc.displayName))
+                )?.segments.orEmpty()
+            } else StoryResponseCodec.decode(message.content)?.segments.orEmpty()
             if (segments.any { segment ->
                 segment.type == com.example.domain.story.StorySegmentType.NPC &&
                     (segment.speakerId == npc.npcId ||
