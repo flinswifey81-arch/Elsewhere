@@ -37,6 +37,36 @@ class StoryMemoryTemporalRetrievalTest {
         lifecycle = lifecycle
     )
 
+    @Test fun paraphrasedHiddenLetterBeatsNewerUnrelatedMemoryWithoutLeakingPendingSecret() {
+        val relevant = record("letter",
+            "Nessa hid the letter behind the greenhouse mural.", 3)
+        val distractor = record("recent",
+            "Nessa spoke with the archivist about the garden.", 40)
+        val unreviewed = record("unreviewed",
+            "Nessa stashed the missive in the forbidden vault.", 50).copy(
+                review = StoryMemoryReview.PENDING_REVIEW
+            )
+        val result = StoryMemoryLocalRetriever.search(
+            listOf(distractor, unreviewed, relevant),
+            StoryMemorySearchRequest(context,
+                "Where did Nessa stash the missive?", maxMemories = 1)
+        )
+        assertEquals(listOf("letter"), result.selected.map { it.memoryId })
+        assertEquals(2, result.eligibleCount)
+        assertEquals(1, result.excludedCounts[StoryMemoryExclusion.NOT_APPROVED])
+    }
+
+    @Test fun historicalVowIsRecalledFromParaphraseEvenWhenAlreadyResolved() {
+        val vow = record("vow", "Nessa promised to protect the cedar grove.", 2,
+            lifecycle = StoryMemoryLifecycle.RESOLVED, claim = StoryMemoryClaim.PROMISE)
+        val later = record("later", "Nessa visited the herbalist.", 90)
+        val result = StoryMemoryLocalRetriever.search(
+            listOf(later, vow),
+            StoryMemorySearchRequest(context, "What oath did Nessa make?", maxMemories = 1)
+        )
+        assertEquals(listOf("vow"), result.selected.map { it.memoryId })
+    }
+
     @Test fun chosenRelationshipEventsArePresentedInChronologicalOrder() {
         val conflict = record("conflict", "Ari and Bea argued about the letter", 1)
         val reconciliation = record("reconciliation", "Ari and Bea reconciled about the letter", 9)

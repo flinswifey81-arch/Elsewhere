@@ -322,6 +322,33 @@ class MemoryV2RoomScaleBenchmarkTest {
                 (afterVariantSwitch.excludedCounts[StoryMemoryExclusion.SOURCE_NOT_SELECTED] ?: 0) > 0
             )
 
+            // A real continuity question need not repeat the exact words used
+            // when an event was saved. Test ranking against newer distracting
+            // facts at 500, 2k and 10k messages through production Room reads.
+            val callback = repository.saveManual(chatId,
+                "Nessa hid the letter behind the greenhouse mural.")
+            val distractor = repository.saveManual(chatId,
+                "Nessa chatted with the archivist at the evening market.")
+            val forbidden = repository.saveManual(chatId,
+                "Nessa stashed the missive beneath the secret vault.")
+            repository.update(chatId, forbidden.memoryId, hidden = true)
+            val paraphrase = repository.retrieveForGeneration(
+                chatId, narrator, "Where did Nessa stash the missive?", maxMemories = 1
+            )
+            assertEquals("Wrong recalled event at $total",
+                listOf(callback.memoryId), paraphrase.selected.map { it.memoryId })
+            // Existing hidden Story Memory plus this concealed callback: both excluded.
+            assertTrue((paraphrase.excludedCounts[StoryMemoryExclusion.HIDDEN] ?: 0) >= 2)
+            val callbackPrompt = compiler.compile(
+                scenario, persona, settings, history, current,
+                storyMemories = paraphrase.selected
+            ).joinToString("\\n") { it.content }
+            assertTrue("Paraphrased callback omitted at $total",
+                callbackPrompt.contains("greenhouse mural"))
+            assertFalse(callbackPrompt.contains("evening market"))
+            assertFalse(callbackPrompt.contains("secret vault"))
+            assertNotEquals(callback.memoryId, distractor.memoryId)
+
             // The old archive remains stored, but the new Wack boundary is a
             // hard eligibility gate until one record is explicitly restored.
             val boundary = total.toLong() - 5L

@@ -39,6 +39,21 @@ object StoryMemoryLocalRetriever {
         "him", "all", "can", "did", "does", "how", "why", "out"
     )
 
+    // Conservative word-level equivalents for common narrative callbacks. They help
+    // match a paraphrased question without a paid embedding/model request. Do not
+    // collapse distinct locations, relationships or objects into guessed facts.
+    // Eligibility and character-knowledge boundaries always run before matching.
+    private val narrativeEquivalents = mapOf(
+        "hid" to "hide", "hidden" to "hide", "hiding" to "hide",
+        "stashed" to "hide", "stash" to "hide", "concealed" to "hide",
+        "conceal" to "hide", "missive" to "letter",
+        "correspondence" to "letter", "letters" to "letter",
+        "promised" to "promise", "promises" to "promise",
+        "pledge" to "promise", "pledged" to "promise",
+        "vow" to "promise", "vowed" to "promise",
+        "oath" to "promise", "swore" to "promise", "sworn" to "promise"
+    )
+
     /**
      * Caller supplies local archive records and the exact recipient context.
      * No network calls, model calls, database writes, or global caches.
@@ -151,5 +166,6 @@ object StoryMemoryLocalRetriever {
         wordPattern.findAll(text.lowercase(Locale.ROOT))
             .map { it.value }
             .filter { it.length >= 2 && it !in uninformativeWords }
+            .map { narrativeEquivalents[it] ?: it }
             .toSet()
 }
