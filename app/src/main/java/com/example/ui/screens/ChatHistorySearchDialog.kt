@@ -44,6 +44,8 @@ fun ChatHistorySearchDialog(
     onDismiss: () -> Unit
 ) {
     var query by remember(chatId) { mutableStateOf("") }
+    var indexedWords by remember(chatId) { mutableStateOf(false) }
+    var submittedIndexedWords by remember(chatId) { mutableStateOf(false) }
     var submitted by remember(chatId) { mutableStateOf("") }
     var revision by remember(chatId) { mutableIntStateOf(0) }
     var matches by remember(chatId) { mutableStateOf<List<MessageEntity>>(emptyList()) }
@@ -58,9 +60,15 @@ fun ChatHistorySearchDialog(
         matches = emptyList()
         selected = null
         try {
-            matches = messageRepository.searchSelectedHistoryForReader(
-                chatId = chatId, phrase = submitted, maxResults = 30
-            )
+            matches = if (submittedIndexedWords) {
+                messageRepository.searchSelectedIndexedWordsForReader(
+                    chatId = chatId, words = submitted, maxResults = 30
+                )
+            } else {
+                messageRepository.searchSelectedHistoryForReader(
+                    chatId = chatId, phrase = submitted, maxResults = 30
+                )
+            }
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (failure: Exception) {
@@ -103,9 +111,31 @@ fun ChatHistorySearchDialog(
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth().testTag("history_search_input")
                     )
+                    androidx.compose.foundation.layout.Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        androidx.compose.material3.FilterChip(
+                            selected = !indexedWords,
+                            onClick = { indexedWords = false },
+                            label = { Text("Exact text") },
+                            modifier = Modifier.testTag("history_search_exact_mode")
+                        )
+                        androidx.compose.material3.FilterChip(
+                            selected = indexedWords,
+                            onClick = { indexedWords = true },
+                            label = { Text("Indexed words") },
+                            modifier = Modifier.testTag("history_search_indexed_mode")
+                        )
+                    }
+                    Text(
+                        if (indexedWords) "Fast whole-word or word-phrase matches."
+                        else "Literal substring matches, including punctuation and partial words.",
+                        style = MaterialTheme.typography.bodySmall
+                    )
                     Button(
                         onClick = {
                             submitted = query.trim()
+                            submittedIndexedWords = indexedWords
                             revision++
                         },
                         enabled = query.trim().length in 2..120 && !isSearching,
