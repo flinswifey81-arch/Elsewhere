@@ -224,6 +224,24 @@ class WorldArchiveHistoryTest {
         assertEquals(share.sourceContentSha256, newShare.sourceContentSha256)
         assertNotEquals(original.worldId, rewritten.worldId)
 
+        // Sibling Campaigns in the same World must not inherit one another's
+        // source-chat provenance, even if the chat is included in the archive.
+        val sibling = CampaignEntity(campaignId = "sibling-campaign",
+            worldId = world.worldId, title = "Other playthrough")
+        val crossCampaignJournal = journal.copy(
+            journalEntryId = "cross-campaign-journal",
+            campaignId = sibling.campaignId,
+            chapterId = null, sourceMessageId = null,
+            sourceVariantGroupId = null, sourceOrderIndex = null,
+            sourceContentSha256 = null
+        )
+        assertThrows(IllegalArgumentException::class.java) {
+            WorldArchiveStateCodec.validate(original.copy(
+                campaigns = original.campaigns + sibling,
+                campaignJournalEntries = original.campaignJournalEntries + crossCampaignJournal
+            ))
+        }
+
         // Invalid links fail closed instead of carrying secrets across Campaigns.
         assertThrows(IllegalArgumentException::class.java) {
             WorldArchiveStateCodec.validate(original.copy(

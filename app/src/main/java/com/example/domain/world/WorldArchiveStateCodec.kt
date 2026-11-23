@@ -344,6 +344,7 @@ object WorldArchiveStateCodec {
         val campaignIds = ids(state.campaigns, "Campaigns") { it.campaignId }
         val chapterIds = ids(state.campaignChapters, "Campaign chapters") { it.chapterId }
         val chaptersById = state.campaignChapters.associateBy { it.chapterId }
+        val chaptersByChat = state.campaignChapters.associateBy { it.chatId }
         val journalIds = ids(state.campaignJournalEntries, "Campaign journal entries") {
             it.journalEntryId
         }
@@ -361,6 +362,11 @@ object WorldArchiveStateCodec {
         require(state.campaignJournalEntries.all { row ->
             row.campaignId in campaignIds &&
                 (row.chapterId == null || chaptersById[row.chapterId]?.campaignId == row.campaignId) &&
+                (row.sourceChatId?.let { sourceChat ->
+                    // Orphaned historical provenance is allowed, but a *live*
+                    // chapter from a sibling Campaign must never be cited here.
+                    chaptersByChat[sourceChat]?.let { it.campaignId == row.campaignId } ?: true
+                } ?: true) &&
                 (row.sourceMessageId == null || messageById[row.sourceMessageId]?.let { source ->
                     row.sourceChatId == source.chatId &&
                         (row.sourceVariantGroupId == null ||

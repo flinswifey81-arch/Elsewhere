@@ -298,6 +298,20 @@ class WorldArchiveMemoryV2TransferTest {
         val importedMemory = db.storyMemoryDao().get(link.sourceMemoryId)!!
         assertEquals(chapters[0].chatId, importedMemory.chatId)
         assertEquals(digest(importedMemory.content), link.sourceContentSha256)
+        // Real retrieval in a *later* imported chapter must respect the
+        // transferred approval and the newly remapped Character identity.
+        val importedCharacterId = db.backupDao().getChatParticipants().single {
+            it.chatId == chapters[1].chatId
+        }.characterId
+        val retrieved = com.example.domain.repository.StoryMemoryRepository(db)
+            .retrieveForGeneration(
+                chatId = chapters[1].chatId,
+                recipient = com.example.domain.memory.StoryActorRef(
+                    com.example.domain.memory.StoryActorKind.CHARACTER, importedCharacterId
+                ),
+                sceneText = "Varka promised to return"
+            )
+        assertTrue(retrieved.selected.any { it.memoryId == importedMemory.memoryId })
         // Copying a World never edits the source Campaign or its approval.
         assertEquals(1, campaigns.memorySharesForCampaign(campaignId).size)
         assertEquals(2, campaigns.chapters(campaignId).size)
