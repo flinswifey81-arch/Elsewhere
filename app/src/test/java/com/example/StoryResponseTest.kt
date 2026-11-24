@@ -1,6 +1,7 @@
 package com.example
 
 import com.example.domain.story.StoryOutputParser
+import com.example.domain.story.PersonaTurnBoundary
 import com.example.domain.story.StoryResponseCodec
 import com.example.domain.story.StorySegmentType
 import com.example.domain.story.StorySpeakerIdentity
@@ -120,6 +121,30 @@ class StoryResponseTest {
         assertEquals(StorySegmentType.CHARACTER, parsed.response.segments[1].type)
         assertTrue(parsed.response.segments[1].content.endsWith("\"I"))
         assertEquals(null, parsed.warning)
+    }
+
+    @Test
+    fun modelAttributedPersonaTurnIsDetectedBeforeItCanBeSavedAsNpcOrCharacter() {
+        val player = listOf("Hazel", "Hazel Alexander")
+        val examples = listOf(
+            "Morax: \"What is that?\"\nHazel: \"I know.\"",
+            "NPC (Hazel): *She takes the relic.*",
+            "Character (Hazel Alexander): \"Fine.\"",
+            """<|segment|>{"type":"npc","speaker_name":"Hazel"}
+"I know." """.trimIndent(),
+            """<|segment|>{"type":"persona"}
+"I know." """.trimIndent()
+        )
+        examples.forEach { example ->
+            assertTrue(
+                "Explicit player speaker should be blocked",
+                PersonaTurnBoundary.hasExplicitAuthoredPersonaTurn(example, player)
+            )
+        }
+        assertFalse(PersonaTurnBoundary.hasExplicitAuthoredPersonaTurn(
+            "Morax watched Hazel point toward the ruined stall.", player))
+        assertFalse(PersonaTurnBoundary.hasExplicitAuthoredPersonaTurn(
+            "\"Hazel: read the inscription,\" Morax said.", player))
     }
 
     @Test

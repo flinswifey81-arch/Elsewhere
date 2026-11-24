@@ -46,6 +46,7 @@ import com.example.domain.npc.NpcScenePresence
 import com.example.domain.story.StoryOutputParser
 import com.example.domain.story.StoryResponseCodec
 import com.example.domain.story.StorySpeakerIdentity
+import com.example.domain.story.PersonaTurnBoundary
 import com.example.domain.repository.CharacterRepository
 import com.example.domain.repository.ChatRepository
 import com.example.domain.repository.MessageRepository
@@ -1273,6 +1274,34 @@ class ChatDetailViewModel(
                         StoryOutputParser.hasExplicitSpeakerFormatting(
                             parsed.storyText, fullCharacter.displayName
                         )
+                    // Block only explicit model-authored Persona turns. Do not
+                    // silently attribute them to the primary Character or
+                    // spend another provider call attempting an invisible repair.
+                    // Ambiguous third-person references are deliberately NOT
+                    // rewritten: there is no trustworthy deterministic way to
+                    // distinguish past player actions from fresh puppeteering.
+                    val activePersona = chatSummary?.personas?.firstOrNull {
+                        it.personaId == prepared.activePersonaId
+                    }
+                    if (prepared.character.type == SpeakerType.CHARACTER &&
+                        PersonaTurnBoundary.hasExplicitAuthoredPersonaTurn(
+                            parsed.storyText,
+                            listOfNotNull(
+                                activePersona?.displayName, activePersona?.personaName
+                            ) + activePersona?.aliases.orEmpty()
+                        )
+                    ) {
+                        retainPartialGeneration(
+                            visibleContent = safeVisibleGeneratedContent(generatedContent, prepared),
+                            metadata = currentMetadata,
+                            requestedModelId = prepared.options.modelId,
+                            wasUserStopped = false,
+                            errorMessage = "The response wrote an explicit turn for your Persona. " +
+                                "It was not saved as Character dialogue. " +
+                                "Discard it or review it before choosing Keep Partial."
+                        )
+                        return@launch
+                    }
                     val storyParsed = if (prepared.ensembleNarrationEnabled || explicitSpeakerFormat) {
                         storyOutputParser.parse(
                             output = parsed.storyText,

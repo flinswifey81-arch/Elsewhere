@@ -1149,6 +1149,35 @@ class ChatDetailGenerationTest {
     }
 
     @Test
+    fun explicitPersonaSpeakerCannotBeAutoSavedAsAnNpcInSoloEnsemble() = runBlocking {
+        val provider = SequentialResponseProvider(listOf(
+            "Character (Rowan): \"Do you recognize the sigil?\"\n" +
+                "Mara: \"Yes, it belongs to the old king.\""
+        ))
+        val harness = createHarness(
+            provider, ResponseLengthProfile.NORMAL,
+            narratorEnabled = true, npcBankEnabledInitially = true
+        )
+        harness.viewModel.onDraftChanged("Look at the sigil.")
+        harness.viewModel.sendMessage()
+        val stopped = withTimeout(15_000) {
+            harness.viewModel.uiState.first { state ->
+                state is ChatUiState.Success && !state.isGenerating &&
+                    state.generationError.orEmpty().contains(
+                        "explicit turn for your Persona"
+                    )
+            }
+        } as ChatUiState.Success
+        assertTrue(stopped.partialStopped)
+        assertTrue(stopped.generationError.orEmpty().contains("not saved"))
+        val persisted = harness.messageRepository.getMessagesForChatOnce(harness.chatId)
+        assertEquals(1, persisted.size)
+        assertEquals(SpeakerType.PERSONA, persisted.single().speakerType)
+        assertTrue(harness.npcRepository.getProjectedDossiers(harness.chatId).isEmpty())
+        assertEquals(1, provider.requests.size)
+    }
+
+    @Test
     fun malformedNarratedOutputIsSavedWithoutExposingControlMarkers() = runBlocking {
         val provider = SequentialResponseProvider(
             listOf(
