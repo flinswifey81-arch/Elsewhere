@@ -617,8 +617,9 @@ class NpcRepository(
             database.chatDao().getChatById(message.chatId)?.chatType != ChatType.SOLO
         ) return emptyList()
         // No guessing if the active player identity is missing.
-        val persona = activePersonaId?.let(database.personaDao()::getPersonaById)
-            ?: return emptyList()
+        val persona = activePersonaId?.let { personaId ->
+            database.personaDao().getPersonaById(personaId)
+        } ?: return emptyList()
         val protected = listOf(
             message.speakerDisplayNameSnapshot,
             persona.displayName,
