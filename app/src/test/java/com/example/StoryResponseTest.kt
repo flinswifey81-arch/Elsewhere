@@ -155,6 +155,34 @@ class StoryResponseTest {
     }
 
     @Test
+    fun mixedProsePersonaTurnIsDetectedWithoutBlockingOtherSpeakersOrPastActions() {
+        val player = listOf("Hazel", "Hazel Alexander")
+        val morax = StorySpeakerIdentity("morax", "Morax")
+        val shaper = StorySpeakerIdentity("mountain-shaper", "Mountain Shaper")
+        val validReply = """
+            Morax: “The seal is compromised.”
+            Mountain Shaper: “The current runs under the stalls.”
+        """.trimIndent()
+        val mixedReply = validReply + "\n“Compromised what?” *Hazel pointed at the stall.* “My breakfast?”"
+        assertTrue(PersonaTurnBoundary.hasExplicitAuthoredPersonaTurn(mixedReply, player))
+        assertTrue(PersonaTurnBoundary.hasExplicitAuthoredPersonaTurn(
+            "\"Wait.\" _Hazel Alexander turns to Morax._ \"What did you see?\"", player))
+        assertFalse(PersonaTurnBoundary.hasExplicitAuthoredPersonaTurn(validReply, player))
+        assertFalse(PersonaTurnBoundary.hasExplicitAuthoredPersonaTurn(
+            "“Right there.” *Morax follows Hazel’s earlier gesture.* “See the seal?”", player))
+        assertFalse(PersonaTurnBoundary.hasExplicitAuthoredPersonaTurn(
+            "“Wait.” *Hazelnut turns to Morax.* “What did you see?”", player))
+        assertFalse(PersonaTurnBoundary.hasExplicitAuthoredPersonaTurn(
+            "“Wait.” *Hazel’s name comes back to him.* “It was the seal.”", player))
+
+        val parsed = parser.parse(validReply, morax, listOf(shaper))
+        assertEquals(listOf(StorySegmentType.CHARACTER, StorySegmentType.NPC),
+            parsed.response.segments.map { it.type })
+        assertEquals(listOf("morax", "mountain-shaper"),
+            parsed.response.segments.map { it.speakerId })
+    }
+
+    @Test
     fun narratorToggleRecognizesExplicitCharacterPrefixWithoutTouchingProse() {
         val varka = StorySpeakerIdentity("varka", "Varka")
         val leaked = "Character (Varka): *Varka drops the bags.* \"You're sitting down.\""

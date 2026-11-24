@@ -5,7 +5,7 @@ package com.example.domain.story
  *
  * Never guess intent from ordinary third-person narration ("Morax looked at Hazel"):
  * such prose may describe an already player-authored action. This guard only
- * recognizes unambiguous speaker headings and explicit structured Persona turns.
+ * recognizes unambiguous speaker labels and high-confidence authored Persona prose.
  * A hit blocks AUTO-persistence; the existing Keep/Discard Partial UI is retained
  * so the player, not the model, decides what to do with the unsaved text.
  */
@@ -54,6 +54,14 @@ object PersonaTurnBoundary {
             """^\s*[*_]$escapedName\s+.{1,500}[*_]\s*$""",
             RegexOption.IGNORE_CASE
         )
+        // Roleplay prose can use a named action beat in place of a dialogue
+        // tag: “What?” *Hazel pointed at the stall.* “My breakfast?”
+        // Require the player to be the subject of the beat, not its object.
+        val quote = """(?:"[^"\r\n]{1,300}"|“[^”\r\n]{1,300}”)"""
+        val quotedPersonaActionBeat = Regex(
+            """^\s*$quote\s*([*_])$escapedName[ \t]+[^\r\n]{1,500}?\1\s*$quote\s*$""",
+            RegexOption.IGNORE_CASE
+        )
         val quotedPersonaSpeech = Regex(
             """^\s*(?:"[^"\r\n]{1,300}"|“[^”\r\n]{1,300}”)[,!?]?\s*$escapedName\s+$verbs\b.*$""",
             RegexOption.IGNORE_CASE
@@ -63,6 +71,7 @@ object PersonaTurnBoundary {
             RegexOption.IGNORE_CASE
         )
         return explicitItalicAction.matches(line) ||
+            quotedPersonaActionBeat.matches(line) ||
             quotedPersonaSpeech.matches(line) ||
             personaSpeechFirst.matches(line)
     }
