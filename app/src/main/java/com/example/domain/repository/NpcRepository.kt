@@ -962,22 +962,22 @@ class NpcRepository(
                 }
             }
             val availableCastContext = if (potentialCast.isEmpty()) null else buildString {
-                append("[POTENTIAL RECURRING CAST — NOT CONFIRMED PRESENT]\\n")
+                append("[POTENTIAL RECURRING CAST — NOT CONFIRMED PRESENT]\n")
                 append("These are established chat-local supporting characters who are not ")
                 append("known to be in the room. They may return through a plausible, ")
                 append("scene-motivated entrance when the setting or ongoing plot calls ")
                 append("for them. Do not teleport them, make them speak before entering, ")
-                append("invent a Persona action to bring them in, or override an Away state.\\n")
+                append("invent a Persona action to bring them in, or override an Away state.\n")
                 potentialCast.forEach { npc ->
                     append("- ").append(npc.displayName.take(120))
                     npc.role.takeIf(String::isNotBlank)?.let { role ->
                         append(" — role: ").append(role.take(160))
                     }
-                    append('\\n')
+                    append('\n')
                 }
             }.trimEnd()
             listOfNotNull(presentContext.takeIf(String::isNotBlank), availableCastContext)
-                .joinToString("\\n\\n").takeIf(String::isNotBlank)
+                .joinToString("\n\n").takeIf(String::isNotBlank)
         }
 
     suspend fun exportJson(chatId: String, includePrivateFields: Boolean = false): String = withContext(Dispatchers.IO) {
