@@ -1152,7 +1152,8 @@ class ChatDetailViewModel(
             currentMessage = currentMessage,
             history = scopedHistory,
             isContinuation = isContinuation,
-            characterId = characterId
+            characterId = characterId,
+            includeScenarioPlaythrough = !isContinuation && variantGroupId == null
         ) ?: return
         val fullCharacter = prepared.character
         updateSuccessState {
@@ -1424,7 +1425,10 @@ class ChatDetailViewModel(
         return null
     }
 
-    private suspend fun prepareScenario(current: MessageEntity, history: List<MessageEntity>, continuation: Boolean): PreparedGeneration? {
+    private suspend fun prepareScenario(
+        current: MessageEntity, history: List<MessageEntity>, continuation: Boolean,
+        includePlaythrough: Boolean
+    ): PreparedGeneration? {
         val settings = chatRepository.getEffectiveChatSettings(chatId) ?: currentChatSettings ?: return null
         val session = scenarioRepository?.session(chatId)
         if (session == null) {
@@ -1466,6 +1470,9 @@ class ChatDetailViewModel(
             chatId, history, current, AutomaticMemoryManager.DEFAULT_RECENT_MESSAGE_LIMIT
         ).orEmpty()
         val worldContext = scenarioRepository?.worldContextForChat(chatId)
+        val playthroughContext = if (includePlaythrough && current.speakerType == SpeakerType.PERSONA) {
+            scenarioRepository?.approvedPlaythroughContext(chatId, current.createdAt)
+        } else null
         val scenarioDefinition = com.example.data.model.ScenarioCodec.decode(session.definitionJson)
         // The link is a stable authored Character ID, NOT a name match and never a
         // license to pull history or knowledge from that Character's other chats.
@@ -1488,7 +1495,8 @@ class ChatDetailViewModel(
         fun compileWithMemories(
             story: List<StoryMemoryRecord>,
             includeLegacy: Boolean = true,
-            includeSummary: Boolean = true
+            includeSummary: Boolean = true,
+            includePlaythroughContext: Boolean = false
         ) = scenarioCompiler.compile(
             scenarioDefinition, persona, settings, history, current,
             summary = if (includeSummary) summary else null,
@@ -1496,7 +1504,8 @@ class ChatDetailViewModel(
             lore = activeLore,
             continuation = continuation, worldContext = worldContext,
             storyMemories = story,
-            linkedCharacters = linkedCharacters
+            linkedCharacters = linkedCharacters,
+            playthroughContext = if (includePlaythroughContext) playthroughContext else null
         )
         // Admit reviewed story memories against the protected authored baseline.
         // Generated summaries/legacy memory are lower priority and may be
@@ -1511,14 +1520,15 @@ class ChatDetailViewModel(
             modelId = modelId,
             available = PromptOptionalContextChoices(
                 includeLegacyMemories = legacyMemories.isNotEmpty(),
-                includeStoryMemories = allowedStoryMemories.isNotEmpty(),
+                includeStoryMemories = allowedStoryMemories.isNotEmpty() || !playthroughContext.isNullOrBlank(),
                 includeSummary = !summary.isNullOrBlank()
             )
         ) { choices ->
             compileWithMemories(
                 if (choices.includeStoryMemories) allowedStoryMemories else emptyList(),
                 includeLegacy = choices.includeLegacyMemories,
-                includeSummary = choices.includeSummary
+                includeSummary = choices.includeSummary,
+                includePlaythroughContext = choices.includeStoryMemories
             ).map {
                 if (it.sourceMessageId == source?.messageId && images.isNotEmpty()) {
                     it.copy(images = images)
@@ -1544,11 +1554,14 @@ class ChatDetailViewModel(
         currentMessage: MessageEntity,
         history: List<MessageEntity>,
         isContinuation: Boolean,
-        characterId: String?
+        characterId: String?,
+        includeScenarioPlaythrough: Boolean = false
     ): PreparedGeneration? {
         val summary = chatSummary ?: return null
         val settings = chatRepository.getEffectiveChatSettings(chatId) ?: currentChatSettings ?: return null
-        if (summary.chat.chatType == ChatType.SCENARIO) return prepareScenario(currentMessage, history, isContinuation)
+        if (summary.chat.chatType == ChatType.SCENARIO) return prepareScenario(
+            currentMessage, history, isContinuation, includeScenarioPlaythrough
+        )
         // A SOLO spotlight uses the persisted participant ordering. The
         // original transcript, Wack and Story Memory ownership never move.
         // Explicit regeneration speaker IDs still take precedence.

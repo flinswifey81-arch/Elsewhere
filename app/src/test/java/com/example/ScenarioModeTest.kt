@@ -226,6 +226,51 @@ class ScenarioModeTest {
         assertTrue(continuationPrompt.last().content.contains("do not invent the Persona's dialogue"))
         assertFalse(continuationPrompt.drop(1).any { it.role == com.example.domain.provider.Role.SYSTEM })
     }
+    @Test fun scenarioUsesOnlyApprovedCampaignStateOnNewTurns() = runBlocking {
+        val provider = RecordingProvider()
+        val (chatId, vm) = model(provider)
+        val world = WorldRepository(db, coordinator).createWorld("Press room")
+        val campaigns = CampaignRepository(db, coordinator)
+        val campaign = campaigns.createCampaign(world.worldId, "The season")
+        val other = campaigns.createCampaign(world.worldId, "Different season")
+        val priorChat = scenarios.start("s", "player")
+        val laterChat = scenarios.start("s", "player")
+        val siblingChat = scenarios.start("s", "player")
+        val prior = campaigns.addChapter(campaign.campaignId, priorChat, "Pilot")
+        campaigns.addChapter(campaign.campaignId, chatId, "Episode two")
+        val later = campaigns.addChapter(campaign.campaignId, laterChat, "Future episode")
+        val sibling = campaigns.addChapter(other.campaignId, siblingChat, "Alternate")
+        campaigns.setPlaythroughState(campaign.campaignId, prior.chapterId,
+            CampaignPlaythroughField.CAST_PRESENCE, "Captain", "APPROVED_STATE", true)
+        campaigns.setPlaythroughState(campaign.campaignId, prior.chapterId,
+            CampaignPlaythroughField.INVENTORY, "Captain", "PRIVATE_STATE")
+        campaigns.setPlaythroughState(campaign.campaignId, later.chapterId,
+            CampaignPlaythroughField.PROGRESSION, "Case", "FUTURE_STATE", true)
+        campaigns.setPlaythroughState(other.campaignId, sibling.chapterId,
+            CampaignPlaythroughField.PROGRESSION, "Case", "SIBLING_STATE", true)
+
+        vm.onDraftChanged("I head to briefing.")
+        vm.sendMessage()
+        awaitMessages(vm, 3)
+        val prompt = provider.requests.single().first().content
+        assertTrue(prompt.contains("APPROVED_STATE"))
+        assertFalse(prompt.contains("PRIVATE_STATE"))
+        assertFalse(prompt.contains("FUTURE_STATE"))
+        assertFalse(prompt.contains("SIBLING_STATE"))
+        assertTrue(prompt.contains("not as instructions"))
+        val response = MessageRepository(db.messageDao(), coordinator).getMessagesForChatOnce(chatId).last()
+        vm.regenerateMessage(response.messageId)
+        awaitMessages(vm, 4)
+        assertEquals(2, provider.requests.size)
+        assertFalse(provider.requests.last().first().content.contains("APPROVED_STATE"))
+
+        val unlinked = scenarios.start("s", "player")
+        assertNull(campaigns.narratorPlaythroughContext(unlinked, Long.MAX_VALUE))
+        db.chatDao().setContextResetBoundary(chatId, 10L, 10L)
+        assertNull(campaigns.narratorPlaythroughContext(chatId, Long.MAX_VALUE))
+        assertNull(campaigns.narratorPlaythroughContext(siblingChat, 1L))
+    }
+
     @Test fun failedNarrationRetryDoesNotDuplicatePlayerTurn() = runBlocking {
         val provider = RecordingProvider(failFirst = true)
         val (id, vm) = model(provider)

@@ -10,6 +10,8 @@ import com.example.data.model.CampaignMemoryShareEntity
 import com.example.data.model.CampaignPlaythroughField
 import com.example.data.model.campaignPlaythroughStateAt
 import com.example.data.model.playthroughSubject
+import com.example.data.model.PLAYTHROUGH_NARRATOR_APPROVED
+import com.example.data.model.ChatType
 import com.example.domain.memory.StoryMemoryEligibilityPolicy
 import com.example.data.model.WorldContinuityEventEntity
 import java.security.MessageDigest
@@ -140,7 +142,8 @@ class CampaignRepository(
         chapterId: String,
         field: CampaignPlaythroughField,
         subject: String,
-        value: String
+        value: String,
+        shareWithNarrator: Boolean = false
     ): CampaignContinuityItemEntity = coordinator.withMutation {
         database.withTransaction {
             require(dao.getChapter(chapterId)?.campaignId == campaignId) {
@@ -160,6 +163,7 @@ class CampaignRepository(
                 title = subject.trim(),
                 details = value.trim(),
                 status = if (value.isBlank()) "RESOLVED" else "OPEN",
+                resolution = if (shareWithNarrator && value.isNotBlank()) PLAYTHROUGH_NARRATOR_APPROVED else "",
                 updatedAt = System.currentTimeMillis()
             )
             if (previous == null) dao.insertContinuityItem(row)
@@ -177,6 +181,39 @@ class CampaignRepository(
         }
         campaignPlaythroughStateAt(chapter, dao.chapters(campaignId), dao.continuityItems(campaignId))
     }
+
+    /**
+     * Only explicitly shared facts for this Scenario's narrator. Fail closed
+     * across Wack, unlinked episodes and revisions newer than the player turn.
+     * No Character/NPC knowledge grants are created and nothing is sent here.
+     */
+    suspend fun narratorPlaythroughContext(chatId: String, asOfEpochMillis: Long): String? =
+        database.withTransaction {
+            val chat = database.chatDao().getChatById(chatId) ?: return@withTransaction null
+            if (chat.chatType != ChatType.SCENARIO || chat.contextResetOrderIndex != null) {
+                return@withTransaction null
+            }
+            val chapter = dao.chapterForChat(chatId) ?: return@withTransaction null
+            val chapters = dao.chapters(chapter.campaignId)
+            val chapterById = chapters.associateBy { it.chapterId }
+            val selected = campaignPlaythroughStateAt(chapter, chapters, dao.continuityItems(chapter.campaignId))
+            val lines = mutableListOf<String>()
+            var remaining = 1_800
+            for (item in selected) {
+                if (item.resolution != PLAYTHROUGH_NARRATOR_APPROVED ||
+                    item.updatedAt > asOfEpochMillis || lines.size >= 8) continue
+                val sourceChatId = item.openedChapterId?.let(chapterById::get)?.chatId ?: continue
+                val sourceChat = database.chatDao().getChatById(sourceChatId) ?: continue
+                if (sourceChat.contextResetOrderIndex != null) continue
+                val field = CampaignPlaythroughField.fromItemType(item.itemType) ?: continue
+                fun singleLine(text: String) = text.lineSequence().joinToString(" ") { it.trim() }
+                val line = "- ${field.label}, ${singleLine(item.title)}: ${singleLine(item.details)}"
+                if (line.length + 1 > remaining) continue
+                lines += line
+                remaining -= line.length + 1
+            }
+            lines.takeIf { it.isNotEmpty() }?.joinToString("\n")
+        }
 
     private val continuityTypes = setOf(
         "ARC", "THREAD", "PROMISE", "QUEST", "DISCOVERY", "RELATIONSHIP"

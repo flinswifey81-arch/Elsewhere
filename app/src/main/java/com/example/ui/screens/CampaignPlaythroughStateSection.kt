@@ -12,6 +12,7 @@ import com.example.data.model.CampaignChapterEntity
 import com.example.data.model.CampaignContinuityItemEntity
 import com.example.data.model.CampaignPlaythroughField
 import com.example.data.model.campaignPlaythroughStateAt
+import com.example.data.model.PLAYTHROUGH_NARRATOR_APPROVED
 
 @Composable
 internal fun CampaignPlaythroughStateSection(
@@ -19,7 +20,7 @@ internal fun CampaignPlaythroughStateSection(
     chapters: List<CampaignChapterEntity>,
     items: List<CampaignContinuityItemEntity>,
     busy: Boolean,
-    onSave: (String, CampaignPlaythroughField, String, String, () -> Unit) -> Unit
+    onSave: (String, CampaignPlaythroughField, String, String, Boolean, () -> Unit) -> Unit
 ) = key(campaignId) {
     val episodes = chapters.filter { it.campaignId == campaignId }.sortedBy { it.ordinal }
     var selected by remember { mutableStateOf<String?>(null) }
@@ -31,10 +32,11 @@ internal fun CampaignPlaythroughStateSection(
     var subject by remember { mutableStateOf("") }
     var value by remember { mutableStateOf("") }
     var existing by remember { mutableStateOf(false) }
+    var shareWithNarrator by remember { mutableStateOf(false) }
 
     Text("Playthrough state", style = MaterialTheme.typography.titleSmall)
     Text(
-        "Record what is true in this episode. Changes carry into later episodes in this Campaign, not into other Campaigns or shared World canon. These notes aren't sent to the model yet.",
+        "Record what is true in this episode. Changes carry into later episodes in this Campaign, not into other Campaigns or shared World canon. Entries stay local unless you make them available to Scenario narration.",
         style = MaterialTheme.typography.bodySmall
     )
     if (episode == null) {
@@ -66,6 +68,7 @@ internal fun CampaignPlaythroughStateSection(
                     subject = row.title
                     value = row.details
                     existing = true
+                    shareWithNarrator = row.resolution == PLAYTHROUGH_NARRATOR_APPROVED
                     editing = true
                 }) { Text("Change") }
             }
@@ -78,6 +81,7 @@ internal fun CampaignPlaythroughStateSection(
                 subject = ""
                 value = ""
                 existing = false
+                shareWithNarrator = false
                 editing = true
             }
         ) { Text("Record state") }
@@ -118,6 +122,14 @@ internal fun CampaignPlaythroughStateSection(
                         minLines = 2,
                         modifier = Modifier.testTag("campaign_playthrough_value")
                     )
+                    Row {
+                        Checkbox(
+                            checked = shareWithNarrator,
+                            onCheckedChange = { shareWithNarrator = it },
+                            enabled = !busy && value.isNotBlank()
+                        )
+                        Text("Use in Scenario narration. A copy of this value is sent with new turns; it does not become any character's knowledge.")
+                    }
                 }
             },
             confirmButton = {
@@ -125,7 +137,7 @@ internal fun CampaignPlaythroughStateSection(
                     modifier = Modifier.testTag("save_campaign_playthrough_state"),
                     enabled = !busy && subject.isNotBlank() && (existing || value.isNotBlank()),
                     onClick = {
-                        onSave(episode.chapterId, field, subject, value) { editing = false }
+                        onSave(episode.chapterId, field, subject, value, shareWithNarrator) { editing = false }
                     }
                 ) { Text(if (value.isBlank()) "Clear value" else "Save") }
             },

@@ -1018,10 +1018,10 @@ fun WorldsScreen(
                                     HorizontalDivider()
                                     CampaignPlaythroughStateSection(
                                         campaign.campaignId, chapters, continuityItems, busy
-                                    ) { chapterId, field, subject, value, onSaved ->
+                                    ) { chapterId, field, subject, value, shareWithNarrator, onSaved ->
                                         submit {
                                             campaignRepository.setPlaythroughState(
-                                                campaign.campaignId, chapterId, field, subject, value
+                                                campaign.campaignId, chapterId, field, subject, value, shareWithNarrator
                                             )
                                             onSaved()
                                         }

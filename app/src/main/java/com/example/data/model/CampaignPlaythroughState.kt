@@ -20,6 +20,8 @@ enum class CampaignPlaythroughField(val label: String) {
     }
 }
 
+internal const val PLAYTHROUGH_NARRATOR_APPROVED = "NARRATOR_APPROVED"
+
 internal fun playthroughSubject(value: String): String =
     value.trim().lowercase(Locale.ROOT)
 

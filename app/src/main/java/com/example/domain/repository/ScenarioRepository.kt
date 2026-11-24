@@ -96,6 +96,9 @@ class ScenarioRepository(
         }
     }
 
+    suspend fun approvedPlaythroughContext(chatId: String, asOfEpochMillis: Long): String? =
+        CampaignRepository(database, coordinator).narratorPlaythroughContext(chatId, asOfEpochMillis)
+
     /** Bounded shared World baseline for Scenario narration. */
     suspend fun worldContextForChat(chatId: String): String? {
         val memberships = database.worldDao().getMembershipsForResource(WorldResourceType.CHAT.name, chatId)
