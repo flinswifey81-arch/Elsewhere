@@ -55,3 +55,7 @@ When metadata or speaker-segment formatting is absent, Elsewhere can conservativ
 ## Additional explicit Persona-authorship checks
 
 The review gate also recognizes **Persona-leading italic action directions** and **directly attributed quoted Persona speech** (for example `*Hazel takes the key.*` or `"No," Hazel replied.`) even when the model omits a `Hazel:` label. It deliberately does not block indirect third-person references such as `Morax watched Hazel...` or arbitrary descriptions of historical player actions. A hit retains an unsaved reviewable partial, does not rewrite the player's established turn, and performs no second paid call.
+
+## NPC scene presence after natural attributed dialogue
+
+If an existing NPC is clearly credited with a quoted spoken line in a recent Character response—even without structured segment markers—the scene resolver can mark them PRESENT in the next turn. The same conservative name-attribution matcher is computed once per recent message and reused across the active NPC Bank, rather than repeating extraction for every dossier. A memory-only mention is not an entrance; manually set AWAY always wins. This avoids inventing attendance or teleporting unrelated returning cast.

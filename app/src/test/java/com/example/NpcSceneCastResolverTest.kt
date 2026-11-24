@@ -55,6 +55,29 @@ class NpcSceneCastResolverTest {
         assertEquals(NpcScenePresence.PRESENT, resolve(npc(), encoded))
     }
 
+    @Test fun namedNpcClearlySpeakingInOrdinaryProseConfirmsPresence() {
+        val spoken = MessageEntity(
+            chatId = "chat", speakerType = SpeakerType.CHARACTER,
+            speakerId = "rowan", speakerDisplayNameSnapshot = "Rowan",
+            content = "\"The archive is closed,\" Archivist Voss warned.",
+            orderIndex = 5
+        )
+        assertEquals(
+            NpcScenePresence.PRESENT,
+            NpcSceneCastResolver.resolve(listOf(npc()), listOf(spoken)).single().presence
+        )
+        assertEquals(
+            NpcScenePresence.AWAY,
+            NpcSceneCastResolver.resolve(listOf(npc("AWAY")), listOf(spoken)).single().presence
+        )
+        assertEquals(
+            NpcScenePresence.UNKNOWN,
+            NpcSceneCastResolver.resolve(
+                listOf(npc()), listOf(spoken.copy(content = "Rowan remembers Archivist Voss."))
+            ).single().presence
+        )
+    }
+
     @Test fun noHistoryMeansNotConfirmedPresent() {
         assertEquals(NpcScenePresence.UNKNOWN, NpcSceneCastResolver.resolve(listOf(npc()), emptyList()).single().presence)
     }
