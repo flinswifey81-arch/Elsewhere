@@ -81,6 +81,7 @@ jobs:
             --tests com.example.StoryResponseTest \
             --tests com.example.NpcRepositoryTest \
             --tests com.example.NpcProseDiscoveryTest \
+            --tests com.example.NpcProseVariantProvenanceTest \
             --tests com.example.ScenarioModeTest
       - name: Report synthetic long-chat benchmark metrics
         if: always()
