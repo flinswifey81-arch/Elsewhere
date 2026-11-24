@@ -11,6 +11,7 @@ import com.example.domain.world.*
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.Types
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
+import java.io.File
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.*
@@ -240,6 +241,35 @@ class WorldDefinitionBundleTransferTest {
         }.isFailure)
         assertTrue(db.worldDao().getWorlds().isEmpty())
         assertTrue(db.scenarioDao().getAll().isEmpty())
+    }
+
+    @Test fun authoredMondstadtWorldKeepsCastAndRelationshipEndpointsAcrossTransfers() = runBlocking {
+        val fixturePath = "docs/worlds/examples/law-and-disorder-world.DRAFT.json"
+        val fixture = listOf(File(fixturePath), File("..", fixturePath)).firstOrNull(File::isFile)
+            ?: error("Missing authored World transfer fixture: $fixturePath")
+        val source = WorldDefinitionCodec.parse(fixture.readText())
+        val first = worlds.importDefinition(fixture.readText())
+        val firstBundle = WorldDefinitionCodec.parse(worlds.exportDefinition(first.worldId))
+        val second = worlds.importDefinition(worlds.exportDefinition(first.worldId))
+        val secondBundle = WorldDefinitionCodec.parse(worlds.exportDefinition(second.worldId))
+
+        fun WorldDefinitionV1.relationshipEnds(): Set<Pair<String, String>> {
+            val names = resources.worldCast.associate { it.worldCharacterId to it.name }
+            return links.relationships.map {
+                names.getValue(it.fromWorldCharacterId) to names.getValue(it.toWorldCharacterId)
+            }.toSet()
+        }
+
+        assertEquals("Law & Disorder: Mondstadt", firstBundle.world.title)
+        assertEquals(16, firstBundle.resources.worldCast.size)
+        assertEquals(5, firstBundle.links.relationships.size)
+        assertEquals(source.relationshipEnds(), firstBundle.relationshipEnds())
+        assertEquals(source.relationshipEnds(), secondBundle.relationshipEnds())
+        assertEquals(source.world.worldRules, secondBundle.world.worldRules)
+        val firstCastIds = firstBundle.resources.worldCast.map { it.worldCharacterId }.toSet()
+        val secondCastIds = secondBundle.resources.worldCast.map { it.worldCharacterId }.toSet()
+        assertTrue(firstCastIds.intersect(secondCastIds).isEmpty())
+        assertEquals(2, db.worldDao().getWorlds().size)
     }
 
     @Test fun shareableWorldJsonRefusesChatHistoryRatherThanSilentlyDroppingIt() = runBlocking {
