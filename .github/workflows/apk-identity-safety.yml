@@ -2,6 +2,8 @@ name: APK Identity and Signing Safety (no install or release key)
 
 on:
   pull_request:
+    # No full work on drafts, but run automatically on review readiness.
+    types: [opened, reopened, synchronize, ready_for_review, converted_to_draft]
     branches:
       - main
     paths:

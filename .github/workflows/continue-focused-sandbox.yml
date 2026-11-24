@@ -2,6 +2,8 @@ name: Continue Regression Tests
 
 on:
   pull_request:
+    # No full work on drafts, but run automatically on review readiness.
+    types: [opened, reopened, synchronize, ready_for_review, converted_to_draft]
     branches:
       - main
       - feature/background-reply-notifications-2026-11-04

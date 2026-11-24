@@ -3,6 +3,8 @@ name: Pre-freeze Regression Tests (manual Test APK optional)
 on:
   workflow_dispatch:
   pull_request:
+    # No full work on drafts, but run automatically on review readiness.
+    types: [opened, reopened, synchronize, ready_for_review, converted_to_draft]
     branches:
       - main
   push:

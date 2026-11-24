@@ -2,6 +2,8 @@ name: Disposable Android Emulator v15 to v21 Package Upgrade
 
 on:
   pull_request:
+    # No full work on drafts, but run automatically on review readiness.
+    types: [opened, reopened, synchronize, ready_for_review, converted_to_draft]
     branches:
       - main
     paths:

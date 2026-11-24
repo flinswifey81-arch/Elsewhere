@@ -12,7 +12,7 @@ This corrects the repeated multi-suite launch problem on PR #49. Previously, eve
 
 ## Full verification (required before any release proposal)
 
-- The existing full checks run **when the PR is marked ready for review**, on subsequent non-draft PR pushes, or individually by `workflow_dispatch` when explicitly requested. This preserves automatic full coverage after review readiness and manual exact-head checks during a draft.
+- The existing full checks run **on the explicit `ready_for_review` PR event**, on subsequent non-draft PR pushes, or individually by `workflow_dispatch` when explicitly requested. This preserves automatic full coverage after review readiness and manual exact-head checks during a draft.
 - The normal full acceptance includes APK identity/signing safety, native-v15 Room migration/rollback, actual emulator package upgrade, Memory V2 (including pinned-v15), Worlds/RP, World archives, Continue and pre-freeze. These checks are not replaced by smoke tests.
 - Treat a skipped full check on a draft as **NOT verified**; do not use skip status to authorize an APK, merge or production install. Verify the full set passed for the exact final commit SHA before any release. If a branch-protection rule requires historical status names, preserve those names and adjust review gates before merging; the GitHub integration did not have permission to read branch protection rules.
 - A manual Workflow Dispatch starts tests, not a production signed APK or phone installation. The separate release candidate workflow still requires the owner's explicit candidate approval.
