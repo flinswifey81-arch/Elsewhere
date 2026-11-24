@@ -30,6 +30,9 @@ permissions:
 
 jobs:
   apk-identity:
+    # Draft work runs the fast smoke gate only. Full acceptance still runs
+    # on explicit workflow_dispatch or whenever the PR is ready for review.
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     name: Verify real QA APK and reject wrong-signer production lookalike
     runs-on: ubuntu-latest
     timeout-minutes: 60

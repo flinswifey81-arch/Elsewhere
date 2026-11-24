@@ -1,0 +1,65 @@
+# Fast draft feedback: all costly release gates remain manual / non-draft.
+name: Elsewhere Draft Smoke
+
+on:
+  pull_request:
+    branches:
+      - main
+    types: [opened, reopened, synchronize, ready_for_review]
+    paths:
+      - 'app/src/**'
+      - 'app/build.gradle.kts'
+      - 'build.gradle.kts'
+      - 'settings.gradle.kts'
+      - 'gradle.properties'
+      - 'gradle/**'
+      - 'buildSrc/**'
+      - 'qa/**'
+      - '.github/workflows/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: elsewhere-draft-smoke-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  draft-smoke:
+    name: Compile + focused offline story and NPC tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools
+      - run: sdkmanager "platforms;android-36.1" "build-tools;36.0.0"
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Compile and run offline smoke regressions
+        run: |
+          bash ./gradlew :app:testSandboxUnitTest --no-daemon \
+            --tests com.example.NpcProseDiscoveryTest \
+            --tests com.example.NpcSceneCastResolverTest \
+            --tests com.example.StoryResponseTest \
+            --tests com.example.domain.memory.StoryMemoryLocalRetrieverTest
+      - name: Print actual failing cases
+        if: failure()
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          from xml.etree import ElementTree as ET
+          root=Path('app/build/test-results/testSandboxUnitTest')
+          for path in root.glob('TEST-*.xml'):
+              for case in ET.parse(path).getroot().iter('testcase'):
+                  for failure in list(case.findall('failure'))+list(case.findall('error')):
+                      print('FAIL',case.get('classname'),case.get('name'))
+                      print((failure.get('message') or '')[:1000])
+          PY

@@ -13,11 +13,18 @@ on:
       - '.github/workflows/native-v15-v21-upgrade.yml'
   workflow_dispatch:
 
+concurrency:
+  group: elsewhere-full-native-v15-v21-upgrade-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
 jobs:
   native-full-schema-upgrade:
+    # Draft work runs the fast smoke gate only. Full acceptance still runs
+    # on explicit workflow_dispatch or whenever the PR is ready for review.
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     name: Native v15 schema, complete v21 migration, rollback and retry
     runs-on: ubuntu-latest
     timeout-minutes: 60

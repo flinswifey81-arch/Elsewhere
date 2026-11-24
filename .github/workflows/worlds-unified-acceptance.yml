@@ -14,12 +14,15 @@ permissions:
   contents: read
 
 concurrency:
-  # Push and both stacked PRs at the same HEAD need one acceptance run, not three.
-  group: worlds-unified-${{ github.event.pull_request.head.sha || github.sha }}
+  # Cancel obsolete commits on the same PR rather than rerunning its full suite.
+  group: worlds-unified-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
   integrated-sandbox:
+    # Draft work runs the fast smoke gate only. Full acceptance still runs
+    # on explicit workflow_dispatch or whenever the PR is ready for review.
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     name: Validate Worlds archives and existing RP lifecycle
     runs-on: ubuntu-latest
     timeout-minutes: 40

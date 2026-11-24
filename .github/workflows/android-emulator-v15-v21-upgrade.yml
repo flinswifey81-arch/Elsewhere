@@ -20,13 +20,16 @@ permissions:
   contents: read
 
 concurrency:
-  group: disposable-emulator-upgrade
+  group: elsewhere-full-emulator-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 # Keep the established workflow/job check identity so existing required checks
 # remain enforced while the target Room version advances from v21 to v22.
 jobs:
   emulator-v15-to-v21:
+    # Draft work runs the fast smoke gate only. Full acceptance still runs
+    # on explicit workflow_dispatch or whenever the PR is ready for review.
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     name: Fresh emulator / actual install -r / Room v15 to v21 retention
     runs-on: ubuntu-latest
     timeout-minutes: 90

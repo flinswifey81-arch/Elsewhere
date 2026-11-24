@@ -21,6 +21,9 @@ permissions:
 
 jobs:
   build-debug-apk:
+    # Draft work runs the fast smoke gate only. Full acceptance still runs
+    # on explicit workflow_dispatch or whenever the PR is ready for review.
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     name: Run pre-freeze compatibility regression tests
     runs-on: ubuntu-latest
     timeout-minutes: 30
