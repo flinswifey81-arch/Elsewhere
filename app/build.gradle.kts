@@ -97,7 +97,17 @@ android {
     compose = true
     buildConfig = true
   }
-  testOptions { unitTests { isIncludeAndroidResources = true } }
+  testOptions {
+    unitTests {
+      isIncludeAndroidResources = true
+      // Robolectric's default runtime repo1 endpoint can throttle or reject
+      // Android framework JAR downloads on fresh CI test workers.
+      // Use the canonical Maven Central endpoint; do not disable tests.
+      all {
+        it.systemProperty("robolectric.dependency.repo.url", "https://repo.maven.apache.org/maven2")
+      }
+    }
+  }
   dependenciesInfo {
     includeInApk = false
     includeInBundle = true

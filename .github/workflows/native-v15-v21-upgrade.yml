@@ -26,6 +26,7 @@ jobs:
       ELSEWHERE_V15_ENCRYPTED_PATH: /tmp/native-v15-encrypted-synthetic.ewbak
       ELSEWHERE_REQUIRE_V15_ENCRYPTED: '1'
       ELSEWHERE_REQUIRE_V15_FIXTURE: '1'
+      JAVA_TOOL_OPTIONS: '-Drobolectric.dependency.repo.url=https://repo.maven.apache.org/maven2'
     steps:
       - name: Check out current proposed v21 code
         uses: actions/checkout@v4
