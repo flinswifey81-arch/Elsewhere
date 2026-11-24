@@ -27,6 +27,7 @@ object PersonaTurnBoundary {
             if (names.any { name ->
                 val escaped = Regex.escape(name)
                 Regex("""^\s*$escaped\s*:\s*\S.*$""", RegexOption.IGNORE_CASE).matches(line) ||
+                    clearlyAuthoredPersonaActionOrSpeech(line, escaped) ||
                     Regex(
                         """^\s*(?:NPC|Character|Persona|User)\s*\(\s*$escaped\s*\)\s*:\s*\S.*$""",
                         RegexOption.IGNORE_CASE
@@ -38,5 +39,31 @@ object PersonaTurnBoundary {
             }) return true
         }
         return false
+    }
+
+    /**
+     * High-confidence direct authoring outside the structured-response contract.
+     * Never match a passing reference such as "Morax watched Hazel move".
+     * Avoid guessing about unmarked third-person narration: it may be describing
+     * the player's already-established actions rather than inventing a new turn.
+     */
+    private fun clearlyAuthoredPersonaActionOrSpeech(line: String, escapedName: String): Boolean {
+        val verbs = "(?:said|says|asked|asks|answered|answers|replied|replies|whispered|whispers|" +
+            "murmured|murmurs|shouted|shouts|exclaimed|exclaims|declared|declares)"
+        val explicitItalicAction = Regex(
+            """^\s*[*_]$escapedName\s+.{1,500}[*_]\s*$""",
+            RegexOption.IGNORE_CASE
+        )
+        val quotedPersonaSpeech = Regex(
+            """^\s*(?:"[^"\r\n]{1,300}"|“[^”\r\n]{1,300}”)[,!?]?\s*$escapedName\s+$verbs\b.*$""",
+            RegexOption.IGNORE_CASE
+        )
+        val personaSpeechFirst = Regex(
+            """^\s*$escapedName\s+$verbs\b[^\r\n]*["“].*$""",
+            RegexOption.IGNORE_CASE
+        )
+        return explicitItalicAction.matches(line) ||
+            quotedPersonaSpeech.matches(line) ||
+            personaSpeechFirst.matches(line)
     }
 }

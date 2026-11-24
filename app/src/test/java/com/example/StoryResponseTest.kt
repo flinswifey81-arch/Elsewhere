@@ -133,7 +133,10 @@ class StoryResponseTest {
             """<|segment|>{"type":"npc","speaker_name":"Hazel"}
 "I know." """.trimIndent(),
             """<|segment|>{"type":"persona"}
-"I know." """.trimIndent()
+"I know." """.trimIndent(),
+            "*Hazel takes the key from Morax.*",
+            "Hazel whispered, \"Let's go.\"",
+            "\"The key is mine,\" Hazel answered.
         )
         examples.forEach { example ->
             assertTrue(
@@ -145,6 +148,10 @@ class StoryResponseTest {
             "Morax watched Hazel point toward the ruined stall.", player))
         assertFalse(PersonaTurnBoundary.hasExplicitAuthoredPersonaTurn(
             "\"Hazel: read the inscription,\" Morax said.", player))
+        assertFalse(PersonaTurnBoundary.hasExplicitAuthoredPersonaTurn(
+            "*Morax watches Hazel reach for the door.*", player))
+        assertFalse(PersonaTurnBoundary.hasExplicitAuthoredPersonaTurn(
+            "Morax remembers that Hazel once asked about the seal.", player))
     }
 
     @Test

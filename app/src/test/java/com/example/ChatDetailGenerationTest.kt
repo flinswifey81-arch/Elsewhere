@@ -1201,6 +1201,30 @@ class ChatDetailGenerationTest {
     }
 
     @Test
+    fun explicitItalicPersonaActionIsHeldForReviewWithoutCreatingExtraTurn() = runBlocking {
+        val provider = SequentialResponseProvider(listOf(
+            "*Mara takes the sigil from Rowan.*\n" +
+                "Rowan: \"No, leave that where it is.\""
+        ))
+        val harness = createHarness(
+            provider, ResponseLengthProfile.NORMAL,
+            narratorEnabled = true, npcBankEnabledInitially = true
+        )
+        harness.viewModel.onDraftChanged("Examine the sigil.")
+        harness.viewModel.sendMessage()
+        val state = withTimeout(15_000) {
+            harness.viewModel.uiState.first { state ->
+                state is ChatUiState.Success && !state.isGenerating &&
+                    state.generationError.orEmpty().contains("explicit turn for your Persona")
+            }
+        } as ChatUiState.Success
+        assertTrue(state.partialStopped)
+        assertEquals(1, harness.messageRepository.getMessagesForChatOnce(harness.chatId).size)
+        assertTrue(harness.npcRepository.getProjectedDossiers(harness.chatId).isEmpty())
+        assertEquals(1, provider.requests.size)
+    }
+
+    @Test
     fun malformedNarratedOutputIsSavedWithoutExposingControlMarkers() = runBlocking {
         val provider = SequentialResponseProvider(
             listOf(

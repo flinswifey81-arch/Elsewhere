@@ -51,3 +51,7 @@ In Solo/Character generation, if a model emits an **explicit line attributed to 
 ## Explicitly attributed natural prose (draft acceptance)
 
 When metadata or speaker-segment formatting is absent, Elsewhere can conservatively propose a chat-local NPC dossier from *unambiguously attributed quoted speech* in a Solo reply, e.g. `"The road is closed," Mountain Shaper warned.` It does not try to invent people from unnamed groups, passing mentions, unattributed quotes or general narration. The active Persona's name/aliases and responding Character are excluded. Bank creation and the generated story stay in the same local transaction, using existing variant provenance; Continue checks only newly introduced names. This is a deterministic, offline fallback rather than an additional AI extraction call. Other unstructured prose remains intentionally outside the safe automatic discovery contract.
+
+## Additional explicit Persona-authorship checks
+
+The review gate also recognizes **Persona-leading italic action directions** and **directly attributed quoted Persona speech** (for example `*Hazel takes the key.*` or `"No," Hazel replied.`) even when the model omits a `Hazel:` label. It deliberately does not block indirect third-person references such as `Morax watched Hazel...` or arbitrary descriptions of historical player actions. A hit retains an unsaved reviewable partial, does not rewrite the player's established turn, and performs no second paid call.
