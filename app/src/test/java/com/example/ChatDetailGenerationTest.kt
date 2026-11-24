@@ -762,6 +762,55 @@ class ChatDetailGenerationTest {
     }
 
     @Test
+    fun previouslyKnownNpcCanBeRecalledWithoutPlayerNamingThemInThePrompt() = runBlocking {
+        val provider = SequentialResponseProvider(listOf("Rowan studies the archive shelves."))
+        val harness = createHarness(
+            provider, ResponseLengthProfile.NORMAL,
+            narratorEnabled = false, npcBankEnabledInitially = true
+        )
+        harness.npcRepository.saveManual(
+            NpcDossier(
+                npcId = "archive-voss", chatId = harness.chatId,
+                displayName = "Archivist Voss", aliases = emptyList(),
+                role = "Court archivist", appearance = "Ink-stained cuffs",
+                personality = "Methodical", relationshipToPersona = "",
+                personaRelationships = emptyMap(), characterKnowledge = emptyMap(),
+                goals = "", secrets = "STORYTELLER_ONLY_SECRET",
+                authorNotes = "PRIVATE_AUTHOR_NOTE", keepInScene = false,
+                sceneMode = "AUTO", isManualBase = true,
+                createdAt = 1L, updatedAt = 1L
+            )
+        )
+        harness.npcRepository.saveManual(
+            NpcDossier(
+                npcId = "away-guard", chatId = harness.chatId,
+                displayName = "Absent Guard", aliases = emptyList(),
+                role = "Palace guard", appearance = "", personality = "",
+                relationshipToPersona = "",
+                personaRelationships = emptyMap(), characterKnowledge = emptyMap(),
+                goals = "", secrets = "", authorNotes = "",
+                keepInScene = false, sceneMode = "AWAY",
+                isManualBase = true, createdAt = 2L, updatedAt = 2L
+            )
+        )
+        harness.viewModel.onDraftChanged("We enter the royal archive and check the records.")
+        harness.viewModel.sendMessage()
+        withTimeout(15_000) {
+            harness.messageRepository.getMessagesForChat(harness.chatId).first { it.size == 2 }
+        }
+        assertEquals(1, provider.requests.size)
+        val prompt = provider.requests.single().joinToString("\n") { it.content }
+        assertTrue(prompt.contains("[POTENTIAL RECURRING CAST"))
+        assertTrue(prompt.contains("Archivist Voss"))
+        assertTrue(prompt.contains("Court archivist"))
+        assertFalse("Not yet in-scene; must not be a full presence dossier",
+            prompt.contains("[NPC id=archive-voss]"))
+        assertFalse(prompt.contains("Absent Guard"))
+        assertFalse(prompt.contains("STORYTELLER_ONLY_SECRET"))
+        assertFalse(prompt.contains("PRIVATE_AUTHOR_NOTE"))
+    }
+
+    @Test
     fun narratorNpcBankAndLorebookGenerateTogetherInOneRequest() = runBlocking {
         val provider = SequentialResponseProvider(
             listOf(
