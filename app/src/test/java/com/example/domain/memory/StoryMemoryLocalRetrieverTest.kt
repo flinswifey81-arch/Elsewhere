@@ -54,14 +54,24 @@ class StoryMemoryLocalRetrieverTest {
         memories, StoryMemorySearchRequest(ctx, text, active, limit, chars)
     )
 
-    @Test fun selectedRelevantFactsAreDeterministicAndCaseInsensitive() {
-        val compass = manual("a", "The BRASS Compass is in the library.", order = 10)
-        val other = manual("b", "The lighthouse is empty.", order = 20)
-        val later = manual("c", "Rowan repaired the compass.", order = 30)
+    @Test fun selectedRelevantFactsArePresentedChronologicallyRegardlessOfCaseOrInputOrder() {
+        val compass = manual("older", "The BRASS Compass is in the library.", order = 10)
+        val other = manual("other", "The lighthouse is empty.", order = 20)
+        val later = manual("newer", "Rowan repaired the compass.", order = 30)
         val input = listOf(compass, other, later)
-        assertEquals(listOf("c", "a"), search(input, "COMPASS").selected.map { it.memoryId })
-        assertEquals(listOf("c", "a"), search(input.reversed(), "compass").selected.map { it.memoryId })
+        assertEquals(listOf("older", "newer"), search(input, "COMPASS").selected.map { it.memoryId })
+        assertEquals(listOf("older", "newer"),
+            search(input.reversed(), "compass").selected.map { it.memoryId })
         assertEquals(3, search(input, "compass").eligibleCount)
+    }
+
+    @Test fun selectionUsesRelevanceAndRecencyBeforeChronologicalPresentation() {
+        val older = manual("older", "The brass compass is in the library.", order = 10)
+        val newer = manual("newer", "Rowan repaired the compass.", order = 30)
+        val input = listOf(older, newer)
+        assertEquals(listOf("newer"), search(input, "compass", limit = 1).selected.map { it.memoryId })
+        assertEquals(listOf("older"),
+            search(input, "brass compass", limit = 1).selected.map { it.memoryId })
     }
 
     @Test fun ineligibleMemoriesAreRejectedBeforeRankingEvenWhenPinned() {
