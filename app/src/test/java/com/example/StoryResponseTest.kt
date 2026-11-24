@@ -136,7 +136,7 @@ class StoryResponseTest {
 "I know." """.trimIndent(),
             "*Hazel takes the key from Morax.*",
             "Hazel whispered, \"Let's go.\"",
-            "\"The key is mine,\" Hazel answered.
+            "\"The key is mine,\" Hazel answered."
         )
         examples.forEach { example ->
             assertTrue(
