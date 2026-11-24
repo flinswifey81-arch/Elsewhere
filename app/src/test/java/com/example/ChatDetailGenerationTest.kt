@@ -805,7 +805,10 @@ class ChatDetailGenerationTest {
         assertTrue(prompt.contains("Court archivist"))
         assertFalse("Not yet in-scene; must not be a full presence dossier",
             prompt.contains("[NPC id=archive-voss]"))
-        assertFalse(prompt.contains("Absent Guard"))
+        assertTrue("Explicit Away must be passed as an absence constraint",
+            prompt.contains("Absent: Absent Guard"))
+        assertFalse("An Away NPC cannot be a returning-cast suggestion",
+            prompt.contains("- Absent Guard"))
         assertFalse(prompt.contains("STORYTELLER_ONLY_SECRET"))
         assertFalse(prompt.contains("PRIVATE_AUTHOR_NOTE"))
     }
