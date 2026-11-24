@@ -127,6 +127,55 @@ class NpcRepositoryTest {
     }
 
     @Test
+    fun unmentionedBankNpcCanBeConsideredForAnEntranceWithoutPretendingPresence() = runBlocking {
+        repository.saveManual(dossier().copy(
+            npcId = "archivist-voss", displayName = "Archivist Voss",
+            role = "Archive keeper", sceneMode = "AUTO",
+            secrets = "NEVER_EXPOSE_PRIVATE_RECURRING_SECRET",
+            authorNotes = "NEVER_EXPOSE_PRIVATE_AUTHOR_NOTE",
+            keepInScene = true
+        ))
+        repository.saveManual(dossier().copy(
+            npcId = "away-guard", displayName = "Absent Guard",
+            role = "Archive guard", sceneMode = "AWAY", keepInScene = true
+        ))
+        val scene = MessageEntity(
+            chatId = "chat", speakerType = SpeakerType.PERSONA,
+            speakerId = "persona", speakerDisplayNameSnapshot = "Persona",
+            content = "We reach the archive and check the notice board.",
+            orderIndex = 8
+        )
+        val preview = repository.relevantContext("chat", listOf(scene)).orEmpty()
+        assertTrue(preview.contains("[POTENTIAL RECURRING CAST"))
+        assertTrue(preview.contains("Archivist Voss"))
+        assertTrue(preview.contains("Archive keeper"))
+        assertFalse("Unknown presence is never a full active-scene dossier",
+            preview.contains("[NPC id=archivist-voss]"))
+        assertFalse("Explicitly Away should not reappear as a candidate",
+            preview.contains("Absent Guard"))
+        assertFalse(preview.contains("NEVER_EXPOSE_PRIVATE_RECURRING_SECRET"))
+        assertFalse(preview.contains("NEVER_EXPOSE_PRIVATE_AUTHOR_NOTE"))
+        assertTrue("Group speaker context must not suggest off-scene cast",
+            repository.relevantContext("chat", listOf(scene), isGroup = true).isNullOrBlank())
+        assertTrue("Wack must not reintroduce pre-reset roster",
+            repository.relevantContext("chat", listOf(scene), afterOrderIndex = 7).isNullOrBlank())
+    }
+
+    @Test
+    fun confirmedPresentNpcKeepsFullProfileWithoutBeingDuplicatedAsCandidate() = runBlocking {
+        repository.saveManual(dossier().copy(
+            npcId = "present-guide", displayName = "Mara",
+            sceneMode = "HERE", role = "Trusted guide",
+            secrets = "ACTIVE_STORYTELLER_KNOWLEDGE"
+        ))
+        val context = repository.relevantContext("chat", emptyList()).orEmpty()
+        assertTrue(context.contains("[NPC id=present-guide]"))
+        assertTrue(context.contains("ACTIVE_STORYTELLER_KNOWLEDGE"))
+        assertFalse("Present NPC should not be treated as unknown",
+            context.contains("[POTENTIAL RECURRING CAST"))
+    }
+
+    @Test
     fun expandedSoloEnsembleContextIncludesAllFiveNpcProfiles() = runBlocking {
         (1..5).forEach { index ->
             repository.saveManual(

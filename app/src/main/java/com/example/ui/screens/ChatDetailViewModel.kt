@@ -1638,9 +1638,12 @@ class ChatDetailViewModel(
                 append("[SCENE CAST — physically present supporting characters] ")
                 append("Present: ").append(present.joinToString(", ").ifEmpty { "none confirmed" }).append(". ")
                 if (absent.isNotEmpty()) append("Absent: ").append(absent.joinToString(", ")).append(". ")
-                append("Other remembered NPCs have unknown presence. ")
-                append("Absent or unknown NPCs must not appear or speak until an actual entrance. ")
-                append("Pinned Co-Leads have priority but are not teleported into scenes.")
+                append("Other remembered NPCs have unknown presence, not confirmed proximity. ")
+                append("A potential recurring NPC may enter only when a believable scene event ")
+                append("would bring them in; show the entrance before giving them dialogue. ")
+                append("Explicitly Away NPCs must stay away until their return is established. ")
+                append("Never create a Persona action, summons, or invitation to cause the entrance. ")
+                append("Pinned Co-Leads have priority only when physically present.")
             }
         } else null
         val activeNpcDossiers = if (npcBankEnabled) {

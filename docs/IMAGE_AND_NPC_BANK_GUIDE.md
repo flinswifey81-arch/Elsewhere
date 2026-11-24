@@ -54,3 +54,7 @@ The import schema is independent from the Room database version. Use `schema_ver
 See [`examples/npc_bank_example.json`](../examples/npc_bank_example.json).
 
 `persona_relationships` and `character_knowledge` are maps keyed by stable Persona and Character IDs, not display names. `extension_fields` is reserved for explicit future additions. Unknown future NPC fields are preserved privately as extension fields; unknown root fields are safely ignored. Extension fields are never placed in provider context or share-safe exports. Malformed or oversized JSON fails without modifying existing dossiers.
+
+## Recurring NPCs without name prompts (draft branch validation)
+
+When the NPC Bank is enabled for a Solo chat, the prompt can now include a **bounded, non-secret potential cast** of up to four stored NPCs whose location/presence is not known, even if the player did not name them. A relevant role gets priority, followed by user-pinned recurring cast and recent updates. The narrator may choose an organic entrance when appropriate; this roster does not mean the NPC is currently present, does not allow them to speak before appearing, and does not force an encounter. Full dossiers remain exclusive to confirmed present NPCs. Explicit **Away**, Group and post-Wack unknown cast are excluded from these previews. The roster excludes private notes, secrets and per-Character knowledge. This is a model-available casting hint, not guaranteed participation in every reply. New-NPC creation and Persona-puppeteering reports are tracked separately in issues #51 and #50.

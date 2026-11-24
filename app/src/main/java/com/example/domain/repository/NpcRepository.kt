@@ -883,7 +883,31 @@ class NpcRepository(
                     ?.takeUnless { it.isArchived }
                     ?.let { linkedCards[id] = it }
             }
-            selected.joinToString("\n\n") { selection ->
+            // The Bank is both active-scene context and a bounded directory of
+            // established recurring cast. An UNKNOWN NPC has not been shown to be
+            // present: supply a tiny, non-secret casting hint so the storyteller
+            // may stage an organic entrance without the Persona naming them.
+            // Do not restore forgotten pre-Wack cast or broadcast extra cast to
+            // per-speaker Group requests. Explicit AWAY is never eligible.
+            val potentialCast = if (!isGroup && afterOrderIndex == null) {
+                val sceneWords = Regex("[\\p{L}\\p{N}]{4,}")
+                    .findAll(recentText).map { it.value }.toSet()
+                NpcSceneCastResolver.resolve(dossiers, recentMessages)
+                    .filter { it.presence == NpcScenePresence.UNKNOWN }
+                    .sortedWith(
+                        compareByDescending<com.example.domain.npc.NpcSceneMember> { member ->
+                            val roleWords = Regex("[\\p{L}\\p{N}]{4,}")
+                                .findAll(member.dossier.role.lowercase(Locale.ROOT))
+                                .map { it.value }.toSet()
+                            roleWords.count { it in sceneWords }
+                        }.thenByDescending { it.dossier.keepInScene }
+                            .thenByDescending { it.dossier.updatedAt }
+                            .thenBy { it.dossier.npcId }
+                    )
+                    .take(minOf(4, limit.coerceIn(1, 8)))
+                    .map { it.dossier }
+            } else emptyList()
+            val presentContext = selected.joinToString("\n\n") { selection ->
                 val linkedCard = selection.dossier.linkedCharacterId?.let(linkedCards::get)
                 with(selection.dossier) {
                     buildString {
@@ -936,7 +960,24 @@ class NpcRepository(
                         }
                     }.trimEnd()
                 }
-            }.takeIf(String::isNotBlank)
+            }
+            val availableCastContext = if (potentialCast.isEmpty()) null else buildString {
+                append("[POTENTIAL RECURRING CAST — NOT CONFIRMED PRESENT]\\n")
+                append("These are established chat-local supporting characters who are not ")
+                append("known to be in the room. They may return through a plausible, ")
+                append("scene-motivated entrance when the setting or ongoing plot calls ")
+                append("for them. Do not teleport them, make them speak before entering, ")
+                append("invent a Persona action to bring them in, or override an Away state.\\n")
+                potentialCast.forEach { npc ->
+                    append("- ").append(npc.displayName.take(120))
+                    npc.role.takeIf(String::isNotBlank)?.let { role ->
+                        append(" — role: ").append(role.take(160))
+                    }
+                    append('\\n')
+                }
+            }.trimEnd()
+            listOfNotNull(presentContext.takeIf(String::isNotBlank), availableCastContext)
+                .joinToString("\\n\\n").takeIf(String::isNotBlank)
         }
 
     suspend fun exportJson(chatId: String, includePrivateFields: Boolean = false): String = withContext(Dispatchers.IO) {
