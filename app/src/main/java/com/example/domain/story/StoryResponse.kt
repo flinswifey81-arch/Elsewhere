@@ -284,7 +284,9 @@ open class StoryOutputParser {
                 }
                 else -> {
                     val visibleLine = sanitizeControlSyntax(line)
-                    if (visibleLine != line) {
+                    // The sanitizer also trims trailing whitespace. Markdown
+                    // hard breaks and CRLF are not evidence of control syntax.
+                    if (visibleLine != line.trimEnd()) {
                         sawStructure = true
                         malformed = true
                     }

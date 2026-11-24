@@ -66,6 +66,42 @@ class StoryResponseTest {
     }
 
     @Test
+    fun trailingSpacesAndCrLfAreNotIncompleteStoryFormat() {
+        val output = "Zebulus stood still.  \r\n \r\nThe room quieted.\t\r\n"
+        val parsed = parser.parse(output, primary)
+
+        assertFalse(parsed.usedStructuredFormat)
+        assertEquals(null, parsed.warning)
+        assertEquals(
+            "Zebulus stood still.\n\nThe room quieted.",
+            parsed.response.segments.single().content
+        )
+    }
+
+    @Test
+    fun trailingWhitespaceDoesNotPreventSpeakerRecoveryInPlainTranscript() {
+        val output = "Character (Zebulus): \"Wait here.\"  \r\nNPC (Lady Ashford): \"I am here.\"\t"
+        val parsed = parser.parse(output, primary, listOf(ashford))
+
+        assertEquals(null, parsed.warning)
+        assertEquals(
+            listOf("character-1", "npc-ashford"),
+            parsed.response.segments.map { it.speakerId }
+        )
+    }
+
+    @Test
+    fun genuinelyMissingClosingMarkerStillWarnsAfterPreservingProse() {
+        val output = "<|elsewhere_story_v1|>\r\n" +
+            "<|segment|>{\"type\":\"character\"}\r\nThe room quieted.  \r\n"
+        val parsed = parser.parse(output, primary)
+
+        assertTrue(parsed.usedStructuredFormat)
+        assertNotNull(parsed.warning)
+        assertEquals("The room quieted.", parsed.response.segments.single().content)
+    }
+
+    @Test
     fun malformedHeadersAndIncompleteOutputHideMarkersAndPreserveProse() {
         val malformed = """
             <|elsewhere_story_v1|>

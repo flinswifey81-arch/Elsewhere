@@ -42,7 +42,9 @@ jobs:
             --tests com.example.CampaignMemoryScopeTest \
             --tests com.example.WorldDefinitionBundleTransferTest \
             --tests com.example.WorldArchiveMemoryV2TransferTest \
-            --tests com.example.ChatPdfExportContractTest
+            --tests com.example.ChatPdfExportContractTest \
+            --tests com.example.SameIdJsonReplaceTest \
+            --tests com.example.ProfileJsonImportWorkflowTest
       - name: Summarize offline test results
         if: always()
         run: |
