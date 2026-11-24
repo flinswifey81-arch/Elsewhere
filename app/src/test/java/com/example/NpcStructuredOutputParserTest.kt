@@ -49,6 +49,28 @@ class NpcStructuredOutputParserTest {
     }
 
     @Test
+    fun malformedIndividualNpcDoesNotEraseValidNewDossiersInSameBlock() {
+        val output = """
+            The courier and the archivist exchange a glance.
+            <elsewhere_npc_updates>
+            {"schema_version":1,"updates":[
+              {"display_name":"Liora Fen","role":"Courier","appearance":"Dusty cloak"},
+              {"npc_id":"existing-guard","display_name":"Unauthorized new identity","goals":"Open the gate"},
+              {"display_name":"Sorin Vale","role":"Archivist","goals":"Protect the ledger"}
+            ]}
+            </elsewhere_npc_updates>
+        """.trimIndent()
+        val parsed = parser.parse(output)
+        assertEquals("The courier and the archivist exchange a glance.", parsed.storyText)
+        assertEquals(listOf("Liora Fen", "Sorin Vale"),
+            parsed.updates.map { it.displayName })
+        assertEquals("Dusty cloak", parsed.updates.first().appearance)
+        assertEquals("Protect the ledger", parsed.updates.last().goals)
+        assertTrue(parsed.warning.orEmpty().contains("1 invalid NPC update"))
+        assertTrue(parsed.updates.none { it.npcId == "existing-guard" })
+    }
+
+    @Test
     fun unknownMutationFieldsRejectWholeBlock() {
         val output = "Visible\n<elsewhere_npc_updates>" +
             "{\"schema_version\":1,\"updates\":[{\"display_name\":\"Mara\",\"author_notes\":\"leak\"}]}" +
