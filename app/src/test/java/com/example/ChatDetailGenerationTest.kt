@@ -1277,6 +1277,102 @@ class ChatDetailGenerationTest {
     }
 
     @Test
+    fun streamedPersonaActionBeatIsHeldForReviewOnSend() = runBlocking {
+        val provider = RequestSequenceProvider(listOf(blockedPersonaReply()))
+        val harness = createHarness(
+            provider, ResponseLengthProfile.NORMAL,
+            narratorEnabled = true, npcBankEnabledInitially = true
+        )
+
+        harness.viewModel.onDraftChanged("Ask Rowan what happened at breakfast.")
+        harness.viewModel.sendMessage()
+
+        assertPersonaReplyHeldForReview(harness)
+        val persisted = harness.messageRepository.getMessagesForChatOnce(harness.chatId)
+        assertEquals(listOf(SpeakerType.PERSONA), persisted.map { it.speakerType })
+        assertEquals(1, provider.requests.size)
+    }
+
+    @Test
+    fun streamedPersonaActionBeatCannotOverwriteContinueTarget() = runBlocking {
+        verifyBlockedPersonaFollowup { viewModel, messageId ->
+            viewModel.continueMessage(messageId)
+        }
+    }
+
+    @Test
+    fun streamedPersonaActionBeatCannotReplacePrimaryVariant() = runBlocking {
+        verifyBlockedPersonaFollowup { viewModel, messageId ->
+            viewModel.regenerateMessage(messageId)
+        }
+    }
+
+    private fun blockedPersonaReply(): List<StreamEvent> = listOf(
+        // Deliberately malformed metadata forces the visible-prose fallback.
+        // Split inside the Persona name and before the second quote.
+        StreamEvent.Content("<|elsewhere_story_v1|>\n<|segment|>{broken}\n"),
+        StreamEvent.Content("Rowan moved toward the stall.\n“Compromised what?” *Ma"),
+        StreamEvent.Content("ra pointed at the stall.* "),
+        StreamEvent.Content("“My breakfast?”\n"),
+        StreamEvent.Done(null)
+    )
+
+    private suspend fun assertPersonaReplyHeldForReview(harness: Harness) {
+        val state = withTimeout(15_000) {
+            harness.viewModel.uiState.first {
+                it is ChatUiState.Success && !it.isGenerating && it.partialStopped &&
+                    it.generationError.orEmpty().contains("explicit turn for your Persona")
+            }
+        } as ChatUiState.Success
+        assertTrue(state.generationError.orEmpty().contains("not saved"))
+        assertTrue(state.streamingContent.orEmpty().contains("Rowan moved toward the stall."))
+        assertFalse(state.streamingContent.orEmpty().contains("<|segment|>"))
+        assertTrue(harness.npcRepository.getProjectedDossiers(harness.chatId).isEmpty())
+    }
+
+    private suspend fun verifyBlockedPersonaFollowup(
+        followup: (ChatDetailViewModel, String) -> Unit
+    ) {
+        val provider = RequestSequenceProvider(
+            listOf(
+                listOf(StreamEvent.Content("Rowan waits by the door."), StreamEvent.Done(null)),
+                blockedPersonaReply()
+            )
+        )
+        val harness = createHarness(
+            provider, ResponseLengthProfile.NORMAL,
+            narratorEnabled = true, npcBankEnabledInitially = true
+        )
+        harness.viewModel.onDraftChanged("Ask Rowan to wait.")
+        harness.viewModel.sendMessage()
+        val before = withTimeout(15_000) {
+            harness.messageRepository.getMessagesForChat(harness.chatId).first { it.size == 2 }
+        }
+        val original = before.last()
+        withTimeout(15_000) {
+            harness.viewModel.uiState.first {
+                it is ChatUiState.Success && !it.isGenerating &&
+                    it.messages.any { message -> message.messageId == original.messageId }
+            }
+        }
+        yield()
+        followup(harness.viewModel, original.messageId)
+
+        assertPersonaReplyHeldForReview(harness)
+        assertEquals(before, harness.messageRepository.getMessagesForChatOnce(harness.chatId))
+        assertEquals(
+            listOf(original.messageId),
+            harness.messageRepository.getVariantsOnce(original.variantGroupId).map { it.messageId }
+        )
+        harness.viewModel.discardPartial()
+        withTimeout(15_000) {
+            harness.viewModel.uiState.first { it is ChatUiState.Success && !it.partialStopped }
+        }
+        assertEquals(before, harness.messageRepository.getMessagesForChatOnce(harness.chatId))
+        assertEquals(2, provider.requests.size)
+    }
+
+    @Test
     fun malformedNarratedOutputIsSavedWithoutExposingControlMarkers() = runBlocking {
         val provider = SequentialResponseProvider(
             listOf(

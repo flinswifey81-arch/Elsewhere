@@ -49,6 +49,11 @@ jobs:
             --tests com.example.NpcProseDiscoveryTest \
             --tests com.example.NpcSceneCastResolverTest \
             --tests com.example.StoryResponseTest \
+            --tests com.example.ChatDetailGenerationTest.streamedPersonaActionBeatIsHeldForReviewOnSend \
+            --tests com.example.ChatDetailGenerationTest.streamedPersonaActionBeatCannotOverwriteContinueTarget \
+            --tests com.example.ChatDetailGenerationTest.streamedPersonaActionBeatCannotReplacePrimaryVariant \
+            --tests com.example.ChatDetailGenerationTest.previouslyKnownNpcCanBeRecalledWithoutPlayerNamingThemInThePrompt \
+            --tests com.example.ChatDetailGenerationTest.modelAttributedNaturalNpcDialogueCreatesBankEntryWithoutMetadata \
             --tests com.example.domain.memory.StoryMemoryLocalRetrieverTest
       - name: Print actual failing cases
         if: failure()
