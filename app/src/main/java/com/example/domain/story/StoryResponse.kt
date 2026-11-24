@@ -421,7 +421,13 @@ open class StoryOutputParser {
         val lines = output.lines()
         val firstContentIndex = lines.indexOfFirst { it.isNotBlank() }
         if (firstContentIndex < 0) return null
-        val firstHeader = transcriptHeader(lines[firstContentIndex], primaryCharacter, knownNpcs) ?: return null
+        // Bare "Name:" labels are ambiguous in ordinary writing. Accept a
+        // previously unknown speaker ONLY when another recognized Character,
+        // Narrator or typed NPC header anchors a genuine transcript.
+        if (lines.none { transcriptHeader(it, primaryCharacter, knownNpcs) != null }) return null
+        val firstHeader = transcriptHeader(
+            lines[firstContentIndex], primaryCharacter, knownNpcs, allowUnknownNpc = true
+        ) ?: return null
         val recovered = mutableListOf<StorySegment>()
         val body = mutableListOf<String>()
         var current = firstHeader
@@ -452,7 +458,7 @@ open class StoryOutputParser {
 
         firstHeader.inlineContent.takeIf(String::isNotBlank)?.let(body::add)
         lines.drop(firstContentIndex + 1).forEach { line ->
-            val header = transcriptHeader(line, primaryCharacter, knownNpcs)
+            val header = transcriptHeader(line, primaryCharacter, knownNpcs, allowUnknownNpc = true)
             if (header == null) {
                 body += line
             } else {
@@ -474,7 +480,8 @@ open class StoryOutputParser {
     private fun transcriptHeader(
         line: String,
         primaryCharacter: StorySpeakerIdentity,
-        knownNpcs: List<StorySpeakerIdentity>
+        knownNpcs: List<StorySpeakerIdentity>,
+        allowUnknownNpc: Boolean = false
     ): TranscriptHeader? {
         NARRATOR_TRANSCRIPT_PATTERN.matchEntire(line)?.let { match ->
             return TranscriptHeader(
@@ -527,6 +534,25 @@ open class StoryOutputParser {
                     inlineContent = match.groupValues[1],
                     strong = false
                 )
+            }
+        }
+        if (allowUnknownNpc) {
+            UNKNOWN_NPC_TRANSCRIPT_PATTERN.matchEntire(line)?.let { match ->
+                val name = match.groupValues[1].trim()
+                val body = match.groupValues[2]
+                val opening = body.trimStart()
+                // Strong RP evidence: an attributed quotation or italic action.
+                // A heading such as "Chapter One: The Return" is not dialogue.
+                if (name !in NON_SPEAKER_LABELS &&
+                    opening.firstOrNull() in setOf('"', '“', '‘', '*', '_')
+                ) {
+                    return TranscriptHeader(
+                        type = StorySegmentType.NPC,
+                        speaker = StorySpeakerIdentity(stableNpcId(name), name),
+                        inlineContent = body,
+                        strong = false
+                    )
+                }
             }
         }
         return null
@@ -626,6 +652,18 @@ open class StoryOutputParser {
             "^\\s*NPC\\s*\\(([^)\\r\\n]{1,120})\\)\\s*:\\s*(.*)$",
             RegexOption.IGNORE_CASE
         )
+
+        // Unknown speakers are recovered only in an already anchored transcript,
+        // never from an isolated prose heading or passing mention.
+        private val UNKNOWN_NPC_TRANSCRIPT_PATTERN = Regex(
+            "^\\s*([\\p{Lu}][\\p{L}'’.-]*(?:\\s+[\\p{Lu}][\\p{L}'’.-]*){0,3})\\s*:\\s*(.*)$"
+        )
+        private val NON_SPEAKER_LABELS = setOf(
+            "Scene", "Chapter", "Location", "Summary", "Context", "Note",
+            "Narration", "Dialogue", "Action", "Thoughts", "Status",
+            "Instructions", "Response", "User", "Persona"
+        )
+
 
         private fun looksLikeControlFragment(line: String): Boolean =
             line.startsWith("<|elsewhere_") ||

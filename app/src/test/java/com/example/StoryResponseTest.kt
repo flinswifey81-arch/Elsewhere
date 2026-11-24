@@ -149,6 +149,36 @@ class StoryResponseTest {
     }
 
     @Test
+    fun unfamiliarNamedNpcFromAnchoredNaturalTranscriptGetsStableSpeakerIdentity() {
+        val scene = """
+            Zebulus: *He lowers his voice.* "Who broke the seal?"
+            Mountain Shaper: *The adeptus folds his arms.* "I did."
+        """.trimIndent()
+        val parsed = parser.parse(scene, primary)
+        assertEquals(listOf(StorySegmentType.CHARACTER, StorySegmentType.NPC),
+            parsed.response.segments.map { it.type })
+        assertEquals("Mountain Shaper", parsed.response.segments.last().speakerName)
+        assertTrue(parsed.response.segments.last().speakerId.orEmpty().startsWith("story-npc:"))
+        assertEquals("*The adeptus folds his arms.* \"I did.\"",
+            parsed.response.segments.last().content)
+    }
+
+    @Test
+    fun isolatedHeadingsOrUnanchoredNamesDoNotInventNpcIdentities() {
+        val ordinary = "Mountain Shaper: *A biography* lies on the desk."
+        assertEquals(
+            ordinary,
+            parser.parse(ordinary, primary).response.segments.single().content
+        )
+        val headings = """
+            Zebulus: "The chapter is over."
+            Chapter: "A New Dawn"
+        """.trimIndent()
+        val parsed = parser.parse(headings, primary)
+        assertTrue(parsed.response.segments.none { it.speakerName == "Chapter" })
+    }
+
+    @Test
     fun ordinaryOutputFallsBackToCharacterAndContinuationAppendsLogicalSegments() {
         val first = parser.parse("A quiet ordinary reply.", primary)
         assertFalse(first.usedStructuredFormat)

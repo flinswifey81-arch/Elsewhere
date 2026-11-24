@@ -1124,6 +1124,31 @@ class ChatDetailGenerationTest {
     }
 
     @Test
+    fun naturalMultiSpeakerReplyCreatesNamedNpcWithoutTerminalMetadataOrSecondRequest() = runBlocking {
+        val provider = SequentialResponseProvider(listOf(
+            "Character (Rowan): \"Is the path open?\"\n" +
+                "Mountain Shaper: *The adeptus shakes his head.* \"Not yet.\""
+        ))
+        val harness = createHarness(
+            provider, ResponseLengthProfile.NORMAL,
+            narratorEnabled = true, npcBankEnabledInitially = true
+        )
+        harness.viewModel.onDraftChanged("Ask the adeptus about the mountain road.")
+        harness.viewModel.sendMessage()
+        val messages = withTimeout(15_000) {
+            harness.messageRepository.getMessagesForChat(harness.chatId).first { it.size == 2 }
+        }
+        val saved = requireNotNull(StoryResponseCodec.decode(messages.last().content))
+        assertEquals(listOf(StorySegmentType.CHARACTER, StorySegmentType.NPC),
+            saved.segments.map { it.type })
+        val bank = harness.npcRepository.getProjectedDossiers(harness.chatId)
+        assertEquals(1, bank.size)
+        assertEquals("Mountain Shaper", bank.single().displayName)
+        assertEquals(bank.single().npcId, saved.segments.last().speakerId)
+        assertEquals(1, provider.requests.size)
+    }
+
+    @Test
     fun malformedNarratedOutputIsSavedWithoutExposingControlMarkers() = runBlocking {
         val provider = SequentialResponseProvider(
             listOf(

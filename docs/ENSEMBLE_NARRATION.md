@@ -39,3 +39,7 @@ The per-chat co-lead switch is persisted with chat settings. Database version 11
 - Segment quality still depends on model instruction-following. The fallback protects the text and interface when formatting is malformed, but it cannot infer missing speaker boundaries reliably.
 - Dynamically introduced NPCs receive a stable generated identity derived from their supplied name. They are not automatically added to the NPC Bank unless the existing NPC update contract also supplies a valid update.
 - Previously saved ensemble responses keep their segmented presentation if Narrator is later disabled; disabling Narrator changes future generations.
+
+## Recovery of newly introduced named NPCs (draft regression)
+
+When the NPC Bank is enabled, a clearly attributed new supporting speaker in a multi-speaker transcript can now be recovered without a terminal metadata block: for example `Character (Morax): ...` followed by `Mountain Shaper: *...*`. A recognized Character/Narrator/typed NPC speaker must anchor the transcript, and the unknown name must lead an attributed quote or RP action; a single loose name, story heading, or passing reference remains ordinary prose. The existing atomic generation persistence creates one chat-local dossier and rewrites the temporary segment ID to the durable Bank ID. No second provider call, and no automatic claim that everyone mentioned is an NPC. This does not yet cover unstructured prose without unambiguous speaker attribution.
