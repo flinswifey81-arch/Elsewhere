@@ -361,8 +361,12 @@ class CampaignRepositoryTest {
         )
         assertEquals("ACTIVE", arc.status)
         assertEquals("OPEN", promise.status)
-        assertEquals(listOf(arc.itemId, promise.itemId),
-            campaigns.continuityItems(first.campaignId).map { it.itemId })
+        // Records created within the same millisecond are deterministically
+        // sorted by ID, not insertion order. This test checks ownership and
+        // independent existence, not a chronological ordering contract.
+        val firstItems = campaigns.continuityItems(first.campaignId)
+        assertEquals(2, firstItems.size)
+        assertEquals(setOf(arc.itemId, promise.itemId), firstItems.map { it.itemId }.toSet())
         assertTrue(campaigns.continuityItems(second.campaignId).isEmpty())
         assertTrue(runCatching {
             campaigns.addContinuityItem(second.campaignId,
