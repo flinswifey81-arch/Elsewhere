@@ -6,6 +6,7 @@ import androidx.test.core.app.ApplicationProvider
 import com.example.data.AppDatabase
 import com.example.data.model.*
 import com.example.domain.repository.AppDataMaintenanceCoordinator
+import com.example.domain.repository.CampaignRepository
 import com.example.domain.repository.MessageAttachmentRepository
 import com.example.domain.repository.ProfileImageRepository
 import com.example.domain.world.*
@@ -249,12 +250,16 @@ class WorldArchiveMemoryV2TransferTest {
             campaignId = campaignId, sourceChapterId = firstChapterId,
             sourceMemoryId = firstMemoryId, sourceContentSha256 = digest(memory.content)
         )))
+        val playthrough = CampaignRepository(db)
+        val originalState = playthrough.setPlaythroughState(
+            campaignId, firstChapterId, CampaignPlaythroughField.FORM, "Varka", "Winter form"
+        )
 
         val preview = transfer.previewExport(worldId)
         assertEquals(1, preview.campaigns)
         assertEquals(2, preview.campaignChapters)
         assertEquals(1, preview.journalEntries)
-        assertEquals(1, preview.campaignContinuityItems)
+        assertEquals(2, preview.campaignContinuityItems)
         assertEquals(1, preview.sharedMemories)
         assertTrue(preview.containsPrivateMaterial)
         assertTrue(runCatching {
@@ -290,7 +295,13 @@ class WorldArchiveMemoryV2TransferTest {
         )!!
         assertEquals(chapters[0].chatId, copiedMessage.chatId)
         assertEquals(digest(copiedMessage.content), importedJournal.sourceContentSha256)
-        val importedThread = campaigns.continuityItems(copy.campaignId).single()
+        val importedState = playthrough.playthroughStateForChapter(
+            copy.campaignId, chapters[1].chapterId
+        ).single()
+        assertNotEquals(originalState.itemId, importedState.itemId)
+        assertEquals(chapters[0].chapterId, importedState.openedChapterId)
+        assertEquals("Winter form", importedState.details)
+        val importedThread = campaigns.continuityItems(copy.campaignId).single { it.itemType == "THREAD" }
         assertEquals(importedJournal.journalEntryId, importedThread.sourceJournalEntryId)
         assertEquals(chapters[0].chapterId, importedThread.openedChapterId)
         val link = campaigns.memorySharesForCampaign(copy.campaignId).single()

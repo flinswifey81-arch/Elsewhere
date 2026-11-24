@@ -28,6 +28,7 @@ import com.example.data.model.CampaignEntity
 import com.example.data.model.CampaignChapterEntity
 import com.example.data.model.CampaignJournalEntryEntity
 import com.example.data.model.CampaignContinuityItemEntity
+import com.example.data.model.CampaignPlaythroughField
 import com.example.data.model.ChatEntity
 import com.example.domain.repository.CampaignRepository
 import com.example.domain.repository.WorldRepository
@@ -1015,8 +1016,22 @@ fun WorldsScreen(
                                         }
                                     }
                                     HorizontalDivider()
+                                    CampaignPlaythroughStateSection(
+                                        campaign.campaignId, chapters, continuityItems, busy
+                                    ) { chapterId, field, subject, value, onSaved ->
+                                        submit {
+                                            campaignRepository.setPlaythroughState(
+                                                campaign.campaignId, chapterId, field, subject, value
+                                            )
+                                            onSaved()
+                                        }
+                                    }
+                                    HorizontalDivider()
+                                    val storyThreads = continuityItems.filter {
+                                        CampaignPlaythroughField.fromItemType(it.itemType) == null
+                                    }
                                     Text(
-                                        "Arcs & ongoing threads (" + continuityItems.size + ")",
+                                        "Arcs & ongoing threads (" + storyThreads.size + ")",
                                         style = MaterialTheme.typography.titleSmall
                                     )
                                     Text(
@@ -1054,7 +1069,7 @@ fun WorldsScreen(
                                             }
                                         ) { Text("Track thread") }
                                     }
-                                    continuityItems.forEach { item ->
+                                    storyThreads.forEach { item ->
                                         Column(
                                             modifier = Modifier.fillMaxWidth()
                                                 .testTag("campaign_continuity_" + item.itemId),

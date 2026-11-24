@@ -11,7 +11,9 @@ import java.util.UUID
  *
  * ARC: ACTIVE or COMPLETE, with an editable summary.
  * THREAD/PROMISE/QUEST/DISCOVERY/RELATIONSHIP: OPEN or RESOLVED, with an
- * optional closing note. This is organization, not RPG gameplay.
+ * optional closing note.
+ * PLAYTHROUGH_*: per-episode value or explicit clear, keyed by field and subject.
+ * This is narrative state, not RPG rules or automatic progression.
  *
  * All records are private to ONE Campaign. Null-on-delete source references
  * preserve the authored record if a chapter or journal bookmark is removed.

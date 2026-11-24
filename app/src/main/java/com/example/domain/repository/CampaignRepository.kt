@@ -7,6 +7,9 @@ import com.example.data.model.CampaignEntity
 import com.example.data.model.CampaignJournalEntryEntity
 import com.example.data.model.CampaignContinuityItemEntity
 import com.example.data.model.CampaignMemoryShareEntity
+import com.example.data.model.CampaignPlaythroughField
+import com.example.data.model.campaignPlaythroughStateAt
+import com.example.data.model.playthroughSubject
 import com.example.domain.memory.StoryMemoryEligibilityPolicy
 import com.example.data.model.WorldContinuityEventEntity
 import java.security.MessageDigest
@@ -130,6 +133,50 @@ class CampaignRepository(
     // Each Campaign's arcs/threads are local notes, never implicit prompt input.
     fun observeContinuityItems(campaignId: String) = dao.observeContinuityItems(campaignId)
     suspend fun continuityItems(campaignId: String) = dao.continuityItems(campaignId)
+
+    /** A player-set value for this episode; blank explicitly clears a prior value. */
+    suspend fun setPlaythroughState(
+        campaignId: String,
+        chapterId: String,
+        field: CampaignPlaythroughField,
+        subject: String,
+        value: String
+    ): CampaignContinuityItemEntity = coordinator.withMutation {
+        database.withTransaction {
+            require(dao.getChapter(chapterId)?.campaignId == campaignId) {
+                "Select an episode in this Campaign."
+            }
+            validateContinuityText(subject, value)
+            val previous = dao.continuityItems(campaignId).singleOrNull {
+                it.openedChapterId == chapterId && it.itemType == field.itemType &&
+                    playthroughSubject(it.title) == playthroughSubject(subject)
+            }
+            val row = (previous ?: CampaignContinuityItemEntity(
+                campaignId = campaignId,
+                itemType = field.itemType,
+                title = subject.trim(),
+                openedChapterId = chapterId
+            )).copy(
+                title = subject.trim(),
+                details = value.trim(),
+                status = if (value.isBlank()) "RESOLVED" else "OPEN",
+                updatedAt = System.currentTimeMillis()
+            )
+            if (previous == null) dao.insertContinuityItem(row)
+            else require(dao.updateContinuityItem(row) == 1)
+            row
+        }
+    }
+
+    suspend fun playthroughStateForChapter(
+        campaignId: String,
+        chapterId: String
+    ): List<CampaignContinuityItemEntity> = database.withTransaction {
+        val chapter = requireNotNull(dao.getChapter(chapterId)?.takeIf { it.campaignId == campaignId }) {
+            "Select an episode in this Campaign."
+        }
+        campaignPlaythroughStateAt(chapter, dao.chapters(campaignId), dao.continuityItems(campaignId))
+    }
 
     private val continuityTypes = setOf(
         "ARC", "THREAD", "PROMISE", "QUEST", "DISCOVERY", "RELATIONSHIP"

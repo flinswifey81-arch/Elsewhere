@@ -3,6 +3,7 @@ package com.example
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.example.data.AppDatabase
+import com.example.data.model.CampaignPlaythroughField
 import com.example.data.model.ChatEntity
 import com.example.data.model.ChatType
 import com.example.data.model.MessageEntity
@@ -408,6 +409,54 @@ class CampaignRepositoryTest {
         assertTrue(worlds.getEvents(world.worldId).isEmpty())
         assertNotNull(db.chatDao().getChatById("arc-story-a"))
         assertNotNull(db.chatDao().getChatById("arc-story-b"))
+    }
+
+    @Test fun playthroughStateCarriesForwardWithoutRewritingEarlierOrSiblingEpisodes() = runBlocking {
+        val world = worlds.createWorld("The station")
+        val campaign = campaigns.createCampaign(world.worldId, "Season One")
+        val alternate = campaigns.createCampaign(world.worldId, "Independent run")
+        for (id in listOf("pilot", "case-two", "case-three", "alternate-pilot")) {
+            db.chatDao().insertChat(ChatEntity(chatId = id, displayName = id, chatType = ChatType.SOLO))
+        }
+        val one = campaigns.addChapter(campaign.campaignId, "pilot", "Pilot")
+        val two = campaigns.addChapter(campaign.campaignId, "case-two", "The missing badge")
+        val three = campaigns.addChapter(campaign.campaignId, "case-three", "The transfer")
+        val sibling = campaigns.addChapter(alternate.campaignId, "alternate-pilot", "A different pilot")
+
+        val opening = campaigns.setPlaythroughState(
+            campaign.campaignId, one.chapterId, CampaignPlaythroughField.LOCATION, "Squad", "Precinct"
+        )
+        assertEquals("Precinct", campaigns.playthroughStateForChapter(campaign.campaignId, two.chapterId)
+            .single().details)
+        val next = campaigns.setPlaythroughState(
+            campaign.campaignId, two.chapterId, CampaignPlaythroughField.LOCATION, " squad ", "Harbor"
+        )
+        assertNotEquals(opening.itemId, next.itemId)
+        val edited = campaigns.setPlaythroughState(
+            campaign.campaignId, two.chapterId, CampaignPlaythroughField.LOCATION, "Squad", "East harbor"
+        )
+        assertEquals(next.itemId, edited.itemId)
+        campaigns.setPlaythroughState(
+            campaign.campaignId, one.chapterId, CampaignPlaythroughField.INVENTORY, "Case file", "Badge"
+        )
+        campaigns.setPlaythroughState(
+            campaign.campaignId, three.chapterId, CampaignPlaythroughField.LOCATION, "Squad", ""
+        )
+        assertEquals(listOf("Precinct", "Badge"), campaigns.playthroughStateForChapter(
+            campaign.campaignId, one.chapterId
+        ).map { it.details })
+        assertEquals(listOf("East harbor", "Badge"), campaigns.playthroughStateForChapter(
+            campaign.campaignId, two.chapterId
+        ).map { it.details })
+        assertEquals(listOf("Badge"), campaigns.playthroughStateForChapter(
+            campaign.campaignId, three.chapterId
+        ).map { it.details })
+        assertTrue(campaigns.playthroughStateForChapter(alternate.campaignId, sibling.chapterId).isEmpty())
+        assertTrue(runCatching {
+            campaigns.setPlaythroughState(alternate.campaignId, one.chapterId,
+                CampaignPlaythroughField.LOCATION, "Squad", "Cross-story leak")
+        }.isFailure)
+        assertTrue(worlds.getEvents(world.worldId).isEmpty())
     }
 
     @Test fun chapterAndJournalRemovalPreservePlayerAuthoredArcAndOpenThreads() = runBlocking {
