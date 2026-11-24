@@ -6,6 +6,8 @@ import com.example.data.AppDatabase
 import com.example.data.model.*
 import com.example.domain.repository.AppDataMaintenanceCoordinator
 import com.example.domain.repository.LorebookRepository
+import com.example.domain.repository.ScenarioRepository
+import com.example.domain.compiler.ScenarioContextCompiler
 import com.example.domain.repository.WorldRepository
 import com.example.domain.world.*
 import com.squareup.moshi.Moshi
@@ -49,6 +51,7 @@ class WorldDefinitionBundleTransferTest {
         val book = lore.newLorebook("The Crossroads Lore")
         val entry = lore.newEntry(book.lorebook.lorebookId).copy(
             title = "Moonlit crossings", canonContent = "The silver bridge is real.",
+            currentContent = "The silver bridge is real.", activationMode = "always",
             notes = "Author's private notes should not be silently discarded."
         )
         lore.saveDefinition(book.lorebook, listOf(entry))
@@ -206,6 +209,45 @@ class WorldDefinitionBundleTransferTest {
         assertEquals("Moonlit Meeting", ScenarioCodec.decode(
             requireNotNull(db.scenarioDao().get(embeddedScenario)).definitionJson
         ).title)
+    }
+
+    @Test fun importedWorldScenarioUsesRemappedDefaultLoreAndLinkedCastOnFirstTurn() = runBlocking {
+        val bundle = completeBundle()
+        val imported = worlds.importDefinition(WorldDefinitionCodec.encode(bundle))
+        val memberships = worlds.getMemberships(imported.worldId)
+        fun id(type: WorldResourceType) = memberships.single { it.resourceType == type.name }.resourceId
+        val scenarios = ScenarioRepository(db)
+        val personaId = id(WorldResourceType.PERSONA)
+        val scenarioId = id(WorldResourceType.SCENARIO)
+        val lorebookId = id(WorldResourceType.LOREBOOK)
+        val linkedId = id(WorldResourceType.CHARACTER)
+        val chatId = scenarios.start(scenarioId, personaId, imported.worldId)
+        val isolatedChatId = scenarios.start(scenarioId, personaId)
+        assertEquals(listOf(lorebookId), db.lorebookDao().getAttachments(chatId).map { it.lorebookId })
+        assertNotEquals(bundle.world.defaultLorebookIds.single(), lorebookId)
+        assertTrue(db.lorebookDao().getAttachments(isolatedChatId).isEmpty())
+
+        val session = ScenarioCodec.decode(requireNotNull(scenarios.session(chatId)).definitionJson)
+        val character = requireNotNull(db.characterDao().getCharacterById(linkedId))
+        assertEquals(linkedId, session.npcs.single().sourceCharacterId)
+        val current = MessageEntity(
+            chatId = chatId, speakerType = SpeakerType.PERSONA, speakerId = personaId,
+            speakerDisplayNameSnapshot = "Piper", content = "I cross the bridge.", orderIndex = 1L
+        )
+        val enrolledLore = lore.resolveActiveLore(chatId, emptyList(), current)
+        val prompt = ScenarioContextCompiler().compile(
+            session, requireNotNull(db.personaDao().getPersonaById(personaId)),
+            ChatSettingsEntity(chatId), emptyList(), current,
+            lore = enrolledLore, worldContext = scenarios.worldContextForChat(chatId),
+            linkedCharacters = mapOf(linkedId to character)
+        ).first().content
+        assertTrue(prompt.contains("Moonlit Crossroads"))
+        assertTrue(prompt.contains("LINKED CHARACTER IDENTITY: Varka"))
+        assertTrue(prompt.contains("PLAYER PERSONA (controlled only by the player)"))
+        assertTrue(prompt.contains("Piper"))
+        assertTrue(prompt.contains("ACTIVE LORE: Moonlit crossings"))
+        assertTrue(prompt.contains("The silver bridge is real."))
+        assertFalse(prompt.contains("creator secret"))
     }
 
     @Test fun malformedOrDanglingResourceNeverCreatesPartialWorldOrReplacesCards() = runBlocking {

@@ -3,11 +3,17 @@ package com.example.domain.repository
 import androidx.room.withTransaction
 import com.example.data.AppDatabase
 import com.example.data.model.*
+import com.squareup.moshi.Moshi
+import com.squareup.moshi.Types
 
 class ScenarioRepository(
     private val database: AppDatabase,
     private val coordinator: AppDataMaintenanceCoordinator = AppDataMaintenanceCoordinator.Global
 ) {
+    private val worldDefaultLoreAdapter = Moshi.Builder().build().adapter<List<String>>(
+        Types.newParameterizedType(List::class.java, String::class.java)
+    )
+
     fun observeAll() = database.scenarioDao().observeAll()
     suspend fun get(id: String) = database.scenarioDao().get(id)
     suspend fun session(chatId: String) = database.scenarioDao().session(chatId)
@@ -59,22 +65,38 @@ class ScenarioRepository(
             val definition = ScenarioCodec.decode(scenario.definitionJson).also { it.validate() }
             validateLinkedCharacters(definition)
             requireNotNull(database.personaDao().getPersonaById(personaId)) { "Select an existing persona." }
-            if (worldId != null) requireNotNull(database.worldDao().getWorld(worldId)) {
-                "Selected World is unavailable."
+            val world = worldId?.let { id ->
+                requireNotNull(database.worldDao().getWorld(id)) { "Selected World is unavailable." }
             }
             val chat = ChatEntity(displayName = definition.displayTitle.ifBlank { definition.title }, chatType = ChatType.SCENARIO)
             database.chatDao().insertChat(chat)
             database.chatDao().insertChatPersonaParticipant(ChatPersonaParticipantEntity(chatId = chat.chatId, personaId = personaId))
             database.chatDao().insertChatSettings(ChatSettingsEntity(chatId = chat.chatId, useGlobalEngineDefaults = true))
             database.scenarioDao().insertSession(ScenarioSessionEntity(chat.chatId, scenarioId, scenario.definitionJson))
-            if (worldId != null) {
+            if (world != null) {
                 val worldDao = database.worldDao()
-                worldDao.insertMembership(WorldMembershipEntity(worldId = worldId,
+                worldDao.insertMembership(WorldMembershipEntity(worldId = world.worldId,
                     resourceType = WorldResourceType.CHAT.name, resourceId = chat.chatId))
                 if (worldDao.getMembershipsForResource(WorldResourceType.SCENARIO.name, scenarioId)
-                        .none { it.worldId == worldId }) {
-                    worldDao.insertMembership(WorldMembershipEntity(worldId = worldId,
+                        .none { it.worldId == world.worldId }) {
+                    worldDao.insertMembership(WorldMembershipEntity(worldId = world.worldId,
                         resourceType = WorldResourceType.SCENARIO.name, resourceId = scenarioId))
+                }
+                // Import remaps these IDs to this World's own reviewed copies.
+                // Never attach an unrelated library book, even if an older
+                // World record contains a stale or foreign default ID.
+                val worldBooks = worldDao.getMemberships(world.worldId)
+                    .filter { it.resourceType == WorldResourceType.LOREBOOK.name }
+                    .map { it.resourceId }.toSet()
+                val defaultBooks = requireNotNull(worldDefaultLoreAdapter.fromJson(world.defaultLorebookIdsJson)) {
+                    "The World has an invalid default Lorebook list."
+                }
+                defaultBooks.distinct().filter { it in worldBooks }.forEachIndexed { index, lorebookId ->
+                    if (worldDao.hasLorebook(lorebookId)) {
+                        database.lorebookDao().upsertAttachment(
+                            ChatLorebookAttachmentEntity(chat.chatId, lorebookId, sortPosition = index)
+                        )
+                    }
                 }
             }
             if (definition.openingMessage.isNotBlank()) database.messageDao().insertMessage(MessageEntity(
