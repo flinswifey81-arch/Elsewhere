@@ -18,6 +18,8 @@ import com.example.data.model.NpcLibraryBankEntity
 import com.example.data.model.NpcLibraryEntryEntity
 import com.example.domain.npc.NpcStructuredUpdate
 import com.example.domain.npc.NpcStructuredOutputParser
+import com.example.domain.npc.NpcProseDiscovery
+import com.example.data.model.SpeakerType
 import com.example.domain.story.StoryResponseCodec
 import com.example.domain.story.StorySegmentType
 import com.squareup.moshi.Json
@@ -497,13 +499,16 @@ class NpcRepository(
                 )
                 if (dao.getSettings(message.chatId)?.isEnabled == true) {
                     val missingSpeakers = missingSpeakerDiscoveryUpdates(message, emptyList())
+                    val proseSpeakers = missingProseDiscoveryUpdates(
+                        message, missingSpeakers, activePersonaId
+                    )
                     applyStructuredUpdatesInTransaction(
                         chatId = message.chatId,
                         sourceMessageId = message.messageId,
                         variantGroupId = message.variantGroupId,
                         sourceRevision = 0,
                         isApplied = true,
-                        updates = missingSpeakers,
+                        updates = missingSpeakers + proseSpeakers,
                         activePersonaId = activePersonaId
                     )
                 }
@@ -538,13 +543,24 @@ class NpcRepository(
                 ) {
                     missingSpeakerDiscoveryUpdates(message, updates, previouslyNamedSpeakers)
                 } else emptyList()
+                val previousProseSpeakers = previous?.let {
+                    proseSpeakerNames(it, activePersonaId).map(String::lowercase).toSet()
+                }.orEmpty()
+                val newProseSpeakers = if (
+                    message.isPrimaryVariant && dao.getSettings(message.chatId)?.isEnabled == true
+                ) {
+                    missingProseDiscoveryUpdates(
+                        message, updates + newSpeakers, activePersonaId,
+                        ignoredNames = previousProseSpeakers
+                    ).take((24 - updates.size - newSpeakers.size).coerceAtLeast(0))
+                } else emptyList()
                 val metadataReport = applyStructuredUpdatesInTransaction(
                     chatId = message.chatId,
                     sourceMessageId = message.messageId,
                     variantGroupId = message.variantGroupId,
                     sourceRevision = dao.nextSourceRevision(message.messageId),
                     isApplied = message.isPrimaryVariant,
-                    updates = updates + newSpeakers,
+                    updates = updates + newSpeakers + newProseSpeakers,
                     activePersonaId = activePersonaId,
                     skipInvalidUpdates = skipInvalidNpcMetadata
                 )
@@ -590,6 +606,49 @@ class NpcRepository(
                 NpcStructuredUpdate(null, name, null, null, null, null, null, null, null)
             }
             .toList()
+    }
+
+    /** A minimal, provenance-linked dossier for an unambiguously quoted new speaker. */
+    private suspend fun proseSpeakerNames(
+        message: MessageEntity,
+        activePersonaId: String?
+    ): List<String> {
+        if (message.speakerType != SpeakerType.CHARACTER ||
+            database.chatDao().getChatById(message.chatId)?.chatType != ChatType.SOLO
+        ) return emptyList()
+        // No guessing if the active player identity is missing.
+        val persona = activePersonaId?.let(database.personaDao()::getPersonaById)
+            ?: return emptyList()
+        val protected = listOf(
+            message.speakerDisplayNameSnapshot,
+            persona.displayName,
+            persona.personaName
+        ) + persona.aliases
+        val story = StoryResponseCodec.decode(message.content)
+        val visible = story?.segments?.joinToString("\n") { it.content } ?: message.content
+        return NpcProseDiscovery.namedSpeakers(
+            NpcStructuredOutputParser.finalVisibleStoryText(visible), protected
+        )
+    }
+
+    private suspend fun missingProseDiscoveryUpdates(
+        message: MessageEntity,
+        otherUpdates: List<NpcStructuredUpdate>,
+        activePersonaId: String?,
+        ignoredNames: Set<String> = emptySet()
+    ): List<NpcStructuredUpdate> {
+        val projected = project(dao.getDossiers(message.chatId), dao.getUpdates(message.chatId))
+        return proseSpeakerNames(message, activePersonaId)
+            .filterNot { it.lowercase(Locale.ROOT) in ignoredNames }
+            .filterNot { name ->
+                projected.any { matchesNameOrAlias(it, name) } ||
+                    otherUpdates.any { update ->
+                        update.displayName?.equals(name, ignoreCase = true) == true ||
+                            update.aliases?.any { it.equals(name, ignoreCase = true) } == true
+                    }
+            }
+            .map { NpcStructuredUpdate(null, it, null, null, null, null, null, null, null) }
+            .take(12)
     }
 
     /** Persist stable Bank IDs instead of the model's temporary name-derived speaker IDs. */

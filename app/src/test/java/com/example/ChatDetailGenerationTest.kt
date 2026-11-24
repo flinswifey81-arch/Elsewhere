@@ -1178,6 +1178,29 @@ class ChatDetailGenerationTest {
     }
 
     @Test
+    fun modelAttributedNaturalNpcDialogueCreatesBankEntryWithoutMetadata() = runBlocking {
+        val provider = SequentialResponseProvider(listOf(
+            "*The courtyard gates shake as the adeptus approaches.*\n" +
+                "\"The mountain road is closed,\" Mountain Shaper warned. " +
+                "Rowan looked toward the gate. \"We should find another way.\""
+        ))
+        val harness = createHarness(
+            provider, ResponseLengthProfile.NORMAL,
+            narratorEnabled = true, npcBankEnabledInitially = true
+        )
+        harness.viewModel.onDraftChanged("Ask about the mountain road.")
+        harness.viewModel.sendMessage()
+        val messages = withTimeout(15_000) {
+            harness.messageRepository.getMessagesForChat(harness.chatId).first { it.size == 2 }
+        }
+        assertEquals(1, provider.requests.size)
+        val npc = harness.npcRepository.getProjectedDossiers(harness.chatId)
+        assertEquals(listOf("Mountain Shaper"), npc.map { it.displayName })
+        assertFalse(npc.single().isManualBase)
+        assertTrue(messages.last().content.contains("mountain road is closed"))
+    }
+
+    @Test
     fun malformedNarratedOutputIsSavedWithoutExposingControlMarkers() = runBlocking {
         val provider = SequentialResponseProvider(
             listOf(
