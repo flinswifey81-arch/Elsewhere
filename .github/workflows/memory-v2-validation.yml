@@ -36,6 +36,36 @@ jobs:
             --tests com.example.domain.PromptHistoryTrimmerTest \
             --tests com.example.domain.StoryMemoryTemporalRetrievalTest \
             --tests com.example.AppDatabaseMigrationTest \
-            --tests com.example.ChatDetailGenerationTest
+            --tests com.example.ChatDetailGenerationTest \
+            --tests com.example.domain.MemoryV2RoomScaleBenchmarkTest \
+            --tests com.example.domain.MemoryV2CrowdedSceneAcceptanceTest \
+            --tests com.example.CampaignMemoryScopeTest \
+            --tests com.example.WorldDefinitionBundleTransferTest \
+            --tests com.example.WorldArchiveMemoryV2TransferTest \
+            --tests com.example.ChatPdfExportContractTest
+      - name: Summarize offline test results
+        if: always()
+        run: |
+          python3 - <<'PYTHON'
+          from pathlib import Path
+          from xml.etree import ElementTree
+
+          reports = sorted(Path("app/build/test-results/testDebugUnitTest").glob("TEST-*.xml"))
+          totals = dict.fromkeys(("tests", "failures", "errors", "skipped"), 0)
+          for file in reports:
+              suite = ElementTree.parse(file).getroot()
+              for key in totals:
+                  totals[key] += int(suite.get(key, 0))
+              count = suite.get("tests", "0")
+              print(f"{suite.get('name')}: {count} cases")
+              for case in suite.findall("testcase"):
+                  if case.find("failure") is not None or case.find("error") is not None:
+                      print(f"FAIL: {case.get('classname')}.{case.get('name')}")
+          summary = (
+              ", ".join(f"{key}: {count}" for key, count in totals.items())
+              if reports else "No offline test report was produced."
+          )
+          print(summary)
+          PYTHON
       - name: Build debug APK
         run: bash ./gradlew :app:assembleDebug --no-daemon --no-configuration-cache

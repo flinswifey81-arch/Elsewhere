@@ -763,10 +763,20 @@ class ChatDetailGenerationTest {
 
     @Test
     fun previouslyKnownNpcCanBeRecalledWithoutPlayerNamingThemInThePrompt() = runBlocking {
-        val provider = SequentialResponseProvider(listOf("Rowan studies the archive shelves."))
+        val provider = SequentialResponseProvider(listOf(
+            """
+                <|elsewhere_story_v1|>
+                <|segment|>{"type":"narration"}
+                Archivist Voss enters from the map room.
+                <|segment|>{"type":"npc","speaker_name":"Archivist Voss"}
+                "I know where to look."
+                <|end_story|>
+            """.trimIndent(),
+            "Rowan studies the archive shelves."
+        ))
         val harness = createHarness(
             provider, ResponseLengthProfile.NORMAL,
-            narratorEnabled = false, npcBankEnabledInitially = true
+            narratorEnabled = true, npcBankEnabledInitially = true
         )
         harness.npcRepository.saveManual(
             NpcDossier(
@@ -795,9 +805,9 @@ class ChatDetailGenerationTest {
         )
         harness.viewModel.onDraftChanged("We enter the royal archive and check the records.")
         harness.viewModel.sendMessage()
-        withTimeout(15_000) {
+        val firstReply = withTimeout(15_000) {
             harness.messageRepository.getMessagesForChat(harness.chatId).first { it.size == 2 }
-        }
+        }.last()
         assertEquals(1, provider.requests.size)
         val prompt = provider.requests.single().joinToString("\n") { it.content }
         assertTrue(prompt.contains("[POTENTIAL RECURRING CAST"))
@@ -811,6 +821,32 @@ class ChatDetailGenerationTest {
             prompt.contains("- Absent Guard"))
         assertFalse(prompt.contains("STORYTELLER_ONLY_SECRET"))
         assertFalse(prompt.contains("PRIVATE_AUTHOR_NOTE"))
+
+        val returningSpeaker = requireNotNull(StoryResponseCodec.decode(firstReply.content))
+            .segments.single { it.type == StorySegmentType.NPC }
+        assertEquals("archive-voss", returningSpeaker.speakerId)
+        withTimeout(15_000) {
+            harness.viewModel.uiState.first {
+                it is ChatUiState.Success && !it.isGenerating &&
+                    it.messages.any { message -> message.messageId == firstReply.messageId }
+            }
+        }
+        yield()
+        harness.viewModel.onDraftChanged("Ask to see the oldest records.")
+        harness.viewModel.sendMessage()
+        withTimeout(15_000) {
+            harness.messageRepository.getMessagesForChat(harness.chatId).first { it.size == 4 }
+        }
+
+        assertEquals(2, provider.requests.size)
+        val nextPrompt = provider.requests.last().joinToString("\n") { it.content }
+        assertTrue("Recorded entrance promotes the same NPC to present context",
+            nextPrompt.contains("[NPC id=archive-voss]"))
+        assertFalse(nextPrompt.contains("PRIVATE_AUTHOR_NOTE"))
+        assertEquals(
+            setOf("archive-voss", "away-guard"),
+            harness.npcRepository.getProjectedDossiers(harness.chatId).map { it.npcId }.toSet()
+        )
     }
 
     @Test
@@ -1250,6 +1286,34 @@ class ChatDetailGenerationTest {
         assertEquals(listOf("Mountain Shaper"), npc.map { it.displayName })
         assertFalse(npc.single().isManualBase)
         assertTrue(messages.last().content.contains("mountain road is closed"))
+    }
+
+    @Test
+    fun newNpcIsDiscoveredFromProseEvenWhenTerminalMetadataIsBroken() = runBlocking {
+        val provider = RequestSequenceProvider(listOf(listOf(
+            StreamEvent.Content("The courier mentioned Lady Briar but carried on.\n"),
+            StreamEvent.Content("\"The mountain road is closed,\" Mountain Shaper warned.\n"),
+            StreamEvent.Content("<elsewhere_npc_updates>\n{broken}"),
+            StreamEvent.Done(null)
+        )))
+        val harness = createHarness(
+            provider, ResponseLengthProfile.NORMAL,
+            narratorEnabled = true, npcBankEnabledInitially = true
+        )
+        harness.viewModel.onDraftChanged("Ask about the road.")
+        harness.viewModel.sendMessage()
+        val messages = withTimeout(15_000) {
+            harness.messageRepository.getMessagesForChat(harness.chatId).first { it.size == 2 }
+        }
+        val visible = StoryResponseCodec.visibleText(messages.last().content)
+        assertTrue(visible.contains("The mountain road is closed"))
+        assertFalse(visible.contains("elsewhere_npc_updates"))
+        assertFalse(visible.contains("{broken}"))
+        assertEquals(
+            listOf("Mountain Shaper"),
+            harness.npcRepository.getProjectedDossiers(harness.chatId).map { it.displayName }
+        )
+        assertEquals(1, provider.requests.size)
     }
 
     @Test
