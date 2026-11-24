@@ -16,6 +16,13 @@ on:
       - 'build.gradle.kts'
       - 'settings.gradle.kts'
       - 'gradle/**'
+  # Run the same isolated gate on an explicitly queued draft checkpoint.
+  # Routine draft changes still do not start hardware/fixture rehearsals.
+  push:
+    branches:
+      - work/memory-v2-stabilization-2026-11-18
+    paths:
+      - 'qa/offline-release-checkpoint.md'
   workflow_dispatch:
 
 permissions:
@@ -29,8 +36,8 @@ concurrency:
 # remain enforced while the target Room version advances from v21 to v22.
 jobs:
   emulator-v15-to-v21:
-    # Draft work runs the fast smoke gate only. Full acceptance still runs
-    # on explicit workflow_dispatch or whenever the PR is ready for review.
+    # Ordinary draft PR events skip this gate. A checkpoint push or manual
+    # dispatch can run it without changing the draft's review state.
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     name: Fresh emulator / actual install -r / Room v15 to v21 retention
     runs-on: ubuntu-latest

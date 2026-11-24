@@ -13,6 +13,13 @@ on:
       - 'app/src/test/java/com/example/domain/backup/NativeV15EncryptedRestoreAcceptanceTest.kt'
       - 'app/src/main/java/com/example/data/**'
       - '.github/workflows/native-v15-v21-upgrade.yml'
+  # Run the same isolated gate on an explicitly queued draft checkpoint.
+  # Routine draft changes still do not start hardware/fixture rehearsals.
+  push:
+    branches:
+      - work/memory-v2-stabilization-2026-11-18
+    paths:
+      - 'qa/offline-release-checkpoint.md'
   workflow_dispatch:
 
 concurrency:
@@ -24,8 +31,8 @@ permissions:
 
 jobs:
   native-full-schema-upgrade:
-    # Draft work runs the fast smoke gate only. Full acceptance still runs
-    # on explicit workflow_dispatch or whenever the PR is ready for review.
+    # Ordinary draft PR events skip this gate. A checkpoint push or manual
+    # dispatch can run it without changing the draft's review state.
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     name: Native v15 schema, complete v21 migration, rollback and retry
     runs-on: ubuntu-latest
