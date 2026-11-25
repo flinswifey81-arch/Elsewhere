@@ -224,14 +224,18 @@ class StoryResponseTest {
         val blocked = listOf(
             "Conductor: “The tram is delayed.” “Delayed?” *Mira checks the clock.* “I need to get across town.”",
             "Conductor: “The tram is delayed.” “I need to get across town,” Mira replied. The conductor sighed.",
-            "Conductor: “The tram is delayed.” Mira replied, “I need to get across town.”"
+            "Conductor: “The tram is delayed.” Mira replied, “I need to get across town.”",
+            "Conductor: “Please take the stairs.” “The stairs?!” *Mira’s voice rose.* “I have a suitcase.”",
+            "\"The stairs?!\" *Mira's voice rose.* \"I have a suitcase.\""
         )
         blocked.forEach { assertTrue(PersonaTurnBoundary.hasExplicitAuthoredPersonaTurn(it, player)) }
         val allowed = listOf(
             "Conductor: “Mira, the tram is delayed.” “I know,” Tess said. The conductor sighed.",
             "“The tram is delayed.” *The conductor follows Mira’s earlier gesture.* “See the clock?”",
             "The conductor recalled that Mira had asked about the delay.",
-            "“The tram is delayed.” *Her colleague checks the clock.* “I need to get across town.”"
+            "“The tram is delayed.” *Her colleague checks the clock.* “I need to get across town.”",
+            "“The lift is down.” *Mira’s coat slipped off the chair.* “Use the side door.”",
+            "“The lift is down.” *Mira’s voice echoed in his memory.* “Use the side door.”"
         )
         allowed.forEach { assertFalse(PersonaTurnBoundary.hasExplicitAuthoredPersonaTurn(it, player)) }
     }

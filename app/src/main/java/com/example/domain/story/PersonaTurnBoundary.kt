@@ -64,6 +64,15 @@ object PersonaTurnBoundary {
             """$quote[ \t]*([*_])$escapedName[ \t]+[^*_\r\n]{1,500}\1[ \t]*$quote""",
             RegexOption.IGNORE_CASE
         )
+        // A possessive speech cue can attribute a quote just as clearly as
+        // a named subject. Limit it to voice/cadence verbs; a reference to
+        // the player's coat, hand or earlier gesture is not a speaker tag.
+        val personaVoiceCue =
+            """$escapedName['’]s[ \t]+voice[ \t]+(?:rose|rises|fell|falls|cracked|cracks|sharpened|sharpens|softened|softens|dropped|drops|cut[ \t]+in|cuts[ \t]+in)(?:[ 	]+(?:slightly|sharply|softly|quietly))?[.!?]?"""
+        val quoteWithPersonaVoice = Regex(
+            """$quote[,!?]?[ \t]*([*_])$personaVoiceCue\1[ \t]*$quote""",
+            RegexOption.IGNORE_CASE
+        )
         val quotedPersonaSpeech = Regex(
             """$quote[,!?]?[ \t]+$escapedName[ \t]+$verbs(?=[ \t]*[.!?…]|[ \t]*$|[ \t]+(?:softly|quietly|calmly)\b)""",
             RegexOption.IGNORE_CASE
@@ -88,6 +97,7 @@ object PersonaTurnBoundary {
             leadingPersonaSpeech.matches(line) ||
             trailingPersonaSpeech.matches(line) ||
             quotedPersonaActionBeat.containsMatchIn(line) ||
+            quoteWithPersonaVoice.containsMatchIn(line) ||
             quotedPersonaSpeech.containsMatchIn(line) ||
             personaSpeechFirst.containsMatchIn(line) ||
             quotedPersonaSpeechWithMarkdown.matches(line)

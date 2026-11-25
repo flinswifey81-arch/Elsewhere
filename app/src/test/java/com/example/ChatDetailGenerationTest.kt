@@ -1411,7 +1411,7 @@ class ChatDetailGenerationTest {
         // Split inside the Persona name and before the second quote.
         StreamEvent.Content("<|elsewhere_story_v1|>\n<|segment|>{broken}\n"),
         StreamEvent.Content("Rowan: “The tram is delayed.” Rowan moved toward the platform. “Delayed?” *Ma"),
-        StreamEvent.Content("ra grabbed her ticket.* "),
+        StreamEvent.Content("ra's voice rose.* "),
         StreamEvent.Content("“But I have a connection.” \nCourier: “Next train in an hour.”"),
         StreamEvent.Done(null)
     )
