@@ -180,25 +180,26 @@ object StoryResponseCodec {
     fun append(
         existing: String,
         addition: String,
-        primaryCharacter: StorySpeakerIdentity
+        primaryCharacter: StorySpeakerIdentity,
+        unstructuredType: StorySegmentType = StorySegmentType.CHARACTER
     ): String {
         val existingResponse = decode(existing)
         val additionResponse = decode(addition)
         if (existingResponse == null && additionResponse == null) return existing + addition
         val existingSegments = existingResponse?.segments ?: listOf(
             StorySegment(
-                type = StorySegmentType.CHARACTER,
+                type = unstructuredType,
                 content = existing,
-                speakerId = primaryCharacter.id,
-                speakerName = primaryCharacter.name
+                speakerId = primaryCharacter.id.takeIf { unstructuredType == StorySegmentType.CHARACTER },
+                speakerName = primaryCharacter.name.takeIf { unstructuredType == StorySegmentType.CHARACTER }
             )
         )
         val additionSegments = additionResponse?.segments ?: listOf(
             StorySegment(
-                type = StorySegmentType.CHARACTER,
+                type = unstructuredType,
                 content = addition,
-                speakerId = primaryCharacter.id,
-                speakerName = primaryCharacter.name
+                speakerId = primaryCharacter.id.takeIf { unstructuredType == StorySegmentType.CHARACTER },
+                speakerName = primaryCharacter.name.takeIf { unstructuredType == StorySegmentType.CHARACTER }
             )
         )
         return encode(StoryResponse(segments = mergeAdjacent(existingSegments + additionSegments)))
@@ -224,6 +225,35 @@ object StoryResponseCodec {
 }
 
 open class StoryOutputParser {
+    /** Scenarios have no primary Character; any unattributed prose belongs to the Narrator. */
+    fun parseScenario(
+        output: String,
+        narrator: StorySpeakerIdentity,
+        knownNpcs: List<StorySpeakerIdentity>,
+        final: Boolean = true
+    ): StoryParseResult {
+        val parsed = parse(output, narrator, knownNpcs, final)
+        // Some providers switch to labelled dialogue after an unlabelled scene beat.
+        // Only retry that shape for an exact, unambiguous authored NPC heading.
+        val segments = parsed.response.segments
+        val recovered = if (!parsed.usedStructuredFormat &&
+            segments.singleOrNull()?.type == StorySegmentType.CHARACTER
+        ) {
+            val names = knownNpcs.groupBy { it.name.lowercase(Locale.ROOT) }
+            val hasAuthoredNpcHeading = output.lineSequence().any { line ->
+                ':' in line && names[line.substringBefore(':').trim().lowercase(Locale.ROOT)]?.size == 1
+            }
+            if (hasAuthoredNpcHeading) parse("Narrator:\n$output", narrator, knownNpcs, final)
+            else parsed
+        } else parsed
+        return recovered.copy(response = StoryResponse(segments = StoryResponseCodec.mergeAdjacent(
+            recovered.response.segments.map {
+                if (it.type == StorySegmentType.CHARACTER) StorySegment(StorySegmentType.NARRATION, it.content)
+                else it
+            }
+        )))
+    }
+
     open fun parse(
         output: String,
         primaryCharacter: StorySpeakerIdentity,
@@ -717,6 +747,18 @@ open class StoryOutputParser {
             $END_MARKER
             Segments may alternate in any natural order and each type may appear more than once. Omit unneeded NPC or narration segments. Put only metadata on a segment-header line and put story prose on following lines. Use Markdown italics for actions inside Character or NPC dialogue segments when appropriate. Never emit a Persona segment and never write dialogue, thoughts, feelings, decisions, or significant actions for the user's Persona. If an NPC Bank update contract is also present, append its terminal metadata block only after $END_MARKER. Do not mention or explain this contract.
             Follow this contract independently on every response, even if an earlier assistant response used another format. Never substitute visible Narrator:, Character (Name):, or NPC (Name): transcript labels for the markers above.
+        """.trimIndent()
+
+        val SCENARIO_OUTPUT_INSTRUCTION: String = """
+            --- SCENARIO ENSEMBLE RESPONSE FORMAT ---
+            Write one response using these lines (no code fence):
+            $START_MARKER
+            $SEGMENT_MARKER{"type":"narration"}
+            World description and scene beats.
+            $SEGMENT_MARKER{"type":"npc","speaker_name":"exact Scenario NPC name"}
+            This NPC's dialogue and visible actions.
+            $END_MARKER
+            Start a new segment on each speaker change. Use only narration and npc segments; omit any segment that is not needed. For an improvised NPC use a consistent name. Keep header lines separate from prose. Apply the same format when continuing or regenerating, even if earlier turns were plain prose. Never add a player segment or write a turn for the player's Persona.
         """.trimIndent()
 
         /** Solo speaker attribution without requiring a separate narratorial voice. */

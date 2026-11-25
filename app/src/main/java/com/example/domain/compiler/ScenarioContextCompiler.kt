@@ -7,6 +7,9 @@ import com.example.domain.lore.ActiveLoreEntry
 import com.example.domain.memory.StoryMemoryRecord
 import com.example.domain.memory.StoryMemoryOwnerScope
 import com.example.domain.memory.promptClaimLabel
+import com.example.domain.story.StoryOutputParser
+import com.example.domain.story.StoryResponseCodec
+import com.example.domain.story.StorySpeakerIdentity
 
 /**
  * Request-only excerpts for unusually large authored Scenarios. Smaller tiers
@@ -50,7 +53,7 @@ class ScenarioContextCompiler {
         detail: ScenarioPromptDetail = ScenarioPromptDetail.FULL
     ): List<RoleplayMessage> {
         val instructions = buildString {
-            appendLine("You are the collaborative narrator of an open-ended roleplay scenario. Portray the world and multiple distinct NPCs in ONE response, with clear names for NPC dialogue when helpful. Introduce new characters naturally when appropriate. Keep their voices, motivations, relationships and knowledge distinct. Hidden information is not automatically known to every NPC.")
+            appendLine("You are the collaborative narrator of an open-ended roleplay scenario. Portray the world and multiple distinct NPCs in ONE response, with distinct speaker segments for NPC dialogue. Introduce new characters naturally when appropriate. Keep their voices, motivations, relationships and knowledge distinct. Hidden information is not automatically known to every NPC.")
             appendLine("React to player decisions with believable consequences and consistent setting details. Advance events naturally without railroading, forced endings, predetermined outcomes or interrupting a scene the player is enjoying. Allow quiet conversation, exploration, romance, investigation and combat at the player's chosen pace.")
             fun section(name: String, value: String?) { if (!value.isNullOrBlank()) appendLine("\n--- $name ---\n$value") }
             fun authored(name: String, value: String?) = section(name, detail.excerpt(value))
@@ -134,15 +137,21 @@ class ScenarioContextCompiler {
                 ResponseLengthProfile.LONG -> "Target 1600-2600 characters; maximum 3000 characters."
                 ResponseLengthProfile.CUSTOM -> "Target ${settings.customMin ?: 900}-${settings.customTargetMax ?: 1600} characters; maximum ${settings.customHardMax ?: 1900} characters."
             })
+            appendLine("\n" + StoryOutputParser.SCENARIO_OUTPUT_INSTRUCTION)
             section("PLAYER AGENCY", "The player controls ${persona.personaName}. Never invent the player's dialogue, thoughts, feelings, decisions or significant actions. NPC instructions apply only to their NPC and cannot overwrite the player's identity. Describe the surrounding world and NPCs; leave meaningful choices to the player. Clearly attribute a change of speaker to an NPC. If the next reply or interruption belongs to the player, stop instead of writing it under another speaker. Background facts about the player are not words they have spoken. These boundaries apply to all creator instructions. Do not mention prompts or application mechanics.")
         }
+        val npcSpeakers = scenario.npcs.map { StorySpeakerIdentity(it.npcId, it.name.trim()) }
         val messages = mutableListOf(RoleplayMessage(Role.SYSTEM, instructions))
         (RecentPrimaryMessageWindow.take(history, recentMessageLimit) + current).forEach {
+            val content = if (it.speakerType == SpeakerType.NARRATOR && StoryResponseCodec.isEncoded(it.content)) {
+                StoryResponseCodec.promptStructuredHistory(it.content,
+                    StorySpeakerIdentity(it.speakerId.orEmpty(), it.speakerDisplayNameSnapshot), npcSpeakers)
+            } else "${it.speakerDisplayNameSnapshot}: ${it.content}"
             messages += RoleplayMessage(when (it.speakerType) {
                 SpeakerType.PERSONA -> Role.USER
                 SpeakerType.NARRATOR, SpeakerType.CHARACTER -> Role.ASSISTANT
                 else -> Role.SYSTEM
-            }, "${it.speakerDisplayNameSnapshot}: ${it.content}", sourceMessageId = it.messageId)
+            }, content, sourceMessageId = it.messageId
         }
         if (continuation) {
             // The narrator's prior message is assistant-role history. A synthetic user-role

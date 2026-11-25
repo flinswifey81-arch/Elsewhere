@@ -7,6 +7,9 @@ import com.example.data.model.*
 import com.example.domain.compiler.PromptPreflight
 import com.example.domain.compiler.ScenarioContextCompiler
 import com.example.domain.provider.*
+import com.example.domain.story.StoryOutputParser
+import com.example.domain.story.StoryResponseCodec
+import com.example.domain.story.StorySegmentType
 import com.example.domain.repository.*
 import com.example.ui.screens.ChatDetailViewModel
 import com.example.ui.screens.ChatUiState
@@ -203,7 +206,14 @@ class ScenarioModeTest {
         assertEquals(1, provider.requests.size)
     }
     @Test fun explicitPlayerDialogueFromScenarioNarratorIsNotSaved() = runBlocking {
-        val provider = RecordingProvider(responseText = "Guest 1: Welcome.\nMira: I accept the invitation.")
+        val provider = RecordingProvider(responseText = """
+            <|elsewhere_story_v1|>
+            <|segment|>{"type":"npc","speaker_name":"Guest 1"}
+            Welcome.
+            <|segment|>{"type":"npc","speaker_name":"Mira"}
+            I accept the invitation.
+            <|end_story|>
+        """.trimIndent())
         val (id, vm) = model(provider, definition().copy(openingMessage = ""))
         vm.onDraftChanged("I look at the invitation."); vm.sendMessage()
         withTimeout(15000) {
@@ -218,7 +228,8 @@ class ScenarioModeTest {
 
     @Test fun oneRequestPortraysMultipleNpcsAndPreservesModelSettingsAndNarratorIdentity() = runBlocking {
         val provider = RecordingProvider()
-        val (id, vm) = model(provider)
+        val scenario = definition()
+        val (id, vm) = model(provider, scenario)
         vm.onDraftChanged("I greet the guests."); vm.sendMessage()
         awaitMessages(vm, 3)
         assertEquals(1, provider.requests.size)
@@ -227,7 +238,13 @@ class ScenarioModeTest {
         val response = MessageRepository(db.messageDao(), coordinator).getMessagesForChatOnce(id).last()
         assertEquals(SpeakerType.NARRATOR, response.speakerType)
         assertEquals("narrator:$id", response.speakerId)
-        assertTrue(response.content.contains("Guest 1")); assertTrue(response.content.contains("Guest 2"))
+        val segments = requireNotNull(StoryResponseCodec.decode(response.content)).segments
+        assertEquals(listOf(StorySegmentType.NARRATION, StorySegmentType.NPC, StorySegmentType.NPC),
+            segments.map { it.type })
+        assertEquals(scenario.npcs.take(2).map { it.npcId }, segments.drop(1).map { it.speakerId })
+        assertEquals(listOf("Guest 1", "Guest 2"), segments.drop(1).map { it.speakerName })
+        assertEquals(listOf("The music fades.", "Welcome.", "Good evening."), segments.map { it.content })
+        assertTrue(provider.requests.single().first().content.contains("SCENARIO ENSEMBLE RESPONSE FORMAT"))
         assertTrue(provider.requests.single().first().content.contains("collaborative narrator"))
         assertFalse(provider.requests.single().first().content.contains("Portray the character described below"))
         vm.regenerateMessage(response.messageId)
@@ -244,7 +261,36 @@ class ScenarioModeTest {
         assertTrue(continuationPrompt.last().content.contains("Continue the preceding narrator response"))
         assertTrue(continuationPrompt.last().content.contains("do not invent the Persona's dialogue"))
         assertFalse(continuationPrompt.drop(1).any { it.role == com.example.domain.provider.Role.SYSTEM })
+        val previousReply = continuationPrompt.single { it.sourceMessageId == active.messageId }
+        assertEquals(Role.ASSISTANT, previousReply.role)
+        assertTrue(previousReply.content.startsWith(StoryOutputParser.START_MARKER))
+        assertFalse(previousReply.content.contains("elsewhere-story-v1"))
+        val saved = MessageRepository(db.messageDao(), coordinator).getMessagesForChatOnce(id)
+        assertEquals(1, saved.count { it.speakerType == SpeakerType.PERSONA })
+        assertEquals(response.content, saved.single { it.messageId == response.messageId }.content)
+        val continued = requireNotNull(StoryResponseCodec.decode(saved.single { it.messageId == active.messageId }.content))
+        assertEquals(segments + segments, continued.segments)
     }
+    @Test fun continuingAnOlderOpeningPreservesItAsNarration() = runBlocking {
+        val provider = RecordingProvider(responseText = "A bell rings.\nGuest 1: Welcome.")
+        val scenario = definition()
+        val (id, vm) = model(provider, scenario)
+        val messages = MessageRepository(db.messageDao(), coordinator)
+        val opening = messages.getMessagesForChatOnce(id).single()
+        vm.continueMessage(opening.messageId)
+        val state = withTimeout(15000) {
+            vm.uiState.first { it is ChatUiState.Success && !it.isGenerating &&
+                it.messages.any { m -> m.messageId == opening.messageId && StoryResponseCodec.isEncoded(m.content) } }
+        } as ChatUiState.Success
+        val updated = state.messages.single()
+        assertEquals(SpeakerType.NARRATOR, updated.speakerType)
+        val segments = requireNotNull(StoryResponseCodec.decode(updated.content)).segments
+        assertEquals(listOf(StorySegmentType.NARRATION, StorySegmentType.NPC), segments.map { it.type })
+        assertEquals("The doors open.\n\nA bell rings.", segments.first().content)
+        assertEquals(scenario.npcs.first().npcId, segments.last().speakerId)
+        assertEquals(1, provider.requests.size)
+    }
+
     @Test fun scenarioReplayUsesOnlyStillApprovedStateFromTheOriginalPlayerTurn() = runBlocking {
         val provider = RecordingProvider()
         val (chatId, vm) = model(provider)
@@ -444,7 +490,7 @@ class ScenarioModeTest {
         val provider = RecordingProvider(waitForStop = true)
         val (id, vm) = model(provider)
         vm.onDraftChanged("I enter."); vm.sendMessage()
-        withTimeout(15000) { vm.uiState.first { it is ChatUiState.Success && it.streamingContent?.isNotBlank() == true } }
+        withTimeout(15000) { vm.uiState.first { it is ChatUiState.Success && StoryResponseCodec.visibleText(it.streamingContent.orEmpty()).isNotBlank() } }
         vm.stopGeneration()
         withTimeout(15000) { vm.uiState.first { it is ChatUiState.Success && it.partialStopped } }
         vm.keepPartial()
@@ -457,7 +503,16 @@ class ScenarioModeTest {
     private class RecordingProvider(
         val failFirst: Boolean = false, val waitForStop: Boolean = false,
         val contextWindow: Int? = null,
-        val responseText: String = "Guest 1: Welcome. Guest 2: Good evening."
+        val responseText: String = """
+            <|elsewhere_story_v1|>
+            <|segment|>{"type":"narration"}
+            The music fades.
+            <|segment|>{"type":"npc","speaker_name":"Guest 1"}
+            Welcome.
+            <|segment|>{"type":"npc","speaker_name":"Guest 2"}
+            Good evening.
+            <|end_story|>
+        """.trimIndent()
     ): ModelProvider {
         override fun cachedContextLength(modelId: String): Int? = contextWindow
         val requests = mutableListOf<List<RoleplayMessage>>()
