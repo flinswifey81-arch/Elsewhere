@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.net.Uri
 import androidx.room.Room
+import androidx.room.withTransaction
 import androidx.test.core.app.ApplicationProvider
 import com.example.data.AppDatabase
 import com.example.data.model.CharacterEntity
@@ -39,6 +40,9 @@ import com.example.domain.repository.AppDataMaintenanceCoordinator
 import com.example.domain.repository.ChatRepository
 import com.example.domain.repository.LorebookRepository
 import com.example.domain.repository.MemoryRepository
+import com.example.domain.repository.StoryMemoryRepository
+import com.example.domain.memory.StoryMemoryClaim
+import com.example.domain.memory.AutomaticMemoryManager
 import com.example.domain.repository.MessageRepository
 import com.example.domain.repository.MessageAttachmentRepository
 import com.example.domain.repository.NpcRepository
@@ -59,7 +63,6 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.yield
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.setMain
 import kotlinx.coroutines.withTimeout
@@ -81,7 +84,10 @@ class ChatDetailGenerationTest {
     private lateinit var database: AppDatabase
     private lateinit var viewModels: TestViewModelOwner
     private lateinit var dataCoordinator: AppDataMaintenanceCoordinator
-    private val mainDispatcher = UnconfinedTestDispatcher()
+    // runBlocking does not advance a virtual TestCoroutineScheduler. Room's
+    // asynchronous history Flow must not be starved by a test-only Main dispatcher.
+    // Adapted from the isolated three-trial passing PR #46 experiment.
+    private val mainDispatcher = Dispatchers.Unconfined
 
     @Before
     fun setUp() {
@@ -206,6 +212,203 @@ class ChatDetailGenerationTest {
         withTimeout(5_000) { while (savedReplyIds.size < 2) yield() }
         // A saved Continue updates the existing message instead of inventing a new chat turn.
         assertEquals(listOf(persisted.last().messageId, persisted.last().messageId), savedReplyIds)
+    }
+
+    /**
+     * Generation regressions should report whether the provider was reached,
+     * instead of surfacing an opaque coroutine timeout. No prompt or RP text
+     * is printed: only synthetic test state, counts and the UI error.
+     */
+    private suspend fun awaitCompletedTurn(
+        viewModel: ChatDetailViewModel,
+        expectedMessageCount: Int,
+        requests: () -> Int
+    ) {
+        try {
+            withTimeout(15_000) {
+                viewModel.uiState.first { state ->
+                    state is ChatUiState.Success &&
+                        ((!state.isGenerating && state.messages.size == expectedMessageCount) ||
+                            state.generationError != null)
+                }
+            }
+        } catch (timeout: kotlinx.coroutines.TimeoutCancellationException) {
+            throw AssertionError(generationDiagnostics(viewModel, expectedMessageCount, requests()), timeout)
+        }
+        val state = viewModel.uiState.value as? ChatUiState.Success
+        assertTrue(
+            generationDiagnostics(viewModel, expectedMessageCount, requests()),
+            state != null && !state.isGenerating && state.messages.size == expectedMessageCount &&
+                state.generationError == null
+        )
+    }
+
+    private fun generationDiagnostics(
+        viewModel: ChatDetailViewModel,
+        expectedMessageCount: Int,
+        requests: Int
+    ): String {
+        val state = viewModel.uiState.value as? ChatUiState.Success
+        return "Generation did not complete: expectedMessageCount=$expectedMessageCount, " +
+            "observedMessageCount=${state?.messages?.size}, requests=$requests, " +
+            "historyLoaded=${state?.historyLoaded}, isGenerating=${state?.isGenerating}, " +
+            "generationError=${state?.generationError}, partialStopped=${state?.partialStopped}"
+    }
+
+    @Test
+    fun generatedSummaryOverflowIsDroppedForThisRequestWithoutDeletingSavedData() = runBlocking {
+        val provider = RecordingStreamingProvider(contextWindow = 4_096)
+        val story = StoryMemoryRepository(database, dataCoordinator)
+        val harness = createHarness(
+            provider, ResponseLengthProfile.NORMAL, storyMemoryRepository = story
+        )
+        val approved = story.saveManual(
+            harness.chatId, "PLAYER_APPROVED_SILVER_COMPASS_MEMO: silver compass stays in the lantern room."
+        )
+        story.setCharacterKnowledge(harness.chatId, approved.memoryId, setOf("character-1"))
+        val savedSummary = "OLD_GENERATED_CONTEXT_TO_DROP_" + "s".repeat(12_000)
+        harness.memoryRepository.upsertSummary(
+            ConversationSummaryEntity(harness.chatId, savedSummary, 0L)
+        )
+        harness.viewModel.onDraftChanged("I inspect the silver compass in the lantern room.")
+        harness.viewModel.sendMessage()
+        awaitCompletedTurn(harness.viewModel, 2) { provider.requests.size }
+        assertEquals(1, provider.requests.size)
+        val sent = provider.requests.single()
+        assertTrue(sent.first().content.contains("You are participating in a roleplay."))
+        assertTrue(sent.last().content.contains("I inspect the silver compass in the lantern room."))
+        assertFalse(sent.first().content.contains("OLD_GENERATED_CONTEXT_TO_DROP_"))
+        assertTrue("Reviewed continuity should outrank a generated summary",
+            sent.first().content.contains("PLAYER_APPROVED_SILVER_COMPASS_MEMO"))
+        assertEquals(savedSummary,
+            harness.memoryRepository.getSummaryOnce(harness.chatId)?.summary)
+        assertTrue(com.example.domain.compiler.PromptPreflight.inspect(sent, 4_096).allowed)
+    }
+
+    @Test
+    fun oversizedAuthoredNarratorInstructionsBlockProviderEvenAfterOptionalRecovery() = runBlocking {
+        val provider = RecordingStreamingProvider(contextWindow = 2_048)
+        val harness = createHarness(
+            provider = provider,
+            responseLengthProfile = ResponseLengthProfile.NORMAL,
+            narratorEnabled = true,
+            narratorInstructions = "PLAYER_AUTHORED_INSTRUCTIONS_" + "c".repeat(3_500)
+        )
+        harness.viewModel.onDraftChanged("The storm begins.")
+        harness.viewModel.sendMessage()
+        val state = withTimeout(15_000) {
+            harness.viewModel.uiState.first {
+                it is ChatUiState.Success && it.generationError?.contains(
+                    "No API request was sent"
+                ) == true
+            }
+        } as ChatUiState.Success
+        assertTrue(state.generationError.orEmpty().contains("safe input budget"))
+        assertTrue(provider.requests.isEmpty())
+        // The user's message was saved before attempted generation; no
+        // authored instructions were truncated in storage.
+        assertTrue(harness.messageRepository.getMessagesForChatOnce(harness.chatId)
+            .any { it.content == "The storm begins." })
+        assertTrue(harness.chatRepository.getChatSettings(harness.chatId)
+            ?.narratorInstructions.orEmpty().contains("PLAYER_AUTHORED_INSTRUCTIONS_"))
+    }
+
+    @Test
+    fun soloRetryWithLongStoredHistoryKeepsMemorySummaryAndBoundsPrompt() = runBlocking {
+        val provider = SequentialResponseProvider(listOf("The compass is still safe."))
+        val harness = createHarness(provider, ResponseLengthProfile.NORMAL)
+        database.withTransaction {
+            for (index in 1..80) {
+                database.messageDao().insertMessage(
+                    MessageEntity(
+                        messageId = "retry-long-$index",
+                        chatId = harness.chatId,
+                        speakerType = if (index == 80 || index % 2 == 0)
+                            SpeakerType.PERSONA else SpeakerType.CHARACTER,
+                        speakerId = if (index == 80 || index % 2 == 0)
+                            "persona-1" else "character-1",
+                        speakerDisplayNameSnapshot = if (index == 80 || index % 2 == 0)
+                            "Mara" else "Rowan",
+                        content = when (index) {
+                            1 -> "VERY_OLD_RETRY_CONTEXT_MARKER"
+                            80 -> "I promise to find the compass."
+                            else -> "A story scene occurred at waypoint $index."
+                        },
+                        orderIndex = index.toLong()
+                    )
+                )
+            }
+        }
+        withTimeout(30_000) {
+            harness.viewModel.uiState.first { state ->
+                state is ChatUiState.Success && state.historyLoaded && state.messages.size == 80
+            }
+        }
+
+        harness.viewModel.retryGeneration()
+        awaitCompletedTurn(harness.viewModel, 81) { provider.requests.size }
+        assertEquals(1, provider.requests.size)
+        val request = provider.requests.single()
+        val prompt = request.joinToString("\n") { it.content }
+        assertFalse("Old transcript must not return to bounded context",
+            prompt.contains("VERY_OLD_RETRY_CONTEXT_MARKER"))
+        assertTrue(prompt.contains("I promise to find the compass."))
+        assertTrue(prompt.contains("waypoint 79"))
+
+        val saved = harness.messageRepository.getMessagesForChatOnce(harness.chatId)
+            .filter { it.isPrimaryVariant }
+        val expected = AutomaticMemoryManager.rollingSummaryTail(saved.dropLast(24))
+        val summary = requireNotNull(harness.memoryRepository.getSummaryOnce(harness.chatId))
+        assertEquals("Retry must preserve the full-history rolling summary semantics",
+            expected, summary.summary)
+        assertEquals(saved.dropLast(24).maxOf { it.orderIndex },
+            summary.summarizedThroughOrderIndex)
+        assertTrue(harness.memoryRepository.getMemoriesOnce(harness.chatId, "character-1")
+            .any { it.content == "to find the compass" })
+    }
+
+    @Test
+    fun storyMemoryRecallsInNextPromptButWackBlocksUntilUserRestoresIt() = runBlocking {
+        // Full ViewModel -> Room -> recipient retrieval -> compiler -> provider path.
+        // No network/OpenRouter request: SequentialResponseProvider is local.
+        val provider = SequentialResponseProvider(listOf(
+            "The story continues.", "A fresh chapter.", "The secret is remembered."
+        ))
+        val stories = StoryMemoryRepository(database, dataCoordinator)
+        val harness = createHarness(
+            provider, ResponseLengthProfile.NORMAL, storyMemoryRepository = stories
+        )
+        val memory = stories.saveManual(
+            harness.chatId, "The silver compass is buried under the willow tree.",
+            StoryMemoryClaim.PROMISE
+        )
+        stories.setCharacterKnowledge(harness.chatId, memory.memoryId, setOf("character-1"))
+
+        harness.viewModel.onDraftChanged("Where is our silver compass?")
+        harness.viewModel.sendMessage()
+        awaitCompletedTurn(harness.viewModel, 2) { provider.requests.size }
+        assertEquals(1, provider.requests.size)
+        assertTrue(provider.requests.single().first().content.contains("silver compass is buried"))
+
+        harness.viewModel.wackContext()
+        withTimeout(15_000) {
+            harness.viewModel.uiState.first {
+                it is ChatUiState.Success && it.chatSummary.chat.contextResetOrderIndex != null &&
+                    it.inChatToolStatus?.message?.contains("Wack complete") == true
+            }
+        }
+        harness.viewModel.onDraftChanged("Where did we put the compass in this new story?")
+        harness.viewModel.sendMessage()
+        awaitCompletedTurn(harness.viewModel, 4) { provider.requests.size }
+        assertEquals(2, provider.requests.size)
+        assertFalse(provider.requests[1].first().content.contains("silver compass is buried"))
+
+        stories.restoreAcrossWack(harness.chatId, memory.memoryId)
+        harness.viewModel.onDraftChanged("Do you remember the silver compass?")
+        harness.viewModel.sendMessage()
+        awaitCompletedTurn(harness.viewModel, 6) { provider.requests.size }
+        assertEquals(3, provider.requests.size)
+        assertTrue(provider.requests[2].first().content.contains("silver compass is buried"))
     }
 
     @Test
@@ -556,6 +759,94 @@ class ChatDetailGenerationTest {
         val npc = story.segments.single { it.type == StorySegmentType.NPC }
         assertEquals("npc-ashford", npc.speakerId)
         assertEquals("Lady Ashford", npc.speakerName)
+    }
+
+    @Test
+    fun previouslyKnownNpcCanBeRecalledWithoutPlayerNamingThemInThePrompt() = runBlocking {
+        val provider = SequentialResponseProvider(listOf(
+            """
+                <|elsewhere_story_v1|>
+                <|segment|>{"type":"narration"}
+                Archivist Voss enters from the map room.
+                <|segment|>{"type":"npc","speaker_name":"Archivist Voss"}
+                "I know where to look."
+                <|end_story|>
+            """.trimIndent(),
+            "Rowan studies the archive shelves."
+        ))
+        val harness = createHarness(
+            provider, ResponseLengthProfile.NORMAL,
+            narratorEnabled = true, npcBankEnabledInitially = true
+        )
+        harness.npcRepository.saveManual(
+            NpcDossier(
+                npcId = "archive-voss", chatId = harness.chatId,
+                displayName = "Archivist Voss", aliases = emptyList(),
+                role = "Court archivist", appearance = "Ink-stained cuffs",
+                personality = "Methodical", relationshipToPersona = "",
+                personaRelationships = emptyMap(), characterKnowledge = emptyMap(),
+                goals = "", secrets = "STORYTELLER_ONLY_SECRET",
+                authorNotes = "PRIVATE_AUTHOR_NOTE", keepInScene = false,
+                sceneMode = "AUTO", isManualBase = true,
+                createdAt = 1L, updatedAt = 1L
+            )
+        )
+        harness.npcRepository.saveManual(
+            NpcDossier(
+                npcId = "away-guard", chatId = harness.chatId,
+                displayName = "Absent Guard", aliases = emptyList(),
+                role = "Palace guard", appearance = "", personality = "",
+                relationshipToPersona = "",
+                personaRelationships = emptyMap(), characterKnowledge = emptyMap(),
+                goals = "", secrets = "", authorNotes = "",
+                keepInScene = false, sceneMode = "AWAY",
+                isManualBase = true, createdAt = 2L, updatedAt = 2L
+            )
+        )
+        harness.viewModel.onDraftChanged("We enter the royal archive and check the records.")
+        harness.viewModel.sendMessage()
+        val firstReply = withTimeout(15_000) {
+            harness.messageRepository.getMessagesForChat(harness.chatId).first { it.size == 2 }
+        }.last()
+        assertEquals(1, provider.requests.size)
+        val prompt = provider.requests.single().joinToString("\n") { it.content }
+        assertTrue(prompt.contains("[POTENTIAL RECURRING CAST"))
+        assertTrue(prompt.contains("Archivist Voss"))
+        assertTrue(prompt.contains("Court archivist"))
+        assertFalse("Not yet in-scene; must not be a full presence dossier",
+            prompt.contains("[NPC id=archive-voss]"))
+        assertTrue("Explicit Away must be passed as an absence constraint",
+            prompt.contains("Absent: Absent Guard"))
+        assertFalse("An Away NPC cannot be a returning-cast suggestion",
+            prompt.contains("- Absent Guard"))
+        assertFalse(prompt.contains("STORYTELLER_ONLY_SECRET"))
+        assertFalse(prompt.contains("PRIVATE_AUTHOR_NOTE"))
+
+        val returningSpeaker = requireNotNull(StoryResponseCodec.decode(firstReply.content))
+            .segments.single { it.type == StorySegmentType.NPC }
+        assertEquals("archive-voss", returningSpeaker.speakerId)
+        withTimeout(15_000) {
+            harness.viewModel.uiState.first {
+                it is ChatUiState.Success && !it.isGenerating &&
+                    it.messages.any { message -> message.messageId == firstReply.messageId }
+            }
+        }
+        yield()
+        harness.viewModel.onDraftChanged("Ask to see the oldest records.")
+        harness.viewModel.sendMessage()
+        withTimeout(15_000) {
+            harness.messageRepository.getMessagesForChat(harness.chatId).first { it.size == 4 }
+        }
+
+        assertEquals(2, provider.requests.size)
+        val nextPrompt = provider.requests.last().joinToString("\n") { it.content }
+        assertTrue("Recorded entrance promotes the same NPC to present context",
+            nextPrompt.contains("[NPC id=archive-voss]"))
+        assertFalse(nextPrompt.contains("PRIVATE_AUTHOR_NOTE"))
+        assertEquals(
+            setOf("archive-voss", "away-guard"),
+            harness.npcRepository.getProjectedDossiers(harness.chatId).map { it.npcId }.toSet()
+        )
     }
 
     @Test
@@ -921,6 +1212,231 @@ class ChatDetailGenerationTest {
     }
 
     @Test
+    fun naturalMultiSpeakerReplyCreatesNamedNpcWithoutTerminalMetadataOrSecondRequest() = runBlocking {
+        val provider = SequentialResponseProvider(listOf(
+            "Character (Rowan): \"Is the path open?\"\n" +
+                "Mountain Shaper: *The adeptus shakes his head.* \"Not yet.\""
+        ))
+        val harness = createHarness(
+            provider, ResponseLengthProfile.NORMAL,
+            narratorEnabled = true, npcBankEnabledInitially = true
+        )
+        harness.viewModel.onDraftChanged("Ask the adeptus about the mountain road.")
+        harness.viewModel.sendMessage()
+        val messages = withTimeout(15_000) {
+            harness.messageRepository.getMessagesForChat(harness.chatId).first { it.size == 2 }
+        }
+        val saved = requireNotNull(StoryResponseCodec.decode(messages.last().content))
+        assertEquals(listOf(StorySegmentType.CHARACTER, StorySegmentType.NPC),
+            saved.segments.map { it.type })
+        val bank = harness.npcRepository.getProjectedDossiers(harness.chatId)
+        assertEquals(1, bank.size)
+        assertEquals("Mountain Shaper", bank.single().displayName)
+        assertEquals(bank.single().npcId, saved.segments.last().speakerId)
+        assertEquals(1, provider.requests.size)
+    }
+
+    @Test
+    fun explicitPersonaSpeakerCannotBeAutoSavedAsAnNpcInSoloEnsemble() = runBlocking {
+        val provider = SequentialResponseProvider(listOf(
+            "Character (Rowan): \"Do you recognize the sigil?\"\n" +
+                "Mara: \"Yes, it belongs to the old king.\""
+        ))
+        val harness = createHarness(
+            provider, ResponseLengthProfile.NORMAL,
+            narratorEnabled = true, npcBankEnabledInitially = true
+        )
+        harness.viewModel.onDraftChanged("Look at the sigil.")
+        harness.viewModel.sendMessage()
+        val stopped = withTimeout(15_000) {
+            harness.viewModel.uiState.first { state ->
+                state is ChatUiState.Success && !state.isGenerating &&
+                    state.generationError.orEmpty().contains(
+                        "explicit turn for your Persona"
+                    )
+            }
+        } as ChatUiState.Success
+        assertTrue(stopped.partialStopped)
+        assertTrue(stopped.generationError.orEmpty().contains("not saved"))
+        val persisted = harness.messageRepository.getMessagesForChatOnce(harness.chatId)
+        assertEquals(1, persisted.size)
+        assertEquals(SpeakerType.PERSONA, persisted.single().speakerType)
+        assertTrue(harness.npcRepository.getProjectedDossiers(harness.chatId).isEmpty())
+        assertEquals(1, provider.requests.size)
+    }
+
+    @Test
+    fun modelAttributedNaturalNpcDialogueCreatesBankEntryWithoutMetadata() = runBlocking {
+        val provider = SequentialResponseProvider(listOf(
+            "*The courtyard gates shake as the adeptus approaches.*\n" +
+                "\"The mountain road is closed,\" Mountain Shaper warned. " +
+                "Rowan looked toward the gate. \"We should find another way.\""
+        ))
+        val harness = createHarness(
+            provider, ResponseLengthProfile.NORMAL,
+            narratorEnabled = true, npcBankEnabledInitially = true
+        )
+        harness.viewModel.onDraftChanged("Ask about the mountain road.")
+        harness.viewModel.sendMessage()
+        val messages = withTimeout(15_000) {
+            harness.messageRepository.getMessagesForChat(harness.chatId).first { it.size == 2 }
+        }
+        assertEquals(1, provider.requests.size)
+        val npc = harness.npcRepository.getProjectedDossiers(harness.chatId)
+        assertEquals(listOf("Mountain Shaper"), npc.map { it.displayName })
+        assertFalse(npc.single().isManualBase)
+        assertTrue(messages.last().content.contains("mountain road is closed"))
+    }
+
+    @Test
+    fun newNpcIsDiscoveredFromProseEvenWhenTerminalMetadataIsBroken() = runBlocking {
+        val provider = RequestSequenceProvider(listOf(listOf(
+            StreamEvent.Content("The courier mentioned Lady Briar but carried on.\n"),
+            StreamEvent.Content("\"The mountain road is closed,\" Mountain Shaper warned.\n"),
+            StreamEvent.Content("<elsewhere_npc_updates>\n{broken}"),
+            StreamEvent.Done(null)
+        )))
+        val harness = createHarness(
+            provider, ResponseLengthProfile.NORMAL,
+            narratorEnabled = true, npcBankEnabledInitially = true
+        )
+        harness.viewModel.onDraftChanged("Ask about the road.")
+        harness.viewModel.sendMessage()
+        val messages = withTimeout(15_000) {
+            harness.messageRepository.getMessagesForChat(harness.chatId).first { it.size == 2 }
+        }
+        val visible = StoryResponseCodec.visibleText(messages.last().content)
+        assertTrue(visible.contains("The mountain road is closed"))
+        assertFalse(visible.contains("elsewhere_npc_updates"))
+        assertFalse(visible.contains("{broken}"))
+        assertEquals(
+            listOf("Mountain Shaper"),
+            harness.npcRepository.getProjectedDossiers(harness.chatId).map { it.displayName }
+        )
+        assertEquals(1, provider.requests.size)
+    }
+
+    @Test
+    fun explicitItalicPersonaActionIsHeldForReviewWithoutCreatingExtraTurn() = runBlocking {
+        val provider = SequentialResponseProvider(listOf(
+            "*Mara takes the sigil from Rowan.*\n" +
+                "Rowan: \"No, leave that where it is.\""
+        ))
+        val harness = createHarness(
+            provider, ResponseLengthProfile.NORMAL,
+            narratorEnabled = true, npcBankEnabledInitially = true
+        )
+        harness.viewModel.onDraftChanged("Examine the sigil.")
+        harness.viewModel.sendMessage()
+        val state = withTimeout(15_000) {
+            harness.viewModel.uiState.first { state ->
+                state is ChatUiState.Success && !state.isGenerating &&
+                    state.generationError.orEmpty().contains("explicit turn for your Persona")
+            }
+        } as ChatUiState.Success
+        assertTrue(state.partialStopped)
+        assertEquals(1, harness.messageRepository.getMessagesForChatOnce(harness.chatId).size)
+        assertTrue(harness.npcRepository.getProjectedDossiers(harness.chatId).isEmpty())
+        assertEquals(1, provider.requests.size)
+    }
+
+    @Test
+    fun streamedPersonaActionBeatIsHeldForReviewOnSend() = runBlocking {
+        val provider = RequestSequenceProvider(listOf(blockedPersonaReply()))
+        val harness = createHarness(
+            provider, ResponseLengthProfile.NORMAL,
+            narratorEnabled = true, npcBankEnabledInitially = true
+        )
+
+        harness.viewModel.onDraftChanged("Ask Rowan what happened at breakfast.")
+        harness.viewModel.sendMessage()
+
+        assertPersonaReplyHeldForReview(harness)
+        val persisted = harness.messageRepository.getMessagesForChatOnce(harness.chatId)
+        assertEquals(listOf(SpeakerType.PERSONA), persisted.map { it.speakerType })
+        assertEquals(1, provider.requests.size)
+    }
+
+    @Test
+    fun streamedPersonaActionBeatCannotOverwriteContinueTarget() = runBlocking {
+        verifyBlockedPersonaFollowup { viewModel, messageId ->
+            viewModel.continueMessage(messageId)
+        }
+    }
+
+    @Test
+    fun streamedPersonaActionBeatCannotReplacePrimaryVariant() = runBlocking {
+        verifyBlockedPersonaFollowup { viewModel, messageId ->
+            viewModel.regenerateMessage(messageId)
+        }
+    }
+
+    private fun blockedPersonaReply(): List<StreamEvent> = listOf(
+        // Deliberately malformed metadata forces the visible-prose fallback.
+        // Split inside the Persona name and before the second quote.
+        StreamEvent.Content("<|elsewhere_story_v1|>\n<|segment|>{broken}\n"),
+        StreamEvent.Content("Rowan moved toward the stall.\n“Compromised what?” *Ma"),
+        StreamEvent.Content("ra pointed at the stall.* "),
+        StreamEvent.Content("“My breakfast?”\n"),
+        StreamEvent.Done(null)
+    )
+
+    private suspend fun assertPersonaReplyHeldForReview(harness: Harness) {
+        val state = withTimeout(15_000) {
+            harness.viewModel.uiState.first {
+                it is ChatUiState.Success && !it.isGenerating && it.partialStopped &&
+                    it.generationError.orEmpty().contains("explicit turn for your Persona")
+            }
+        } as ChatUiState.Success
+        assertTrue(state.generationError.orEmpty().contains("not saved"))
+        assertTrue(state.streamingContent.orEmpty().contains("Rowan moved toward the stall."))
+        assertFalse(state.streamingContent.orEmpty().contains("<|segment|>"))
+        assertTrue(harness.npcRepository.getProjectedDossiers(harness.chatId).isEmpty())
+    }
+
+    private suspend fun verifyBlockedPersonaFollowup(
+        followup: (ChatDetailViewModel, String) -> Unit
+    ) {
+        val provider = RequestSequenceProvider(
+            listOf(
+                listOf(StreamEvent.Content("Rowan waits by the door."), StreamEvent.Done(null)),
+                blockedPersonaReply()
+            )
+        )
+        val harness = createHarness(
+            provider, ResponseLengthProfile.NORMAL,
+            narratorEnabled = true, npcBankEnabledInitially = true
+        )
+        harness.viewModel.onDraftChanged("Ask Rowan to wait.")
+        harness.viewModel.sendMessage()
+        val before = withTimeout(15_000) {
+            harness.messageRepository.getMessagesForChat(harness.chatId).first { it.size == 2 }
+        }
+        val original = before.last()
+        withTimeout(15_000) {
+            harness.viewModel.uiState.first {
+                it is ChatUiState.Success && !it.isGenerating &&
+                    it.messages.any { message -> message.messageId == original.messageId }
+            }
+        }
+        yield()
+        followup(harness.viewModel, original.messageId)
+
+        assertPersonaReplyHeldForReview(harness)
+        assertEquals(before, harness.messageRepository.getMessagesForChatOnce(harness.chatId))
+        assertEquals(
+            listOf(original.messageId),
+            harness.messageRepository.getVariantsOnce(original.variantGroupId).map { it.messageId }
+        )
+        harness.viewModel.discardPartial()
+        withTimeout(15_000) {
+            harness.viewModel.uiState.first { it is ChatUiState.Success && !it.partialStopped }
+        }
+        assertEquals(before, harness.messageRepository.getMessagesForChatOnce(harness.chatId))
+        assertEquals(2, provider.requests.size)
+    }
+
+    @Test
     fun malformedNarratedOutputIsSavedWithoutExposingControlMarkers() = runBlocking {
         val provider = SequentialResponseProvider(
             listOf(
@@ -1214,6 +1730,189 @@ class ChatDetailGenerationTest {
     }
 
     @Test
+    fun chatViewModelPagesOlderCompleteMessageGroupsWithoutProviderCalls() = runBlocking {
+        val provider = CountingProvider()
+        val harness = createHarness(provider, ResponseLengthProfile.NORMAL)
+        withTimeout(15_000) {
+            harness.viewModel.uiState.first {
+                it is ChatUiState.Success && it.historyLoaded
+            }
+        }
+        database.withTransaction {
+            for (index in 1..250) {
+                database.messageDao().insertMessage(
+                    MessageEntity(
+                        messageId = "paged-turn-$index",
+                        chatId = harness.chatId,
+                        speakerType = if (index % 2 == 0)
+                            SpeakerType.PERSONA else SpeakerType.CHARACTER,
+                        speakerId = if (index % 2 == 0) "persona-1" else "character-1",
+                        speakerDisplayNameSnapshot = if (index % 2 == 0) "Mara" else "Rowan",
+                        content = "History event $index",
+                        orderIndex = index.toLong()
+                    )
+                )
+            }
+            database.messageDao().insertMessage(
+                MessageEntity(
+                    messageId = "paged-older-alternate",
+                    chatId = harness.chatId,
+                    speakerType = SpeakerType.CHARACTER,
+                    speakerId = "character-1",
+                    speakerDisplayNameSnapshot = "Rowan",
+                    content = "Discarded alternative event 49",
+                    orderIndex = 49L,
+                    variantGroupId = "paged-turn-49",
+                    isPrimaryVariant = false
+                )
+            )
+        }
+
+        val newest = withTimeout(30_000) {
+            harness.viewModel.uiState.first { state ->
+                state is ChatUiState.Success && state.historyLoaded &&
+                    state.groupedMessages.size == 100 && state.hasEarlierHistory &&
+                    !state.isLoadingEarlierHistory &&
+                    state.groupedMessages.last().primaryMessage.messageId == "paged-turn-250"
+            }
+        } as ChatUiState.Success
+        assertEquals("paged-turn-151", newest.groupedMessages.first().primaryMessage.messageId)
+        assertEquals(100, newest.messages.size)
+
+        // Image attachments must follow the visible chat page while draft
+        // images stay available independently of historical scroll position.
+        val testImageDir = java.io.File(context.filesDir, "message_attachments")
+            .apply { mkdirs() }
+        val metadata = listOf(
+            "visible-image" to "paged-turn-240",
+            "older-image" to "paged-turn-49",
+            "alternate-image" to "paged-older-alternate",
+            "pending-draft-image" to null
+        )
+        metadata.forEach { (id, messageId) ->
+            java.io.File(testImageDir, "$id.png").writeBytes(byteArrayOf(1, 2, 3))
+            database.messageAttachmentDao().insert(
+                MessageAttachmentEntity(
+                    attachmentId = id,
+                    chatId = harness.chatId,
+                    messageId = messageId,
+                    relativePath = "message_attachments/$id.png",
+                    mimeType = "image/png",
+                    byteSize = 3,
+                    pixelWidth = 1,
+                    pixelHeight = 1,
+                    sha256 = "synthetic-$id",
+                    sortPosition = 0
+                )
+            )
+        }
+        val initialImages = withTimeout(30_000) {
+            harness.viewModel.uiState.first { state ->
+                state is ChatUiState.Success &&
+                    state.attachments.map { it.attachmentId } == listOf("visible-image") &&
+                    state.draftAttachments.map { it.attachmentId } ==
+                        listOf("pending-draft-image")
+            }
+        } as ChatUiState.Success
+        assertEquals(1, initialImages.attachments.size)
+        assertEquals(4, database.messageAttachmentDao().getForChat(harness.chatId).size)
+
+        harness.viewModel.loadEarlierMessages()
+        val second = withTimeout(30_000) {
+            harness.viewModel.uiState.first { state ->
+                state is ChatUiState.Success && state.groupedMessages.size == 200 &&
+                    !state.isLoadingEarlierHistory
+            }
+        } as ChatUiState.Success
+        assertTrue(second.hasEarlierHistory)
+        assertEquals("paged-turn-51", second.groupedMessages.first().primaryMessage.messageId)
+
+        assertEquals(listOf("visible-image"),
+            second.attachments.map { it.attachmentId })
+        assertEquals(listOf("pending-draft-image"),
+            second.draftAttachments.map { it.attachmentId })
+
+        // A new Character reply while reading older turns must not evict
+        // the oldest loaded group or pull the reader back to the bottom.
+        harness.messageRepository.insertMessage(
+            MessageEntity(
+                messageId = "paged-turn-251",
+                chatId = harness.chatId,
+                speakerType = SpeakerType.CHARACTER,
+                speakerId = "character-1",
+                speakerDisplayNameSnapshot = "Rowan",
+                content = "An incoming scene while scrolling",
+                orderIndex = 251L
+            )
+        )
+        val preserved = withTimeout(30_000) {
+            harness.viewModel.uiState.first { state ->
+                state is ChatUiState.Success &&
+                    state.groupedMessages.size == 201 &&
+                    state.groupedMessages.first().primaryMessage.messageId == "paged-turn-51" &&
+                    state.groupedMessages.last().primaryMessage.messageId == "paged-turn-251" &&
+                    !state.isLoadingEarlierHistory
+            }
+        } as ChatUiState.Success
+        assertTrue(preserved.hasEarlierHistory)
+
+        harness.viewModel.loadEarlierMessages()
+        val all = withTimeout(30_000) {
+            harness.viewModel.uiState.first { state ->
+                state is ChatUiState.Success && state.groupedMessages.size == 251 &&
+                    !state.hasEarlierHistory && !state.isLoadingEarlierHistory
+            }
+        } as ChatUiState.Success
+        assertEquals("paged-turn-1", all.groupedMessages.first().primaryMessage.messageId)
+        assertEquals("paged-turn-251", all.groupedMessages.last().primaryMessage.messageId)
+        assertEquals(252, all.messages.size)
+        assertEquals(
+            setOf("paged-turn-49", "paged-older-alternate"),
+            all.groupedMessages.single {
+                it.primaryMessage.messageId == "paged-turn-49"
+            }.variants.map { it.messageId }.toSet()
+        )
+        val allImages = withTimeout(30_000) {
+            harness.viewModel.uiState.first { state ->
+                state is ChatUiState.Success &&
+                    state.groupedMessages.size == 251 &&
+                    state.attachments.map { it.attachmentId }.toSet() ==
+                        setOf("visible-image", "older-image", "alternate-image") &&
+                    state.draftAttachments.map { it.attachmentId } ==
+                        listOf("pending-draft-image")
+            }
+        } as ChatUiState.Success
+        assertEquals(3, allImages.attachments.size)
+
+        // Returning to the latest reply releases the hydrated older pages,
+        // but those groups and variants remain retrievable from Room.
+        harness.viewModel.returnToLatestMessages()
+        val collapsed = withTimeout(30_000) {
+            harness.viewModel.uiState.first { state ->
+                state is ChatUiState.Success && state.groupedMessages.size == 100 &&
+                    state.groupedMessages.first().primaryMessage.messageId == "paged-turn-152" &&
+                    state.groupedMessages.last().primaryMessage.messageId == "paged-turn-251" &&
+                    state.hasEarlierHistory && !state.isLoadingEarlierHistory
+            }
+        } as ChatUiState.Success
+        assertEquals(100, collapsed.messages.size)
+        val latestImages = withTimeout(30_000) {
+            harness.viewModel.uiState.first { state ->
+                state is ChatUiState.Success &&
+                    state.groupedMessages.size == 100 &&
+                    state.attachments.map { it.attachmentId } == listOf("visible-image") &&
+                    state.draftAttachments.map { it.attachmentId } ==
+                        listOf("pending-draft-image")
+            }
+        } as ChatUiState.Success
+        assertEquals(1, latestImages.attachments.size)
+        assertEquals(4, database.messageAttachmentDao().getForChat(harness.chatId).size)
+        assertEquals(252,
+            harness.messageRepository.getMessagesForChatOnce(harness.chatId).size)
+        assertEquals(0, provider.requestCount)
+    }
+
+    @Test
     fun retryAndRegenerateReuseOriginImageWhileContinueDoesNotResendIt() = runBlocking {
         val provider = RequestSequenceProvider(
             listOf(
@@ -1246,8 +1945,13 @@ class ChatDetailGenerationTest {
                 messages.any { it.content == "Original image reply." }
             }
         }.single { it.content == "Original image reply." }
+        // The saved Room row may precede the asynchronous history collector.
+        // A user can only tap Regenerate once the response bubble is visible.
         withTimeout(30_000) {
-            harness.viewModel.uiState.first { it is ChatUiState.Success && !it.isGenerating }
+            harness.viewModel.uiState.first { state ->
+                state is ChatUiState.Success && !state.isGenerating &&
+                    state.messages.any { it.messageId == original.messageId }
+            }
         }
 
         harness.viewModel.regenerateMessage(original.messageId)
@@ -1257,7 +1961,12 @@ class ChatDetailGenerationTest {
             }
         }.single { it.content == "Regenerated image reply." }
         withTimeout(30_000) {
-            harness.viewModel.uiState.first { it is ChatUiState.Success && !it.isGenerating }
+            harness.viewModel.uiState.first { state ->
+                state is ChatUiState.Success && !state.isGenerating &&
+                    state.messages.any {
+                        it.messageId == regenerated.messageId && it.isPrimaryVariant
+                    }
+            }
         }
 
         harness.viewModel.continueMessage(regenerated.messageId)
@@ -1389,6 +2098,13 @@ class ChatDetailGenerationTest {
             }
         } as ChatUiState.Success
         assertTrue(failed.generationError.orEmpty().contains("vision-capable"))
+        // The earlier draft-image import may finish after the newer model-capability error.
+        // Its delayed callback must not erase that actionable failure.
+        kotlinx.coroutines.delay(100)
+        assertTrue(
+            (harness.viewModel.uiState.value as? ChatUiState.Success)
+                ?.generationError?.contains("does not support image input") == true
+        )
         assertEquals(0, provider.requestCount)
         assertEquals(listOf(SpeakerType.PERSONA), harness.messageRepository.getMessagesForChatOnce(harness.chatId).map { it.speakerType })
         source.delete()
@@ -1870,7 +2586,10 @@ class ChatDetailGenerationTest {
         assertFalse(requestText.contains("OLD_TRANSCRIPT_CHARACTER"))
         assertFalse(requestText.contains("OLD_ALTERNATE_VARIANT"))
         assertFalse(requestText.contains("OLD_ROLLING_SUMMARY"))
-        assertTrue(requestText.contains("DURABLE_MEMORY_STAYS"))
+        // Wack keeps the historical durable-memory row in Room, but Stage 1
+        // cannot let an origin-unknown legacy fact re-enter generation without
+        // an explicit, separately audited return grant.
+        assertFalse(requestText.contains("DURABLE_MEMORY_STAYS"))
         assertTrue(requestText.contains("POST_RESET_PERSONA"))
         preservedImage.delete()
         Unit
@@ -1974,10 +2693,25 @@ class ChatDetailGenerationTest {
                 dataCoordinator = dataCoordinator
             )
         }
-        withTimeout(15_000) {
-            viewModel.uiState.first { it is ChatUiState.Success && it.groupParticipantsLoaded }
+        // The roster and transcript hydrate through separate Room flows.
+        // Group readiness alone does not authorize Update Memory Now:
+        // beginInChatTool deliberately rejects the action until historyLoaded.
+        withTimeout(30_000) {
+            viewModel.uiState.first {
+                it is ChatUiState.Success && it.groupParticipantsLoaded &&
+                    it.historyLoaded && it.groupCharacters.any { participant ->
+                        participant.isActive && participant.character.characterId == "character-2"
+                    } && it.messages.any { message ->
+                        message.speakerType == SpeakerType.PERSONA &&
+                            message.content == "I prefer mint tea."
+                    }
+            }
         }
         viewModel.selectGroupCharacter("character-2")
+        assertEquals(
+            "character-2",
+            (viewModel.uiState.value as ChatUiState.Success).selectedGroupCharacterId
+        )
         viewModel.updateMemoryNow()
         val firstStatus = withTimeout(15_000) {
             viewModel.uiState.first {
@@ -2029,6 +2763,148 @@ class ChatDetailGenerationTest {
         harness.viewModel.discardPartial()
     }
 
+    @Test
+    fun linkedExistingCharacterActsAsSupportingNpcThenCanTakeSoloSpotlight() = runBlocking {
+        val provider = RecordingStreamingProvider()
+        val harness = createHarness(
+            provider, ResponseLengthProfile.NORMAL, npcBankEnabledInitially = true
+        )
+        val json = """{"schema_version":1,"character_id":"secondary",
+            "display_name":"Captain Varka","character_name":"Varka",
+            "aliases":["Captain"],
+            "personality":{"summary":"LINKED_SUPPORT_PERSONALITY"},
+            "voice":{"tone":"LINKED_SUPPORT_VOICE"},
+            "knowledge":{"private":"LINKED_FORBIDDEN_KNOWLEDGE"},
+            "author_notes":{"private":"LINKED_FORBIDDEN_NOTE"}}"""
+        val characters = CharacterRepository(
+            database.characterDao(),
+            Moshi.Builder().addLast(KotlinJsonAdapterFactory()).build(),
+            dataCoordinator = dataCoordinator
+        )
+        characters.importCharacterJson(json)
+        val newNpcId = harness.npcRepository.addExistingCharacterAsNpc(
+            harness.chatId, "secondary"
+        )
+        harness.npcRepository.setSceneMode(newNpcId, com.example.data.model.NpcSceneMode.HERE)
+        harness.viewModel.onDraftChanged("Captain, please give us a clue.")
+        harness.viewModel.sendMessage()
+        awaitCompletedTurn(harness.viewModel, 2) { provider.requests.size }
+        assertEquals("character-1", harness.messageRepository
+            .getMessagesForChatOnce(harness.chatId).last().speakerId)
+        val firstPrompt = provider.requests.last().first { it.role == Role.SYSTEM }.content
+        assertTrue(firstPrompt.contains("LINKED CHARACTER ID: secondary"))
+        assertTrue(firstPrompt.contains("LINKED_SUPPORT_PERSONALITY"))
+        assertTrue(firstPrompt.contains("LINKED_SUPPORT_VOICE"))
+        assertFalse(firstPrompt.contains("LINKED_FORBIDDEN_KNOWLEDGE"))
+        assertFalse(firstPrompt.contains("LINKED_FORBIDDEN_NOTE"))
+
+        harness.chatRepository.selectSoloSpotlight(harness.chatId, "secondary")
+        withTimeout(15_000) {
+            harness.viewModel.uiState.first {
+                it is ChatUiState.Success && it.selectedSoloSpotlightId == "secondary"
+            }
+        }
+        harness.viewModel.onDraftChanged("Captain, this is your turn.")
+        harness.viewModel.sendMessage()
+        awaitCompletedTurn(harness.viewModel, 4) { provider.requests.size }
+        val secondPrompt = provider.requests.last().first { it.role == Role.SYSTEM }.content
+        assertTrue(secondPrompt.contains("LINKED_SUPPORT_PERSONALITY"))
+        assertFalse(secondPrompt.contains("[NPC id=$newNpcId]"))
+        assertEquals("secondary", harness.messageRepository
+            .getMessagesForChatOnce(harness.chatId).last().speakerId)
+        assertEquals(2, provider.requests.size)
+    }
+
+    @Test
+    fun promotedNpcSpotlightSwitchesRealProviderResponderWithoutRestartingStory() = runBlocking {
+        val provider = RecordingStreamingProvider()
+        val harness = createHarness(
+            provider, ResponseLengthProfile.NORMAL, npcBankEnabledInitially = true
+        )
+        val npcId = "stable-promoted-npc"
+        harness.npcRepository.saveManual(
+            NpcDossier(
+                npcId = npcId, chatId = harness.chatId,
+                displayName = "Mara the Archivist",
+                aliases = listOf("Archivist"),
+                role = "Keeper of the passage",
+                appearance = "Copper braided hair",
+                personality = "PROMOTED_PERSONALITY_SENTINEL",
+                relationshipToPersona = "PROMOTED_RELATIONSHIP_PRIVATE",
+                personaRelationships = emptyMap(),
+                characterKnowledge = emptyMap(),
+                goals = "PROMOTED_GOAL_SENTINEL",
+                secrets = "PROMOTED_SECRET_MUST_NOT_BECOME_GLOBAL",
+                authorNotes = "PROMOTED_PRIVATE_AUTHOR_NOTE",
+                keepInScene = true,
+                isManualBase = true,
+                createdAt = 1L,
+                updatedAt = 1L,
+                sceneMode = "HERE"
+            )
+        )
+        val promoted = harness.npcRepository.promoteNpcToCharacter(harness.chatId, npcId)
+        assertEquals(npcId, promoted.characterId)
+        assertTrue(promoted.created)
+
+        harness.viewModel.onDraftChanged("Original character responds first.")
+        harness.viewModel.sendMessage()
+        awaitCompletedTurn(harness.viewModel, 2) { provider.requests.size }
+        assertEquals("character-1",
+            harness.messageRepository.getMessagesForChatOnce(harness.chatId).last().speakerId)
+
+        harness.chatRepository.selectSoloSpotlight(harness.chatId, npcId)
+        withTimeout(15_000) {
+            harness.viewModel.uiState.first {
+                it is ChatUiState.Success && it.selectedSoloSpotlightId == npcId
+            }
+        }
+        harness.viewModel.onDraftChanged("Archivist, please answer.")
+        harness.viewModel.sendMessage()
+        awaitCompletedTurn(harness.viewModel, 4) { provider.requests.size }
+        val selectedPrompt = provider.requests.last().first { it.role == Role.SYSTEM }.content
+        assertTrue(selectedPrompt.contains("PROMOTED_PERSONALITY_SENTINEL"))
+        assertTrue(selectedPrompt.contains("PROMOTED_GOAL_SENTINEL"))
+        assertFalse(selectedPrompt.contains("PROMOTED_PRIVATE_AUTHOR_NOTE"))
+        // Its own chat-local relationship is allowed in this turn, but is NOT
+        // exported as globally reusable Character knowledge.
+        assertTrue(selectedPrompt.contains("PROMOTED_RELATIONSHIP_PRIVATE"))
+        assertFalse(selectedPrompt.contains("PROMOTED_SECRET_MUST_NOT_BECOME_GLOBAL"))
+        val transcript = harness.messageRepository.getMessagesForChatOnce(harness.chatId)
+        assertEquals("character-1", transcript[1].speakerId)
+        assertEquals(npcId, transcript[3].speakerId)
+        assertEquals(2, provider.requests.size)
+
+        harness.chatRepository.selectSoloSpotlight(harness.chatId, "character-1")
+        withTimeout(15_000) {
+            harness.viewModel.uiState.first {
+                it is ChatUiState.Success &&
+                    it.selectedSoloSpotlightId == "character-1"
+            }
+        }
+        harness.viewModel.onDraftChanged("Original character, welcome back.")
+        harness.viewModel.sendMessage()
+        awaitCompletedTurn(harness.viewModel, 6) { provider.requests.size }
+        assertEquals("character-1",
+            harness.messageRepository.getMessagesForChatOnce(harness.chatId).last().speakerId)
+        assertEquals(3, provider.requests.size)
+        assertEquals(npcId,
+            harness.npcRepository.getProjectedDossiers(harness.chatId).single().npcId)
+    }
+
+    @Test
+    fun freshEmptyChatHydratesHistoryBeforeAnyMessageOrProviderCall() = runBlocking {
+        val provider = CountingProvider()
+        val harness = createHarness(provider, ResponseLengthProfile.NORMAL)
+        val state = harness.viewModel.uiState.value as ChatUiState.Success
+        assertTrue("A new empty chat must finish the initial history query", state.historyLoaded)
+        assertTrue(state.messages.isEmpty())
+        assertTrue(withTimeout(5_000) {
+            harness.messageRepository.getMessagesForChat(harness.chatId).first().isEmpty()
+        })
+        assertEquals(0, provider.requestCount)
+    }
+
     private data class Harness(
         val chatId: String,
         val viewModel: ChatDetailViewModel,
@@ -2049,7 +2925,8 @@ class ChatDetailGenerationTest {
         narratorInstructions: String = "",
         npcBankEnabledInitially: Boolean = false,
         initialStoredCharacterContent: String? = null,
-        storyOutputParserFactory: () -> StoryOutputParser = ::StoryOutputParser
+        storyOutputParserFactory: () -> StoryOutputParser = ::StoryOutputParser,
+        storyMemoryRepository: StoryMemoryRepository? = null
     ): Harness {
         val moshi = Moshi.Builder().addLast(KotlinJsonAdapterFactory()).build()
         val characterRepository = CharacterRepository(database.characterDao(), moshi, dataCoordinator = dataCoordinator)
@@ -2102,7 +2979,8 @@ class ChatDetailGenerationTest {
                 npcRepository = npcRepository,
                 npcOutputParser = npcParser,
                 dataCoordinator = dataCoordinator,
-                storyOutputParserFactory = storyOutputParserFactory
+                storyOutputParserFactory = storyOutputParserFactory,
+                storyMemoryRepository = storyMemoryRepository
             )
         }
         // ChatUiState.Success is emitted before the Room history collector delivers its
@@ -2123,7 +3001,9 @@ class ChatDetailGenerationTest {
         )
     }
 
-    private class RecordingStreamingProvider : ModelProvider {
+    private class RecordingStreamingProvider(
+        private val contextWindow: Int? = null
+    ) : ModelProvider {
         lateinit var messages: List<RoleplayMessage>
         lateinit var options: GenerationOptions
         val requests = mutableListOf<List<RoleplayMessage>>()
@@ -2131,6 +3011,7 @@ class ChatDetailGenerationTest {
         override suspend fun getModels(): List<OpenRouterModel> = emptyList()
         override suspend fun getEndpoints(modelId: String): List<ProviderEndpoint> = emptyList()
         override suspend fun supportsImageInput(modelId: String): Boolean = true
+        override fun cachedContextLength(modelId: String): Int? = contextWindow
 
         override fun streamResponse(
             messages: List<RoleplayMessage>,

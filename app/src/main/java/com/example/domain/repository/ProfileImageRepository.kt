@@ -161,14 +161,22 @@ class ProfileImageRepository(
         }
 
     suspend fun copyImage(kind: ProfileImageKind, sourceProfileId: String, targetProfileId: String): Boolean =
-        dataCoordinator.withMutation {
+        copyImageToKind(kind, sourceProfileId, kind, targetProfileId)
+
+    /** Preserve a promoted NPC portrait under the Character's own image namespace. */
+    suspend fun copyImageToKind(
+        sourceKind: ProfileImageKind,
+        sourceProfileId: String,
+        targetKind: ProfileImageKind,
+        targetProfileId: String
+    ): Boolean = dataCoordinator.withMutation {
             storageMutex.withLock {
                 withContext(Dispatchers.IO) {
                 requireValidProfileId(sourceProfileId)
                 requireValidProfileId(targetProfileId)
-                val source = resolveImage(kind, sourceProfileId) ?: return@withContext false
-                val directory = imageDirectory(kind).apply { mkdirs() }
-                val destination = File(directory, "${storageKey(kind, targetProfileId)}.png")
+                val source = resolveImage(sourceKind, sourceProfileId) ?: return@withContext false
+                val directory = imageDirectory(targetKind).apply { mkdirs() }
+                val destination = File(directory, "${storageKey(targetKind, targetProfileId)}.png")
                 val temporary = File(directory, ".${destination.name}-${UUID.randomUUID()}.copying")
                 try {
                     source.copyTo(temporary, overwrite = true)

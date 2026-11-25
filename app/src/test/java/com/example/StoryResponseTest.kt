@@ -1,6 +1,7 @@
 package com.example
 
 import com.example.domain.story.StoryOutputParser
+import com.example.domain.story.PersonaTurnBoundary
 import com.example.domain.story.StoryResponseCodec
 import com.example.domain.story.StorySegmentType
 import com.example.domain.story.StorySpeakerIdentity
@@ -65,6 +66,42 @@ class StoryResponseTest {
     }
 
     @Test
+    fun trailingSpacesAndCrLfAreNotIncompleteStoryFormat() {
+        val output = "Zebulus stood still.  \r\n \r\nThe room quieted.\t\r\n"
+        val parsed = parser.parse(output, primary)
+
+        assertFalse(parsed.usedStructuredFormat)
+        assertEquals(null, parsed.warning)
+        assertEquals(
+            "Zebulus stood still.\n\nThe room quieted.",
+            parsed.response.segments.single().content
+        )
+    }
+
+    @Test
+    fun trailingWhitespaceDoesNotPreventSpeakerRecoveryInPlainTranscript() {
+        val output = "Character (Zebulus): \"Wait here.\"  \r\nNPC (Lady Ashford): \"I am here.\"\t"
+        val parsed = parser.parse(output, primary, listOf(ashford))
+
+        assertEquals(null, parsed.warning)
+        assertEquals(
+            listOf("character-1", "npc-ashford"),
+            parsed.response.segments.map { it.speakerId }
+        )
+    }
+
+    @Test
+    fun genuinelyMissingClosingMarkerStillWarnsAfterPreservingProse() {
+        val output = "<|elsewhere_story_v1|>\r\n" +
+            "<|segment|>{\"type\":\"character\"}\r\nThe room quieted.  \r\n"
+        val parsed = parser.parse(output, primary)
+
+        assertTrue(parsed.usedStructuredFormat)
+        assertNotNull(parsed.warning)
+        assertEquals("The room quieted.", parsed.response.segments.single().content)
+    }
+
+    @Test
     fun malformedHeadersAndIncompleteOutputHideMarkersAndPreserveProse() {
         val malformed = """
             <|elsewhere_story_v1|>
@@ -123,6 +160,65 @@ class StoryResponseTest {
     }
 
     @Test
+    fun modelAttributedPersonaTurnIsDetectedBeforeItCanBeSavedAsNpcOrCharacter() {
+        val player = listOf("Hazel", "Hazel Alexander")
+        val examples = listOf(
+            "Morax: \"What is that?\"\nHazel: \"I know.\"",
+            "NPC (Hazel): *She takes the relic.*",
+            "Character (Hazel Alexander): \"Fine.\"",
+            """<|segment|>{"type":"npc","speaker_name":"Hazel"}
+"I know." """.trimIndent(),
+            """<|segment|>{"type":"persona"}
+"I know." """.trimIndent(),
+            "*Hazel takes the key from Morax.*",
+            "Hazel whispered, \"Let's go.\"",
+            "\"The key is mine,\" Hazel answered."
+        )
+        examples.forEach { example ->
+            assertTrue(
+                "Explicit player speaker should be blocked",
+                PersonaTurnBoundary.hasExplicitAuthoredPersonaTurn(example, player)
+            )
+        }
+        assertFalse(PersonaTurnBoundary.hasExplicitAuthoredPersonaTurn(
+            "Morax watched Hazel point toward the ruined stall.", player))
+        assertFalse(PersonaTurnBoundary.hasExplicitAuthoredPersonaTurn(
+            "\"Hazel: read the inscription,\" Morax said.", player))
+        assertFalse(PersonaTurnBoundary.hasExplicitAuthoredPersonaTurn(
+            "*Morax watches Hazel reach for the door.*", player))
+        assertFalse(PersonaTurnBoundary.hasExplicitAuthoredPersonaTurn(
+            "Morax remembers that Hazel once asked about the seal.", player))
+    }
+
+    @Test
+    fun mixedProsePersonaTurnIsDetectedWithoutBlockingOtherSpeakersOrPastActions() {
+        val player = listOf("Hazel", "Hazel Alexander")
+        val morax = StorySpeakerIdentity("morax", "Morax")
+        val shaper = StorySpeakerIdentity("mountain-shaper", "Mountain Shaper")
+        val validReply = """
+            Morax: “The seal is compromised.”
+            Mountain Shaper: “The current runs under the stalls.”
+        """.trimIndent()
+        val mixedReply = validReply + "\n“Compromised what?” *Hazel pointed at the stall.* “My breakfast?”"
+        assertTrue(PersonaTurnBoundary.hasExplicitAuthoredPersonaTurn(mixedReply, player))
+        assertTrue(PersonaTurnBoundary.hasExplicitAuthoredPersonaTurn(
+            "\"Wait.\" _Hazel Alexander turns to Morax._ \"What did you see?\"", player))
+        assertFalse(PersonaTurnBoundary.hasExplicitAuthoredPersonaTurn(validReply, player))
+        assertFalse(PersonaTurnBoundary.hasExplicitAuthoredPersonaTurn(
+            "“Right there.” *Morax follows Hazel’s earlier gesture.* “See the seal?”", player))
+        assertFalse(PersonaTurnBoundary.hasExplicitAuthoredPersonaTurn(
+            "“Wait.” *Hazelnut turns to Morax.* “What did you see?”", player))
+        assertFalse(PersonaTurnBoundary.hasExplicitAuthoredPersonaTurn(
+            "“Wait.” *Hazel’s name comes back to him.* “It was the seal.”", player))
+
+        val parsed = parser.parse(validReply, morax, listOf(shaper))
+        assertEquals(listOf(StorySegmentType.CHARACTER, StorySegmentType.NPC),
+            parsed.response.segments.map { it.type })
+        assertEquals(listOf("morax", "mountain-shaper"),
+            parsed.response.segments.map { it.speakerId })
+    }
+
+    @Test
     fun narratorToggleRecognizesExplicitCharacterPrefixWithoutTouchingProse() {
         val varka = StorySpeakerIdentity("varka", "Varka")
         val leaked = "Character (Varka): *Varka drops the bags.* \"You're sitting down.\""
@@ -146,6 +242,36 @@ class StoryResponseTest {
         assertEquals(listOf(StorySegmentType.CHARACTER, StorySegmentType.NPC),
             parsed.response.segments.map { it.type })
         assertEquals("Liora Fen", parsed.response.segments.last().speakerName)
+    }
+
+    @Test
+    fun unfamiliarNamedNpcFromAnchoredNaturalTranscriptGetsStableSpeakerIdentity() {
+        val scene = """
+            Zebulus: *He lowers his voice.* "Who broke the seal?"
+            Mountain Shaper: *The adeptus folds his arms.* "I did."
+        """.trimIndent()
+        val parsed = parser.parse(scene, primary)
+        assertEquals(listOf(StorySegmentType.CHARACTER, StorySegmentType.NPC),
+            parsed.response.segments.map { it.type })
+        assertEquals("Mountain Shaper", parsed.response.segments.last().speakerName)
+        assertTrue(parsed.response.segments.last().speakerId.orEmpty().startsWith("story-npc:"))
+        assertEquals("*The adeptus folds his arms.* \"I did.\"",
+            parsed.response.segments.last().content)
+    }
+
+    @Test
+    fun isolatedHeadingsOrUnanchoredNamesDoNotInventNpcIdentities() {
+        val ordinary = "Mountain Shaper: *A biography* lies on the desk."
+        assertEquals(
+            ordinary,
+            parser.parse(ordinary, primary).response.segments.single().content
+        )
+        val headings = """
+            Zebulus: "The chapter is over."
+            Chapter: "A New Dawn"
+        """.trimIndent()
+        val parsed = parser.parse(headings, primary)
+        assertTrue(parsed.response.segments.none { it.speakerName == "Chapter" })
     }
 
     @Test

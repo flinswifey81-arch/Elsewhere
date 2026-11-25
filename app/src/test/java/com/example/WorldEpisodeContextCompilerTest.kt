@@ -6,6 +6,10 @@ import com.example.data.model.PersonaEntity
 import com.example.data.model.ResponseLengthProfile
 import com.example.data.model.SpeakerType
 import com.example.domain.compiler.ContextCompilerV1
+import com.example.domain.compiler.ScenarioContextCompiler
+import com.example.domain.memory.*
+import com.example.data.model.ScenarioDefinition
+import com.example.data.model.ChatSettingsEntity
 import com.example.domain.provider.Role
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -83,5 +87,119 @@ class WorldEpisodeContextCompilerTest {
         )
         assertFalse(prompt.first().content.contains("--- SHARED WORLD BASELINE & APPROVED CONTINUITY ---"))
         assertFalse(prompt.first().content.contains("The archway was repaired."))
+    }
+
+    @Test
+    fun scenarioEpisodeGetsOnlyItsExplicitlyLinkedWorldBaseline() {
+        val scenario = ScenarioDefinition(title = "Night Watch", premise = "Patrol the city")
+        val current = greeting.copy(
+            messageId = "persona-turn", speakerType = SpeakerType.PERSONA,
+            speakerId = persona.personaId,
+            speakerDisplayNameSnapshot = persona.displayName,
+            content = "What happened at the archway?"
+        )
+        val compiler = ScenarioContextCompiler()
+        val withWorld = compiler.compile(
+            scenario = scenario, persona = persona,
+            settings = ChatSettingsEntity(chatId = "episode"),
+            history = emptyList(), current = current, worldContext = sharedWorld
+        )
+        assertEquals(Role.SYSTEM, withWorld.first().role)
+        assertTrue(withWorld.first().content.contains("--- SHARED WORLD BASELINE ---"))
+        assertTrue(withWorld.first().content.contains("The archway was repaired."))
+        assertTrue(withWorld.first().content.contains("Hidden information is not automatically known to every NPC"))
+        val unlinked = compiler.compile(
+            scenario, persona, ChatSettingsEntity(chatId = "episode"),
+            history = emptyList(), current = current
+        )
+        assertFalse(unlinked.first().content.contains("The archway was repaired."))
+        assertFalse(unlinked.first().content.contains("--- SHARED WORLD BASELINE ---"))
+    }
+
+    private fun rememberedCompass(): StoryMemoryRecord = StoryMemoryRecord(
+        memoryId = "silver-compass", content = "Mara promised Rowan the silver compass.",
+        createdAtEpochMillis = 10L, updatedAtEpochMillis = 10L,
+        ownerId = "episode", sourceChatId = "episode",
+        scope = StoryMemoryOwnerScope.CHAT, branchId = null,
+        origin = StoryMemoryOrigin.Manual(17L),
+        claim = StoryMemoryClaim.PROMISE,
+        visibility = StoryMemoryVisibility.CHARACTER_ONLY,
+        knownBy = setOf(StoryActorRef(StoryActorKind.CHARACTER, character.characterId)),
+        review = StoryMemoryReview.APPROVED
+    )
+
+    @Test
+    fun eligibleStoryMemoryAppearsInSoloAndGroupWithoutReplacingPersonaAgency() {
+        val memory = rememberedCompass()
+        val solo = ContextCompilerV1().compileSoloContext(
+            character = character, persona = persona,
+            chatHistory = emptyList(), currentMessage = greeting,
+            responseProfile = ResponseLengthProfile.NORMAL,
+            customMin = null, customTargetMax = null, customHardMax = null,
+            storyMemories = listOf(memory)
+        ).first().content
+        assertTrue(solo.contains("Mara promised Rowan the silver compass."))
+        assertTrue(solo.contains("RECIPIENT APPROVED"))
+        assertTrue(solo.contains("Never write dialogue for the user/Persona"))
+        val group = ContextCompilerV1().compileGroupCharacterContext(
+            character = character, persona = persona,
+            activeCharacterNames = listOf("Varka", "Kaeya"),
+            chatHistory = emptyList(), currentMessage = greeting,
+            responseProfile = ResponseLengthProfile.NORMAL,
+            customMin = null, customTargetMax = null, customHardMax = null,
+            storyMemories = listOf(memory)
+        ).first().content
+        assertTrue(group.contains("Mara promised Rowan the silver compass."))
+        assertTrue(group.contains("Respond only as Varka"))
+        val old = ContextCompilerV1().compileSoloContext(
+            character = character, persona = persona, chatHistory = emptyList(),
+            currentMessage = greeting, responseProfile = ResponseLengthProfile.NORMAL,
+            customMin = null, customTargetMax = null, customHardMax = null
+        ).first().content
+        assertFalse(old.contains("Mara promised Rowan the silver compass."))
+    }
+
+    @Test
+    fun explicitCampaignRecallIsLabeledAndNotMistakenForSharedWorldCanon() {
+        val campaign = rememberedCompass().copy(
+            scope = StoryMemoryOwnerScope.CAMPAIGN,
+            ownerId = "the-only-campaign",
+            sourceChatId = "earlier-chapter"
+        )
+        val solo = ContextCompilerV1().compileSoloContext(
+            character = character, persona = persona,
+            chatHistory = emptyList(), currentMessage = greeting,
+            responseProfile = ResponseLengthProfile.NORMAL,
+            customMin = null, customTargetMax = null, customHardMax = null,
+            storyMemories = listOf(campaign)
+        ).first().content
+        assertTrue(solo.contains("RELEVANT CHAT & CAMPAIGN STORY MEMORY"))
+        assertTrue(solo.contains("[CAMPAIGN / PROMISE]"))
+        assertTrue(solo.contains("not universal knowledge"))
+        assertFalse(solo.contains("Accepted prior World continuity: Mara promised"))
+
+        val scenario = ScenarioContextCompiler().compile(
+            scenario = ScenarioDefinition(title = "A journey", premise = "Keep going."),
+            persona = persona, settings = ChatSettingsEntity(chatId = "episode"),
+            history = emptyList(), current = greeting,
+            storyMemories = listOf(campaign)
+        ).first().content
+        assertTrue(scenario.contains("APPROVED CHAT/CAMPAIGN STORY MEMORY"))
+        assertTrue(scenario.contains("[CAMPAIGN / PROMISE]"))
+        assertTrue(scenario.contains("NOT UNIVERSAL NPC KNOWLEDGE"))
+    }
+
+    @Test
+    fun scenarioStoryMemoryIsLabeledNarratorOnlyAndNeverCreatesNewTurns() {
+        val result = ScenarioContextCompiler().compile(
+            scenario = ScenarioDefinition(title = "A journey", premise = "Keep going."),
+            persona = persona, settings = ChatSettingsEntity(chatId = "episode"),
+            history = emptyList(), current = greeting,
+            storyMemories = listOf(rememberedCompass())
+        )
+        assertEquals(2, result.size)
+        assertTrue(result.first().content.contains("NARRATOR CONTINUITY, NOT UNIVERSAL NPC KNOWLEDGE"))
+        assertTrue(result.first().content.contains("Mara promised Rowan the silver compass."))
+        assertTrue(result.first().content.contains("Never invent the player's dialogue"))
     }
 }

@@ -2,6 +2,8 @@ name: World Archive Manifest Contract
 
 on:
   pull_request:
+    # No full work on drafts, but run automatically on review readiness.
+    types: [opened, reopened, synchronize, ready_for_review, converted_to_draft]
     branches:
       - feature/worlds-foundation-2026-11-01
       - feature/world-archive-manifest-contract-2026-11-05
@@ -12,11 +14,18 @@ on:
       - main
   workflow_dispatch:
 
+concurrency:
+  group: elsewhere-full-world-archive-contract-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
 jobs:
   test-contract:
+    # Draft work runs the fast smoke gate only. Full acceptance still runs
+    # on explicit workflow_dispatch or whenever the PR is ready for review.
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     name: Validate World archive manifest and existing World records
     runs-on: ubuntu-latest
     timeout-minutes: 25
@@ -44,8 +53,10 @@ jobs:
             --tests com.example.WorldArchiveEncryptedIOTest \
             --tests com.example.WorldArchiveAdditiveRestorerTest \
             --tests com.example.WorldArchiveTransferCoordinatorTest \
+            --tests com.example.WorldArchiveMemoryV2TransferTest \
             --tests com.example.WorldDefinitionCodecTest \
             --tests com.example.WorldRepositoryTest \
+            --tests com.example.WorldDefinitionBundleTransferTest \
             --tests com.example.AppDatabaseMigrationTest
 
       # This contract gate validates archive format and migration only.

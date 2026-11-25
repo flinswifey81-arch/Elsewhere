@@ -2,6 +2,7 @@ package com.example.domain.world
 
 import com.example.data.model.*
 import com.example.domain.backup.BackupPayload
+import com.example.domain.memory.StoryActorKind
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.Types
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
@@ -88,6 +89,43 @@ object WorldArchiveSnapshotSelector {
         val chatParticipants = source.chatParticipants.filter { it.chatId in includedChatIds }
         val chatPersonaParticipants = source.chatPersonaParticipants.filter { it.chatId in includedChatIds }
         val memories = source.roleplayMemories.filter { it.chatId in includedChatIds }
+        val storyMemories = source.storyMemories.filter { it.chatId in includedChatIds }
+        val storyMemoryIds = storyMemories.map { it.memoryId }.toSet()
+        val storyMemoryActors = source.storyMemoryActors.filter { it.memoryId in storyMemoryIds }
+        val storyMemoryReturns = source.storyMemoryReturns.filter { it.memoryId in storyMemoryIds }
+        val storyMemoryKnowledgeChanges = source.storyMemoryKnowledgeChanges.filter {
+            it.memoryId in storyMemoryIds
+        }
+        val storyMemoryPerspectives = source.storyMemoryPerspectives.filter {
+            it.memoryId in storyMemoryIds
+        }
+        // A Campaign is a private playthrough, not World canon. If ANY chapter is
+        // exported, require ALL its chapters. Partial Campaign export would silently
+        // lose journal/arc provenance or private memory sharing permissions.
+        val worldCampaigns = source.campaigns.filter { it.worldId == worldId }
+        val worldCampaignIds = worldCampaigns.map { it.campaignId }.toSet()
+        val worldChapters = source.campaignChapters.filter { it.campaignId in worldCampaignIds }
+        val chosenCampaignIds = if (selectedChatIds == null) worldCampaignIds
+            else worldChapters.filter { it.chatId in includedChatIds }
+                .map { it.campaignId }.toSet()
+        val campaigns = worldCampaigns.filter { it.campaignId in chosenCampaignIds }
+        val campaignChapters = worldChapters.filter { it.campaignId in chosenCampaignIds }
+        require(campaignChapters.all { it.chatId in includedChatIds }) {
+            "Select every chapter of each Campaign or exclude that Campaign from this World export."
+        }
+        val chapterIds = campaignChapters.map { it.chapterId }.toSet()
+        val campaignJournalEntries = source.campaignJournalEntries.filter {
+            it.campaignId in chosenCampaignIds
+        }
+        val campaignContinuityItems = source.campaignContinuityItems.filter {
+            it.campaignId in chosenCampaignIds
+        }
+        val campaignMemoryShares = source.campaignMemoryShares.filter {
+            it.campaignId in chosenCampaignIds
+        }
+        require(campaignMemoryShares.all {
+            it.sourceChapterId in chapterIds && it.sourceMemoryId in storyMemoryIds
+        }) { "Campaign memory approvals require their source chapter and Story Memory" }
         val npcDossiers = source.npcDossiers.filter { it.chatId in includedChatIds }
         val npcUpdates = source.npcDossierUpdates.filter { it.chatId in includedChatIds }
 
@@ -96,6 +134,14 @@ object WorldArchiveSnapshotSelector {
         characterIds.addAll(chatParticipants.map { it.characterId })
         characterIds.addAll(messages.filter { it.speakerType == SpeakerType.CHARACTER }.map { it.speakerId })
         characterIds.addAll(memories.map { it.characterId })
+        characterIds.addAll(storyMemoryActors.filter {
+            it.actorKind == StoryActorKind.CHARACTER.name
+        }.map { it.actorId })
+        characterIds.addAll(storyMemoryKnowledgeChanges.map { it.characterId })
+        characterIds.addAll(storyMemoryPerspectives.map { it.characterId })
+        characterIds.addAll(storyMemories.filter {
+            it.believedByKind == StoryActorKind.CHARACTER.name
+        }.mapNotNull { it.believedById })
         characterIds.addAll(links.castRoles.filter { it.roleType == "CHARACTER" }.map { it.resourceId })
         val scenarioDefinitions = scenarios.map { ScenarioCodec.decode(it.definitionJson) } +
             scenarioSessions.map { ScenarioCodec.decode(it.definitionJson) }
@@ -111,6 +157,12 @@ object WorldArchiveSnapshotSelector {
             .map { it.resourceId }.toMutableSet()
         personaIds.addAll(chatPersonaParticipants.map { it.personaId })
         personaIds.addAll(messages.filter { it.speakerType == SpeakerType.PERSONA }.map { it.speakerId })
+        personaIds.addAll(storyMemoryActors.filter {
+            it.actorKind == StoryActorKind.PERSONA.name
+        }.map { it.actorId })
+        personaIds.addAll(storyMemories.filter {
+            it.believedByKind == StoryActorKind.PERSONA.name
+        }.mapNotNull { it.believedById })
         personaIds.addAll(links.castRoles.filter { it.roleType == "PERSONA" }.map { it.resourceId })
 
         fun parseKnowledgeMap(raw: String): Map<String, String> =
@@ -166,7 +218,10 @@ object WorldArchiveSnapshotSelector {
                 npcDossiers.none { it.authorNotes.isNotBlank() || it.secrets.isNotBlank() } &&
                 npcLibraryEntries.none { it.authorNotes.isNotBlank() || it.secrets.isNotBlank() } &&
                 loreEntries.none { it.notes.isNotBlank() } &&
-                selectedSettings.none { !it.draftMessage.isNullOrBlank() }
+                selectedSettings.none { !it.draftMessage.isNullOrBlank() } &&
+                storyMemories.isEmpty() &&
+                campaigns.isEmpty() && campaignJournalEntries.isEmpty() &&
+                campaignContinuityItems.isEmpty() && campaignMemoryShares.isEmpty()
             ) {
                 "World archive contains private notes, secrets or drafts. Require explicit inclusion review."
             }
@@ -192,6 +247,16 @@ object WorldArchiveSnapshotSelector {
             chatSettings = selectedSettings,
             generationMetadata = source.generationMetadata.filter { it.messageId in messageIds },
             roleplayMemories = memories,
+            storyMemories = storyMemories,
+            storyMemoryActors = storyMemoryActors,
+            storyMemoryReturns = storyMemoryReturns,
+            storyMemoryKnowledgeChanges = storyMemoryKnowledgeChanges,
+            storyMemoryPerspectives = storyMemoryPerspectives,
+            campaigns = campaigns,
+            campaignChapters = campaignChapters,
+            campaignJournalEntries = campaignJournalEntries,
+            campaignContinuityItems = campaignContinuityItems,
+            campaignMemoryShares = campaignMemoryShares,
             conversationSummaries = source.conversationSummaries.filter { it.chatId in includedChatIds },
             relationships = relationships,
             lorebooks = lorebooks,

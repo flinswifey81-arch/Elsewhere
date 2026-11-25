@@ -98,6 +98,27 @@ class MessageAttachmentRepositoryTest {
     }
 
     @Test
+    fun chatOpenReconciliationRunsOnceButExplicitMaintenanceStillRescans() = runBlocking {
+        val draft = repository.importDraftImage("chat", Uri.fromFile(source))
+        assertEquals(1, repository.getDrafts("chat").size)
+
+        repository.reconcileOrphanFilesForChatOpenOnce()
+        assertEquals(1, repository.getDrafts("chat").size)
+
+        // Only an external/app-internal file change after the initial scan
+        // produces this case. Repeated chat openings must not rescan every
+        // archived image in the app.
+        repository.resolveFile(draft)!!.delete()
+        repository.reconcileOrphanFilesForChatOpenOnce()
+        assertEquals(1, repository.getDrafts("chat").size)
+
+        // Explicit reconciliation is not skipped: backup/restore and
+        // maintenance can still detect and remove missing-file metadata.
+        repository.reconcileOrphanFiles()
+        assertTrue(repository.getDrafts("chat").isEmpty())
+    }
+
+    @Test
     fun reconciliationRemovesRowsWhoseDeviceLocalFileIsMissing() = runBlocking {
         val draft = repository.importDraftImage("chat", Uri.fromFile(source))
         repository.resolveFile(draft)!!.delete()

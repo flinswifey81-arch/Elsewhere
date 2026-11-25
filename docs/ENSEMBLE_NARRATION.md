@@ -39,3 +39,23 @@ The per-chat co-lead switch is persisted with chat settings. Database version 11
 - Segment quality still depends on model instruction-following. The fallback protects the text and interface when formatting is malformed, but it cannot infer missing speaker boundaries reliably.
 - Dynamically introduced NPCs receive a stable generated identity derived from their supplied name. They are not automatically added to the NPC Bank unless the existing NPC update contract also supplies a valid update.
 - Previously saved ensemble responses keep their segmented presentation if Narrator is later disabled; disabling Narrator changes future generations.
+
+## Recovery of newly introduced named NPCs (draft regression)
+
+When the NPC Bank is enabled, a clearly attributed new supporting speaker in a multi-speaker transcript can now be recovered without a terminal metadata block: for example `Character (Morax): ...` followed by `Mountain Shaper: *...*`. A recognized Character/Narrator/typed NPC speaker must anchor the transcript, and the unknown name must lead an attributed quote or RP action; a single loose name, story heading, or passing reference remains ordinary prose. The existing atomic generation persistence creates one chat-local dossier and rewrites the temporary segment ID to the durable Bank ID. No second provider call, and no automatic claim that everyone mentioned is an NPC. This does not yet cover unstructured prose without unambiguous speaker attribution.
+
+## Explicit Persona-turn guard (draft regression)
+
+In Solo/Character generation, if a model emits an **explicit line attributed to the active Persona** (`Hazel: ...`, `NPC (Hazel): ...`, `Character (Hazel): ...`, structured segment with `speaker_name: Hazel`, or a `persona`/`user` segment), the response is **not automatically persisted as Character dialogue**. The existing review/Discard or Keep Partial flow retains the generated text locally for the player to choose, without a second paid generation. Ordinary references to prior Persona actions (e.g. `Morax watched Hazel...`) are not modified. This intentionally does **not** claim to detect implicit puppeteering hidden in unlabelled narration; issue #50 remains open for broader grounded handling and actual-model testing.
+
+## Explicitly attributed natural prose (draft acceptance)
+
+When metadata or speaker-segment formatting is absent, Elsewhere can conservatively propose a chat-local NPC dossier from *unambiguously attributed quoted speech* in a Solo reply, e.g. `"The road is closed," Mountain Shaper warned.` It does not try to invent people from unnamed groups, passing mentions, unattributed quotes or general narration. The active Persona's name/aliases and responding Character are excluded. Bank creation and the generated story stay in the same local transaction, using existing variant provenance; Continue checks only newly introduced names. This is a deterministic, offline fallback rather than an additional AI extraction call. Other unstructured prose remains intentionally outside the safe automatic discovery contract.
+
+## Additional explicit Persona-authorship checks
+
+The review gate also recognizes **Persona-leading italic action directions** and **directly attributed quoted Persona speech** (for example `*Hazel takes the key.*` or `"No," Hazel replied.`) even when the model omits a `Hazel:` label. It deliberately does not block indirect third-person references such as `Morax watched Hazel...` or arbitrary descriptions of historical player actions. A hit retains an unsaved reviewable partial, does not rewrite the player's established turn, and performs no second paid call.
+
+## NPC scene presence after natural attributed dialogue
+
+If an existing NPC is clearly credited with a quoted spoken line in a recent Character response—even without structured segment markers—the scene resolver can mark them PRESENT in the next turn. The same conservative name-attribution matcher is computed once per recent message and reused across the active NPC Bank, rather than repeating extraction for every dossier. A memory-only mention is not an entrance; manually set AWAY always wins. This avoids inventing attendance or teleporting unrelated returning cast.

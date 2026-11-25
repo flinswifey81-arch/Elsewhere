@@ -1,6 +1,8 @@
 package com.example.domain.world
 
 import com.example.data.model.*
+import com.example.domain.memory.StoryActorKind
+import com.example.domain.memory.StoryMemoryEligibilityPolicy
 import com.example.domain.story.StoryResponseCodec
 import com.example.domain.story.StorySegmentType
 import com.squareup.moshi.Moshi
@@ -29,6 +31,9 @@ object WorldArchiveSemanticRemapper {
     private val stringsAdapter = moshi.adapter<List<String>>(
         Types.newParameterizedType(List::class.java, String::class.java)
     )
+    private val extensionsAdapter = moshi.adapter<Map<String, Any?>>(
+        Types.newParameterizedType(Map::class.java, String::class.java, Any::class.java)
+    )
     private val knowledgeAdapter = moshi.adapter<Map<String, String>>(
         Types.newParameterizedType(Map::class.java, String::class.java, String::class.java)
     )
@@ -42,16 +47,34 @@ object WorldArchiveSemanticRemapper {
 
     fun rewrite(source: WorldArchiveStateV1, plan: WorldArchiveIdRemapPlan): RewrittenWorld {
         WorldArchiveStateCodec.validate(source)
-        // Opaque extension fields do not have a published reference schema. Passing old
-        // resource IDs through these fields would create silent broken links after import.
-        // Accept only empty extensions until an explicit typed extension migration exists.
-        fun unsupportedExtension(json: String?): Boolean =
-            json?.trim()?.let { it.isNotBlank() && it != "{}" && it != "null" } == true
-        require(source.characters.none { unsupportedExtension(it.extensionFieldsJson) } &&
-            source.personas.none { unsupportedExtension(it.extensionFieldsJson) } &&
-            source.npcDossiers.none { unsupportedExtension(it.extensionFieldsJson) } &&
-            source.npcLibraryEntries.none { unsupportedExtension(it.extensionFieldsJson) }) {
-            "World contains opaque extension data requiring a schema-aware reference migration"
+        // Only app-known extension keys have a documented reference contract.
+        // User-entered manual profile fields are plain authored text; the two
+        // Living Cast link keys below get explicit typed ID remapping.
+        fun extension(json: String?, label: String): Map<String, Any?> =
+            if (json.isNullOrBlank() || json == "null") emptyMap()
+            else decode(json, label, extensionsAdapter::fromJson)
+        fun checked(json: String?, label: String, allowed: Set<String>): Map<String, Any?> {
+            val fields = extension(json, label)
+            require(fields.keys.all { it in allowed }) {
+                "$label has unrecognized reference-bearing extension fields; " +
+                    "a type-aware migration is required."
+            }
+            return fields
+        }
+        source.characters.forEach {
+            checked(it.extensionFieldsJson, "Character extension",
+                setOf("elsewhere_manual_fields", "_elsewhere_promoted_npc_id"))
+        }
+        source.personas.forEach {
+            checked(it.extensionFieldsJson, "Persona extension",
+                setOf("elsewhere_manual_persona_fields"))
+        }
+        source.npcDossiers.forEach {
+            checked(it.extensionFieldsJson, "NPC extension",
+                setOf("_elsewhere_linked_character_id"))
+        }
+        source.npcLibraryEntries.forEach {
+            checked(it.extensionFieldsJson, "NPC Library extension", emptySet())
         }
         // A plan from another archive or namespace must never silently remap this one.
         require(WorldArchiveIdPlanner.plan(source, plan.namespace).mappings == plan.mappings) {
@@ -64,6 +87,40 @@ object WorldArchiveSemanticRemapper {
         fun keyedMap(json: String, label: String, kind: WorldArchiveIdKind): String {
             val original = decode(json, label, knowledgeAdapter::fromJson)
             return knowledgeAdapter.toJson(original.mapKeys { (old, _) -> id(kind, old) })
+        }
+        val sourceCharacterIds = source.characters.mapTo(mutableSetOf()) {
+            it.characterId
+        }
+        val sourceNpcIds = source.npcDossiers.mapTo(mutableSetOf()) { it.npcId }
+        fun characterExtension(row: CharacterEntity): String? {
+            val fields = checked(row.extensionFieldsJson, "Character extension",
+                setOf("elsewhere_manual_fields", "_elsewhere_promoted_npc_id")).toMutableMap()
+            val origin = fields.remove("_elsewhere_promoted_npc_id") as? String
+            if (origin == row.characterId && origin in sourceNpcIds) {
+                require(id(WorldArchiveIdKind.CHARACTER, origin) ==
+                    id(WorldArchiveIdKind.NPC_DOSSIER, origin)) {
+                    "Promoted Character/NPC imported identities must stay aligned."
+                }
+                fields["_elsewhere_promoted_npc_id"] =
+                    id(WorldArchiveIdKind.CHARACTER, origin)
+            }
+            return fields.takeIf { it.isNotEmpty() }?.let(extensionsAdapter::toJson)
+        }
+        fun npcExtension(row: NpcDossierEntity): String? {
+            val fields = checked(row.extensionFieldsJson, "NPC extension",
+                setOf("_elsewhere_linked_character_id")).toMutableMap()
+            if ("_elsewhere_linked_character_id" in fields) {
+                val linked = fields["_elsewhere_linked_character_id"] as? String
+                    ?: throw IllegalArgumentException(
+                        "Linked NPC Character reference must be a stable ID string."
+                    )
+                require(linked in sourceCharacterIds) {
+                    "Linked Character is missing from the selected World archive."
+                }
+                fields["_elsewhere_linked_character_id"] =
+                    id(WorldArchiveIdKind.CHARACTER, linked)
+            }
+            return fields.takeIf { it.isNotEmpty() }?.let(extensionsAdapter::toJson)
         }
         fun scenarioJson(json: String, scenarioId: String): String {
             val original = ScenarioCodec.decode(json)
@@ -119,10 +176,44 @@ object WorldArchiveSemanticRemapper {
             return id(resourceType, sourceId)
         }
 
+        // Remap typed fictional actors, never global-replace text or infer identity by name.
+        // Scenario NPC IDs are scenario-local and cannot be safely resolved from an actor
+        // without its owning Scenario; refuse those rather than silently mislink them.
+        fun storyActorId(kind: String, oldId: String, chatId: String): String =
+            when (kind) {
+                StoryActorKind.CHARACTER.name -> id(WorldArchiveIdKind.CHARACTER, oldId)
+                StoryActorKind.PERSONA.name -> id(WorldArchiveIdKind.PERSONA, oldId)
+                StoryActorKind.NPC.name -> id(WorldArchiveIdKind.NPC_DOSSIER, oldId)
+                StoryActorKind.WORLD_CAST.name -> id(WorldArchiveIdKind.WORLD_CAST, oldId)
+                StoryActorKind.NARRATOR.name -> {
+                    require(oldId == "narrator:$chatId") {
+                        "Cannot import an unknown narrator identity into another World"
+                    }
+                    "narrator:" + id(WorldArchiveIdKind.CHAT, chatId)
+                }
+                else -> throw IllegalArgumentException(
+                    "Story Memory actor type requires a typed World import migration"
+                )
+            }
+
+        fun sourceSpeakerId(memory: StoryMemoryEntity): String? =
+            memory.sourceSpeakerId?.let { old ->
+                when (memory.sourceSpeakerType) {
+                    SpeakerType.CHARACTER.name -> id(WorldArchiveIdKind.CHARACTER, old)
+                    SpeakerType.PERSONA.name -> id(WorldArchiveIdKind.PERSONA, old)
+                    SpeakerType.NARRATOR.name -> if (old == "narrator:${memory.chatId}") {
+                        "narrator:" + id(WorldArchiveIdKind.CHAT, memory.chatId)
+                    } else old
+                    else -> old
+                }
+            }
+
+        val storyMemoryChat = source.storyMemories.associate { it.memoryId to it.chatId }
         val freshWorldId = id(WorldArchiveIdKind.WORLD, source.worldId)
         val npcOwnerById = source.npcDossiers.associate { it.npcId to it.chatId }
         val oldNpcIds = npcOwnerById.keys
         val selectedChatIds = source.chats.map { it.chatId }.toSet()
+        val sourceMessageById = source.messages.associateBy { it.messageId }
         fun content(originalChat: String, raw: String): String {
             if (!StoryResponseCodec.isEncoded(raw)) return raw
             val response = requireNotNull(StoryResponseCodec.decode(raw)) {
@@ -224,7 +315,10 @@ object WorldArchiveSemanticRemapper {
                 )
             },
             characters = source.characters.map {
-                it.copy(characterId = id(WorldArchiveIdKind.CHARACTER, it.characterId))
+                it.copy(
+                    characterId = id(WorldArchiveIdKind.CHARACTER, it.characterId),
+                    extensionFieldsJson = characterExtension(it)
+                )
             },
             personas = source.personas.map {
                 it.copy(personaId = id(WorldArchiveIdKind.PERSONA, it.personaId))
@@ -282,6 +376,131 @@ object WorldArchiveSemanticRemapper {
                     sourceMessageId = optional(WorldArchiveIdKind.MESSAGE, it.sourceMessageId)
                 )
             },
+            // Restore the full, source-linked Story Memory graph. Neither a Wack nor a
+            // Character's knowledge is inferred or granted during this transform.
+            storyMemories = source.storyMemories.map { memory ->
+                memory.copy(
+                    memoryId = id(WorldArchiveIdKind.STORY_MEMORY, memory.memoryId),
+                    chatId = id(WorldArchiveIdKind.CHAT, memory.chatId),
+                    ownerId = id(WorldArchiveIdKind.CHAT, memory.ownerId),
+                    sourceMessageId = optional(WorldArchiveIdKind.MESSAGE, memory.sourceMessageId),
+                    sourceVariantGroupId = optional(
+                        WorldArchiveIdKind.VARIANT_GROUP, memory.sourceVariantGroupId
+                    ),
+                    sourceSpeakerId = sourceSpeakerId(memory),
+                    // A correctly sourced structured response can change encoded speaker IDs
+                    // during import. Only re-anchor its hash when the ORIGINAL hash was valid;
+                    // never resurrect stale knowledge invalidated by an edit or regeneration.
+                    sourceSha256 = memory.sourceSha256?.let { originalHash ->
+                        val oldSource = memory.sourceMessageId?.let { sourceMessageById[it] }
+                        if (oldSource != null && oldSource.isPrimaryVariant &&
+                            originalHash == StoryMemoryEligibilityPolicy.sha256(oldSource.content)) {
+                            StoryMemoryEligibilityPolicy.sha256(
+                                content(oldSource.chatId, oldSource.content)
+                            )
+                        } else originalHash
+                    },
+                    believedById = memory.believedById?.let { original ->
+                        storyActorId(requireNotNull(memory.believedByKind),
+                            original, memory.chatId)
+                    },
+                    previousStateMemoryId = optional(
+                        WorldArchiveIdKind.STORY_MEMORY, memory.previousStateMemoryId
+                    )
+                )
+            },
+            storyMemoryActors = source.storyMemoryActors.map { actor ->
+                val originalChat = requireNotNull(storyMemoryChat[actor.memoryId]) {
+                    "Story Memory actor lost its chat owner during import"
+                }
+                actor.copy(
+                    memoryId = id(WorldArchiveIdKind.STORY_MEMORY, actor.memoryId),
+                    actorId = storyActorId(actor.actorKind, actor.actorId, originalChat)
+                )
+            },
+            storyMemoryReturns = source.storyMemoryReturns.map {
+                it.copy(
+                    memoryId = id(WorldArchiveIdKind.STORY_MEMORY, it.memoryId),
+                    chatId = id(WorldArchiveIdKind.CHAT, it.chatId)
+                )
+            },
+            storyMemoryKnowledgeChanges = source.storyMemoryKnowledgeChanges.map {
+                it.copy(
+                    memoryId = id(WorldArchiveIdKind.STORY_MEMORY, it.memoryId),
+                    characterId = id(WorldArchiveIdKind.CHARACTER, it.characterId)
+                )
+            },
+            storyMemoryPerspectives = source.storyMemoryPerspectives.map {
+                it.copy(
+                    memoryId = id(WorldArchiveIdKind.STORY_MEMORY, it.memoryId),
+                    characterId = id(WorldArchiveIdKind.CHARACTER, it.characterId)
+                )
+            },
+            campaigns = source.campaigns.map { row ->
+                row.copy(
+                    campaignId = id(WorldArchiveIdKind.CAMPAIGN, row.campaignId),
+                    worldId = freshWorldId
+                )
+            },
+            campaignChapters = source.campaignChapters.map { row ->
+                row.copy(
+                    chapterId = id(WorldArchiveIdKind.CAMPAIGN_CHAPTER, row.chapterId),
+                    campaignId = id(WorldArchiveIdKind.CAMPAIGN, row.campaignId),
+                    chatId = id(WorldArchiveIdKind.CHAT, row.chatId)
+                )
+            },
+            campaignJournalEntries = source.campaignJournalEntries.map { row ->
+                row.copy(
+                    journalEntryId = id(WorldArchiveIdKind.CAMPAIGN_JOURNAL, row.journalEntryId),
+                    campaignId = id(WorldArchiveIdKind.CAMPAIGN, row.campaignId),
+                    chapterId = optional(WorldArchiveIdKind.CAMPAIGN_CHAPTER, row.chapterId),
+                    sourceChatId = optional(WorldArchiveIdKind.CHAT, row.sourceChatId),
+                    sourceMessageId = optional(WorldArchiveIdKind.MESSAGE, row.sourceMessageId),
+                    sourceVariantGroupId = optional(
+                        WorldArchiveIdKind.VARIANT_GROUP, row.sourceVariantGroupId
+                    ),
+                    // Structured response IDs can change on import. Re-hash only a
+                    // previously valid checkpoint; stale checkpoints stay stale.
+                    sourceContentSha256 = row.sourceContentSha256?.let { originalHash ->
+                        val sourceMessage = row.sourceMessageId?.let(sourceMessageById::get)
+                        if (sourceMessage != null &&
+                            originalHash == StoryMemoryEligibilityPolicy.sha256(sourceMessage.content)
+                        ) {
+                            StoryMemoryEligibilityPolicy.sha256(
+                                content(sourceMessage.chatId, sourceMessage.content)
+                            )
+                        } else originalHash
+                    }
+                )
+            },
+            campaignContinuityItems = source.campaignContinuityItems.map { row ->
+                row.copy(
+                    itemId = id(WorldArchiveIdKind.CAMPAIGN_CONTINUITY, row.itemId),
+                    campaignId = id(WorldArchiveIdKind.CAMPAIGN, row.campaignId),
+                    openedChapterId = optional(
+                        WorldArchiveIdKind.CAMPAIGN_CHAPTER, row.openedChapterId
+                    ),
+                    closedChapterId = optional(
+                        WorldArchiveIdKind.CAMPAIGN_CHAPTER, row.closedChapterId
+                    ),
+                    sourceJournalEntryId = optional(
+                        WorldArchiveIdKind.CAMPAIGN_JOURNAL, row.sourceJournalEntryId
+                    )
+                )
+            },
+            campaignMemoryShares = source.campaignMemoryShares.map { row ->
+                row.copy(
+                    campaignId = id(WorldArchiveIdKind.CAMPAIGN, row.campaignId),
+                    sourceChapterId = id(
+                        WorldArchiveIdKind.CAMPAIGN_CHAPTER, row.sourceChapterId
+                    ),
+                    sourceMemoryId = id(
+                        WorldArchiveIdKind.STORY_MEMORY, row.sourceMemoryId
+                    )
+                    // Digest stays attached to the same Story Memory content, not a
+                    // fabricated cross-Campaign grant. Source gates still apply.
+                )
+            },
             conversationSummaries = source.conversationSummaries.map {
                 it.copy(chatId = id(WorldArchiveIdKind.CHAT, it.chatId))
             },
@@ -323,6 +542,7 @@ object WorldArchiveSemanticRemapper {
                 it.copy(
                     npcId = id(WorldArchiveIdKind.NPC_DOSSIER, it.npcId),
                     chatId = id(WorldArchiveIdKind.CHAT, it.chatId),
+                    extensionFieldsJson = npcExtension(it),
                     personaRelationshipsJson = keyedMap(it.personaRelationshipsJson,
                         "NPC Persona relationships", WorldArchiveIdKind.PERSONA),
                     characterKnowledgeJson = keyedMap(it.characterKnowledgeJson,

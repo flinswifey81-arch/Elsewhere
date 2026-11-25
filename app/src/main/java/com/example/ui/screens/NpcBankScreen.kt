@@ -9,6 +9,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -141,6 +143,29 @@ class NpcBankViewModel(
         }.onFailure { notice(it.message ?: "NPC dossier or portrait could not be deleted.") }
     }
 
+    fun addExistingCharacterAsNpc(characterId: String) = viewModelScope.launch {
+        runCatching { repository.addExistingCharacterAsNpc(chatId, characterId) }
+            .onSuccess {
+                notice("Character linked as a supporting NPC in this chat. " +
+                    "Its identity stays reusable; this chat's NPC state stays private.")
+            }
+            .onFailure { notice(it.message ?: "Character could not join this NPC Bank.") }
+    }
+
+    fun promoteNpc(npcId: String) = viewModelScope.launch {
+        runCatching { repository.promoteNpcToCharacter(chatId, npcId) }
+            .onSuccess { outcome ->
+                notice(
+                    if (outcome.created) {
+                        "Character created with this NPC's same ID. Original NPC and RP remain intact."
+                    } else {
+                        "This Character is already linked. No duplicate was created."
+                    }
+                )
+            }
+            .onFailure { notice(it.message ?: "NPC could not become a Character.") }
+    }
+
     fun setKeepInScene(npcId: String, keep: Boolean) = viewModelScope.launch {
         runCatching { repository.setKeepInScene(npcId, keep) }
             .onFailure { notice(it.message ?: "NPC pin could not be changed.") }
@@ -201,12 +226,21 @@ fun NpcBankScreen(
         factory = NpcBankViewModel.Factory(chatId, repository, profileImageRepository)
     )
     val state by viewModel.uiState.collectAsState()
+    val promotedCharacterIds by repository.observePromotedCharacterIds().collectAsState(
+        initial = emptySet()
+    )
+    val reusableCharacters by repository.observeReusableCharacters().collectAsState(
+        initial = emptyList()
+    )
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var editing by remember { mutableStateOf<NpcDossier?>(null) }
     var showPaste by remember { mutableStateOf(false) }
     var pasteText by remember { mutableStateOf("") }
     var deleteTarget by remember { mutableStateOf<NpcDossier?>(null) }
+    var promoteTarget by remember { mutableStateOf<NpcDossier?>(null) }
+    var chooseExistingCharacter by remember { mutableStateOf(false) }
+    var characterSearch by remember { mutableStateOf("") }
     var showExportOptions by remember { mutableStateOf(false) }
     var showLibrary by remember { mutableStateOf(false) }
     var libraryImportJson by remember { mutableStateOf("") }
@@ -309,6 +343,11 @@ fun NpcBankScreen(
                 }
                 OutlinedButton(onClick = { showLibrary = true }) { Text("Library") }
             }
+            OutlinedButton(
+                onClick = { chooseExistingCharacter = true; characterSearch = "" },
+                enabled = reusableCharacters.isNotEmpty(),
+                modifier = Modifier.testTag("add_existing_character_as_npc")
+            ) { Text("Add existing Character as NPC") }
             state.notice?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary) }
             if (!state.isEnabled) {
                 Text("NPC discovery and context injection are disabled for this chat. Existing dossiers remain local and editable.")
@@ -372,6 +411,26 @@ fun NpcBankScreen(
                                         modifier = Modifier.testTag("npc_scene_${dossier.npcId}_${mode.name}")
                                     )
                                 }
+                            }
+                            if (dossier.linkedCharacterId != null) {
+                                val linked = reusableCharacters.firstOrNull {
+                                    it.characterId == dossier.linkedCharacterId
+                                }
+                                Text(
+                                    if (linked != null) "Character link: ${linked.displayName} (chat-local NPC role)"
+                                    else "Linked Character missing — edit this NPC to retain its chat-local details",
+                                    style = MaterialTheme.typography.labelSmall
+                                )
+                            } else if (dossier.npcId in promotedCharacterIds) {
+                                Text(
+                                    "Linked Character · same stable identity",
+                                    style = MaterialTheme.typography.labelSmall
+                                )
+                            } else {
+                                OutlinedButton(
+                                    onClick = { promoteTarget = dossier },
+                                    modifier = Modifier.testTag("promote_npc_${dossier.npcId}")
+                                ) { Text("Make Character from NPC") }
                             }
                             if (dossier.relationshipToPersona.isNotBlank()) Text("Relationship: ${dossier.relationshipToPersona}")
                             if (dossier.goals.isNotBlank()) Text("Goals: ${dossier.goals}")
@@ -452,6 +511,82 @@ fun NpcBankScreen(
             onImport = viewModel::importLibrary,
             onSaveChat = viewModel::saveChatToLibrary,
             onAdd = viewModel::addFromLibrary
+        )
+    }
+    if (chooseExistingCharacter) {
+        val candidates = reusableCharacters.filter {
+            it.displayName.contains(characterSearch, ignoreCase = true)
+        }.sortedBy { it.displayName.lowercase() }
+        AlertDialog(
+            onDismissRequest = { chooseExistingCharacter = false },
+            title = { Text("Add Character as a supporting NPC") },
+            text = {
+                Column(
+                    Modifier.heightIn(max = 380.dp)
+                        .verticalScroll(androidx.compose.foundation.rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        "Links the existing Character's identity without duplicating " +
+                            "the card or copying other chat memories, relationships " +
+                            "or secrets. Scene presence and NPC updates stay in this chat."
+                    )
+                    OutlinedTextField(
+                        value = characterSearch,
+                        onValueChange = { characterSearch = it.take(100) },
+                        label = { Text("Find Character") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    candidates.take(30).forEach { character ->
+                        TextButton(
+                            onClick = {
+                                viewModel.addExistingCharacterAsNpc(character.characterId)
+                                chooseExistingCharacter = false
+                            },
+                            modifier = Modifier.fillMaxWidth().testTag(
+                                "link_existing_character_${character.characterId}"
+                            )
+                        ) { Text(character.displayName) }
+                    }
+                    if (candidates.isEmpty()) Text("No matching Character cards.")
+                    if (candidates.size > 30) {
+                        Text("Showing first 30 matches. Refine the search for more.")
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { chooseExistingCharacter = false }) { Text("Cancel") }
+            }
+        )
+    }
+    promoteTarget?.let { dossier ->
+        AlertDialog(
+            onDismissRequest = { promoteTarget = null },
+            title = { Text("Make ${dossier.displayName} a Character?") },
+            text = {
+                Text(
+                    "Create a reusable Character card using this NPC's SAME stable ID. " +
+                        "The original NPC, chat messages, selected variants and story memory " +
+                        "stay exactly where they are. Appearance, personality, role and goals " +
+                        "become a Character baseline. Story-specific relationships, " +
+                        "private notes, secrets and NPC knowledge do NOT become global " +
+                        "Character knowledge. Solo and Group chats can switch the " +
+                        "spotlight to this Character without starting a new chat."
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.promoteNpc(dossier.npcId)
+                        promoteTarget = null
+                    },
+                    modifier = Modifier.testTag("confirm_promote_npc")
+                ) { Text("Create linked Character") }
+            },
+            dismissButton = {
+                TextButton(onClick = { promoteTarget = null }) { Text("Cancel") }
+            }
         )
     }
     deleteTarget?.let { dossier ->

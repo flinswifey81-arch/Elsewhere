@@ -28,6 +28,7 @@ import com.example.data.model.LorebookEntryEntity
 import com.example.data.model.LorebookWithEntries
 import com.example.domain.repository.LorebookImportMode
 import com.example.domain.repository.LorebookImportPreview
+import com.example.domain.repository.LorebookDuplicateIdException
 import com.example.domain.repository.LorebookRepository
 import com.example.domain.repository.LorebookValidationException
 import com.example.ui.components.ProfileLibraryActions
@@ -57,11 +58,19 @@ fun LorebooksScreen(
     var pasteJson by remember { mutableStateOf("") }
     var pendingImportJson by remember { mutableStateOf<String?>(null) }
     var importPreview by remember { mutableStateOf<LorebookImportPreview?>(null) }
+    var confirmLorebookReplace by remember { mutableStateOf(false) }
     var pendingDelete by remember { mutableStateOf<LorebookEntity?>(null) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var noticeMessage by remember { mutableStateOf<String?>(null) }
     var pendingExportJson by remember { mutableStateOf<String?>(null) }
     var batchImportSummary by remember { mutableStateOf<BatchImportSummary?>(null) }
+    var pendingBatchDuplicates by remember {
+        mutableStateOf<List<PendingSameIdJson>>(emptyList())
+    }
+    var completedBatchImports by remember {
+        mutableStateOf<List<BatchImportResult>>(emptyList())
+    }
+    var importing by remember { mutableStateOf(false) }
 
     fun previewJson(json: String) {
         scope.launch {
@@ -77,6 +86,32 @@ fun LorebooksScreen(
         }
     }
 
+    fun finishBatchDuplicate(result: BatchImportResult) {
+        val allResults = completedBatchImports + result
+        val remaining = pendingBatchDuplicates.drop(1)
+        completedBatchImports = allResults
+        pendingBatchDuplicates = remaining
+        pendingImportJson = null
+        importPreview = null
+        confirmLorebookReplace = false
+        if (remaining.isEmpty()) {
+            batchImportSummary = BatchImportSummary(allResults)
+            completedBatchImports = emptyList()
+        } else {
+            previewJson(remaining.first().json)
+        }
+    }
+
+    fun dismissImportPreview() {
+        val duplicate = pendingBatchDuplicates.firstOrNull()
+        if (duplicate != null) {
+            finishBatchDuplicate(BatchImportResult(duplicate.fileName, skipped = true))
+        } else {
+            importPreview = null
+            pendingImportJson = null
+        }
+    }
+
     val importFileLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris: List<Uri> ->
         if (uris.isNotEmpty()) {
             scope.launch {
@@ -87,12 +122,33 @@ fun LorebooksScreen(
                         errorMessage = error.message ?: "Unable to read the selected file."
                     }
                 } else {
-                    batchImportSummary = importJsonDocuments(
-                        context = context,
-                        uris = uris,
-                        reader = { readBoundedLorebookJson(context, it) }
-                    ) { json ->
-                        repository.importJson(json, LorebookImportMode.REJECT_DUPLICATE)
+                    importing = true
+                    try {
+                        val batch = stageDuplicateJsonImports(
+                            items = uris,
+                            nameOf = { documentDisplayName(context, it) },
+                            read = { readBoundedLorebookJson(context, it) },
+                            importer = { json ->
+                                val preview = repository.previewImport(json)
+                                if (preview.duplicateLorebookId) {
+                                    throw LorebookDuplicateIdException(preview.lorebook.lorebookId)
+                                }
+                                repository.importJson(json, LorebookImportMode.REJECT_DUPLICATE)
+                            },
+                            duplicateId = { (it as? LorebookDuplicateIdException)?.duplicateId }
+                        )
+                        completedBatchImports = batch.completed
+                        pendingBatchDuplicates = batch.duplicates
+                        if (batch.duplicates.isEmpty()) {
+                            batchImportSummary = BatchImportSummary(batch.completed)
+                            completedBatchImports = emptyList()
+                        } else {
+                            previewJson(batch.duplicates.first().json)
+                        }
+                    } catch (failure: Exception) {
+                        errorMessage = failure.message ?: "Unable to import the selected Lorebooks."
+                    } finally {
+                        importing = false
                     }
                 }
             }
@@ -222,13 +278,10 @@ fun LorebooksScreen(
         )
     }
 
-    importPreview?.let { preview ->
+    if (!confirmLorebookReplace) importPreview?.let { preview ->
         val json = pendingImportJson
         AlertDialog(
-            onDismissRequest = {
-                importPreview = null
-                pendingImportJson = null
-            },
+            onDismissRequest = { if (!importing) dismissImportPreview() },
             title = { Text("Import Preview") },
             text = {
                 Column(
@@ -283,53 +336,131 @@ fun LorebooksScreen(
             confirmButton = {
                 Row {
                     if (preview.duplicateLorebookId || preview.conflictingEntryIds.isNotEmpty()) {
-                        TextButton(onClick = {
-                            if (json != null) {
-                                scope.launch {
-                                    runCatching { repository.importJson(json, LorebookImportMode.IMPORT_AS_NEW_COPY) }
-                                        .onSuccess { noticeMessage = "Imported as a new copy." }
-                                        .onFailure { errorMessage = it.message ?: "Import failed." }
-                                    importPreview = null
-                                    pendingImportJson = null
+                        TextButton(
+                            enabled = !importing,
+                            onClick = {
+                                if (json != null) scope.launch {
+                                    importing = true
+                                    val result = runCatching {
+                                        repository.importJson(json, LorebookImportMode.IMPORT_AS_NEW_COPY)
+                                    }
+                                    val queued = pendingBatchDuplicates.firstOrNull()
+                                    if (queued != null) {
+                                        finishBatchDuplicate(BatchImportResult(
+                                            queued.fileName,
+                                            error = result.exceptionOrNull()?.message
+                                        ))
+                                    } else {
+                                        result.onSuccess { noticeMessage = "Imported as a new copy." }
+                                            .onFailure {
+                                                errorMessage = it.message ?: "Import failed."
+                                            }
+                                        importPreview = null
+                                        pendingImportJson = null
+                                    }
+                                    importing = false
                                 }
                             }
-                        }) { Text("New Copy") }
+                        ) { Text("New Copy") }
                         if (preview.duplicateLorebookId && preview.conflictingEntryIds.isEmpty()) {
                             TextButton(
                                 onClick = {
-                                    if (json != null) {
-                                        scope.launch {
-                                            runCatching { repository.importJson(json, LorebookImportMode.REPLACE_EXISTING) }
-                                                .onSuccess { noticeMessage = "Existing Lorebook replaced." }
-                                                .onFailure { errorMessage = it.message ?: "Import failed." }
-                                            importPreview = null
-                                            pendingImportJson = null
-                                        }
-                                    }
+                                    if (json != null && !importing) confirmLorebookReplace = true
                                 },
+                                enabled = !importing,
                                 colors = elsewhereDestructiveButtonColors()
-                            ) { Text("Replace") }
+                            ) { Text("Review Replacement") }
                         }
                     } else {
-                        TextButton(onClick = {
-                            if (json != null) {
-                                scope.launch {
-                                    runCatching { repository.importJson(json, LorebookImportMode.REJECT_DUPLICATE) }
-                                        .onSuccess { noticeMessage = "Lorebook imported." }
-                                        .onFailure { errorMessage = it.message ?: "Import failed." }
-                                    importPreview = null
-                                    pendingImportJson = null
+                        TextButton(
+                            enabled = !importing,
+                            onClick = {
+                                if (json != null) scope.launch {
+                                    importing = true
+                                    val result = runCatching {
+                                        repository.importJson(json, LorebookImportMode.REJECT_DUPLICATE)
+                                    }
+                                    val queued = pendingBatchDuplicates.firstOrNull()
+                                    if (queued != null) {
+                                        finishBatchDuplicate(BatchImportResult(
+                                            queued.fileName,
+                                            error = result.exceptionOrNull()?.message
+                                        ))
+                                    } else {
+                                        result.onSuccess { noticeMessage = "Lorebook imported." }
+                                            .onFailure { errorMessage = it.message ?: "Import failed." }
+                                        importPreview = null
+                                        pendingImportJson = null
+                                    }
+                                    importing = false
                                 }
                             }
-                        }) { Text("Import") }
+                        ) { Text("Import") }
                     }
                 }
             },
             dismissButton = {
-                TextButton(onClick = {
-                    importPreview = null
-                    pendingImportJson = null
-                }) { Text("Cancel") }
+                TextButton(
+                    enabled = !importing,
+                    onClick = { dismissImportPreview() }
+                ) { Text(if (pendingBatchDuplicates.isEmpty()) "Cancel" else "Keep existing") }
+            }
+        )
+    }
+
+    if (confirmLorebookReplace) {
+        val preview = importPreview
+        val json = pendingImportJson
+        AlertDialog(
+            onDismissRequest = { if (!importing) confirmLorebookReplace = false },
+            title = { Text("Replace existing Lorebook JSON?") },
+            text = {
+                Text(
+                    "The saved Lorebook with ID ${preview?.lorebook?.lorebookId.orEmpty()} " +
+                        "will be updated in place. Its existing chat attachments, " +
+                        "matching entry IDs and their chat-specific overrides are preserved. " +
+                        "Entries omitted from the replacement JSON—and their overrides—" +
+                        "will be removed. No chat messages will be deleted. " +
+                        "This cannot be undone without your own backup."
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    modifier = Modifier.testTag("confirm_replace_lorebook_json"),
+                    enabled = !importing,
+                    onClick = {
+                        if (preview != null && json != null && !importing) scope.launch {
+                            importing = true
+                            val result = runCatching {
+                                repository.importJson(json, LorebookImportMode.REPLACE_EXISTING)
+                            }
+                            val queued = pendingBatchDuplicates.firstOrNull()
+                            if (queued != null) {
+                                finishBatchDuplicate(BatchImportResult(
+                                    queued.fileName,
+                                    error = result.exceptionOrNull()?.message,
+                                    updated = result.isSuccess
+                                ))
+                            } else {
+                                result.onSuccess {
+                                    noticeMessage = "Existing Lorebook JSON updated without removing chat attachments."
+                                    importPreview = null
+                                    pendingImportJson = null
+                                }.onFailure {
+                                    errorMessage = it.message ?: "Lorebook update failed."
+                                }
+                            }
+                            confirmLorebookReplace = false
+                            importing = false
+                        }
+                    }
+                ) { Text(if (importing) "Updating…" else "Replace Lorebook JSON") }
+            },
+            dismissButton = {
+                TextButton(
+                    enabled = !importing,
+                    onClick = { confirmLorebookReplace = false }
+                ) { Text("Back to preview") }
             }
         )
     }

@@ -22,6 +22,10 @@ interface ScenarioDao {
     suspend fun session(chatId: String): ScenarioSessionEntity?
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insertSession(session: ScenarioSessionEntity)
+
+    /** Only the active chat's frozen snapshot changes, never the Scenario template. */
+    @Query("UPDATE scenario_sessions SET definitionJson = :definitionJson WHERE chatId = :chatId")
+    suspend fun updateSessionDefinition(chatId: String, definitionJson: String): Int
     @Query("SELECT * FROM scenario_sessions ORDER BY chatId")
     suspend fun sessions(): List<ScenarioSessionEntity>
     @Query("DELETE FROM scenario_sessions")

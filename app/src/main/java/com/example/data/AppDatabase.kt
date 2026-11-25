@@ -7,7 +7,7 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.example.data.model.*
 
-const val APP_DATABASE_VERSION = 15
+const val APP_DATABASE_VERSION = 26
 
 @Database(
     entities = [
@@ -17,10 +17,16 @@ const val APP_DATABASE_VERSION = 15
         ChatParticipantEntity::class,
         ChatPersonaParticipantEntity::class,
         MessageEntity::class,
+        MessageSearchFtsEntity::class,
         RelationshipEntity::class,
         ChatSettingsEntity::class,
         GenerationMetadataEntity::class,
         RoleplayMemoryEntity::class,
+        StoryMemoryEntity::class,
+        StoryMemoryActorEntity::class,
+        StoryMemoryReturnEntity::class,
+        StoryMemoryKnowledgeChangeEntity::class,
+        StoryMemoryPerspectiveEntity::class,
         ConversationSummaryEntity::class,
         LorebookEntity::class,
         LorebookEntryEntity::class,
@@ -43,7 +49,12 @@ const val APP_DATABASE_VERSION = 15
         WorldEntity::class,
         WorldMembershipEntity::class,
         WorldCastEntity::class,
-        WorldContinuityEventEntity::class
+        WorldContinuityEventEntity::class,
+        CampaignEntity::class,
+        CampaignChapterEntity::class,
+        CampaignJournalEntryEntity::class,
+        CampaignContinuityItemEntity::class,
+        CampaignMemoryShareEntity::class
     ],
     version = APP_DATABASE_VERSION,
     exportSchema = false
@@ -55,6 +66,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun chatDao(): ChatDao
     abstract fun messageDao(): MessageDao
     abstract fun memoryDao(): MemoryDao
+    abstract fun storyMemoryDao(): StoryMemoryDao
     abstract fun lorebookDao(): LorebookDao
     abstract fun coopDao(): CoopDao
     abstract fun messageAttachmentDao(): MessageAttachmentDao
@@ -62,8 +74,304 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun scenarioDao(): ScenarioDao
     abstract fun backupDao(): BackupDao
     abstract fun worldDao(): WorldDao
+    abstract fun campaignDao(): CampaignDao
 
     companion object {
+        /**
+         * Stage 2 local historical search index. Additive only: the existing
+         * messages/variants stay untouched. Existing messages are indexed once
+         * during migration; Room owns the content-sync triggers afterwards.
+         * External-content FTS avoids duplicating the transcript itself.
+         */
+        val MIGRATION_25_26 = object : Migration(25, 26) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE VIRTUAL TABLE IF NOT EXISTS `messages_search_fts`
+                    USING FTS4(`content` TEXT, content=`messages`, tokenize=unicode61)
+                """.trimIndent())
+                db.execSQL(
+                    "INSERT INTO `messages_search_fts`(`messages_search_fts`) VALUES('rebuild')"
+                )
+            }
+        }
+
+        /** Explicit Campaign memory pointers; no existing Story Memory is copied or rewritten. */
+        val MIGRATION_24_25 = object : Migration(24, 25) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS campaign_memory_shares (
+                        campaignId TEXT NOT NULL,
+                        sourceMemoryId TEXT NOT NULL,
+                        sourceChapterId TEXT NOT NULL,
+                        sourceContentSha256 TEXT NOT NULL,
+                        approvedAt INTEGER NOT NULL,
+                        PRIMARY KEY(campaignId, sourceMemoryId),
+                        FOREIGN KEY(campaignId) REFERENCES campaigns(campaignId)
+                            ON UPDATE NO ACTION ON DELETE CASCADE,
+                        FOREIGN KEY(sourceMemoryId) REFERENCES story_memories(memoryId)
+                            ON UPDATE NO ACTION ON DELETE CASCADE,
+                        FOREIGN KEY(sourceChapterId) REFERENCES campaign_chapters(chapterId)
+                            ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_campaign_memory_shares_sourceMemoryId ON campaign_memory_shares(sourceMemoryId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_campaign_memory_shares_sourceChapterId ON campaign_memory_shares(sourceChapterId)")
+            }
+        }
+
+        /** Stage 5: additive arcs / promises / threads; no chat mutation. */
+        val MIGRATION_23_24 = object : Migration(23, 24) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS campaign_continuity_items (
+                        itemId TEXT NOT NULL PRIMARY KEY,
+                        campaignId TEXT NOT NULL,
+                        itemType TEXT NOT NULL,
+                        title TEXT NOT NULL,
+                        details TEXT NOT NULL,
+                        status TEXT NOT NULL,
+                        resolution TEXT NOT NULL,
+                        openedChapterId TEXT,
+                        closedChapterId TEXT,
+                        sourceJournalEntryId TEXT,
+                        createdAt INTEGER NOT NULL,
+                        updatedAt INTEGER NOT NULL,
+                        FOREIGN KEY(campaignId) REFERENCES campaigns(campaignId)
+                            ON UPDATE NO ACTION ON DELETE CASCADE,
+                        FOREIGN KEY(openedChapterId) REFERENCES campaign_chapters(chapterId)
+                            ON UPDATE NO ACTION ON DELETE SET NULL,
+                        FOREIGN KEY(closedChapterId) REFERENCES campaign_chapters(chapterId)
+                            ON UPDATE NO ACTION ON DELETE SET NULL,
+                        FOREIGN KEY(sourceJournalEntryId) REFERENCES campaign_journal_entries(journalEntryId)
+                            ON UPDATE NO ACTION ON DELETE SET NULL
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_campaign_continuity_items_campaignId ON campaign_continuity_items(campaignId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_campaign_continuity_items_openedChapterId ON campaign_continuity_items(openedChapterId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_campaign_continuity_items_closedChapterId ON campaign_continuity_items(closedChapterId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_campaign_continuity_items_sourceJournalEntryId ON campaign_continuity_items(sourceJournalEntryId)")
+            }
+        }
+
+        /** Additive private journal/checkpoint storage. No existing story rows are rewritten. */
+        val MIGRATION_22_23 = object : Migration(22, 23) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS campaign_journal_entries (
+                        journalEntryId TEXT NOT NULL PRIMARY KEY,
+                        campaignId TEXT NOT NULL,
+                        chapterId TEXT,
+                        sourceChatId TEXT,
+                        sourceMessageId TEXT,
+                        sourceVariantGroupId TEXT,
+                        sourceOrderIndex INTEGER,
+                        sourceContentSha256 TEXT,
+                        entryType TEXT NOT NULL,
+                        title TEXT NOT NULL,
+                        body TEXT NOT NULL,
+                        createdAt INTEGER NOT NULL,
+                        updatedAt INTEGER NOT NULL,
+                        FOREIGN KEY(campaignId) REFERENCES campaigns(campaignId)
+                            ON UPDATE NO ACTION ON DELETE CASCADE,
+                        FOREIGN KEY(chapterId) REFERENCES campaign_chapters(chapterId)
+                            ON UPDATE NO ACTION ON DELETE SET NULL,
+                        FOREIGN KEY(sourceMessageId) REFERENCES messages(messageId)
+                            ON UPDATE NO ACTION ON DELETE SET NULL
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_campaign_journal_entries_campaignId ON campaign_journal_entries(campaignId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_campaign_journal_entries_chapterId ON campaign_journal_entries(chapterId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_campaign_journal_entries_sourceMessageId ON campaign_journal_entries(sourceMessageId)")
+            }
+        }
+
+        /** Private Campaign records and chapter links; never rewrite existing chats. */
+        val MIGRATION_21_22 = object : Migration(21, 22) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS campaigns (
+                        campaignId TEXT NOT NULL PRIMARY KEY,
+                        worldId TEXT NOT NULL,
+                        title TEXT NOT NULL,
+                        summary TEXT NOT NULL,
+                        createdAt INTEGER NOT NULL,
+                        updatedAt INTEGER NOT NULL,
+                        FOREIGN KEY(worldId) REFERENCES worlds(worldId)
+                            ON UPDATE NO ACTION ON DELETE RESTRICT
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_campaigns_worldId ON campaigns(worldId)")
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS campaign_chapters (
+                        chapterId TEXT NOT NULL PRIMARY KEY,
+                        campaignId TEXT NOT NULL,
+                        chatId TEXT NOT NULL,
+                        ordinal INTEGER NOT NULL,
+                        title TEXT NOT NULL,
+                        recap TEXT NOT NULL,
+                        state TEXT NOT NULL,
+                        createdAt INTEGER NOT NULL,
+                        updatedAt INTEGER NOT NULL,
+                        FOREIGN KEY(campaignId) REFERENCES campaigns(campaignId)
+                            ON UPDATE NO ACTION ON DELETE CASCADE,
+                        FOREIGN KEY(chatId) REFERENCES chats(chatId)
+                            ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_campaign_chapters_campaignId ON campaign_chapters(campaignId)")
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_campaign_chapters_chatId ON campaign_chapters(chatId)")
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_campaign_chapters_campaignId_ordinal ON campaign_chapters(campaignId, ordinal)")
+            }
+        }
+
+        /**
+         * Append-only per-Character fictional perspectives. Existing KNOWS
+         * permissions remain unchanged, and old chats acquire no invented states.
+         */
+        val MIGRATION_20_21 = object : Migration(20, 21) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS story_memory_perspectives (
+                        memoryId TEXT NOT NULL,
+                        characterId TEXT NOT NULL,
+                        revision INTEGER NOT NULL,
+                        stance TEXT NOT NULL,
+                        contentSha256 TEXT NOT NULL,
+                        note TEXT,
+                        latestMessageOrderIndex INTEGER,
+                        wackBoundaryOrderIndex INTEGER,
+                        recordedAtEpochMillis INTEGER NOT NULL,
+                        PRIMARY KEY(memoryId, characterId, revision),
+                        FOREIGN KEY(memoryId) REFERENCES story_memories(memoryId)
+                            ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                """.trimIndent())
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_story_memory_perspectives_characterId " +
+                        "ON story_memory_perspectives(characterId)"
+                )
+            }
+        }
+
+        /**
+         * Append-only explicit knowledge assignments. Existing KNOWS rows
+         * retain their exact current behavior; no historic state is invented.
+         */
+        val MIGRATION_19_20 = object : Migration(19, 20) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS story_memory_knowledge_changes (
+                        memoryId TEXT NOT NULL,
+                        revision INTEGER NOT NULL,
+                        characterId TEXT NOT NULL,
+                        change TEXT NOT NULL,
+                        latestMessageOrderIndex INTEGER,
+                        wackBoundaryOrderIndex INTEGER,
+                        recordedAtEpochMillis INTEGER NOT NULL,
+                        PRIMARY KEY(memoryId, revision, characterId),
+                        FOREIGN KEY(memoryId) REFERENCES story_memories(memoryId)
+                            ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                """.trimIndent())
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_story_memory_knowledge_changes_characterId " +
+                        "ON story_memory_knowledge_changes(characterId)"
+                )
+            }
+        }
+
+        /** Append-only memory-state metadata. Existing memories keep NULL lineage. */
+        val MIGRATION_18_19 = object : Migration(18, 19) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE story_memories ADD COLUMN previousStateMemoryId TEXT")
+                db.execSQL("ALTER TABLE story_memories ADD COLUMN promiseOutcome TEXT")
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_story_memories_previousStateMemoryId " +
+                        "ON story_memories(previousStateMemoryId)"
+                )
+            }
+        }
+
+        /** Additive index for bounded selected-turn chronology; preserves all variants. */
+        val MIGRATION_17_18 = object : Migration(17, 18) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_messages_chatId_isPrimaryVariant_orderIndex " +
+                        "ON messages(chatId, isPrimaryVariant, orderIndex)"
+                )
+            }
+        }
+
+        /** Additive performance-only index. No table rebuilds or record rewrites. */
+        val MIGRATION_16_17 = object : Migration(16, 17) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_messages_chatId_variantGroupId " +
+                        "ON messages(chatId, variantGroupId)"
+                )
+            }
+        }
+
+        val MIGRATION_15_16 = object : Migration(15, 16) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Additive only. Never mutate old roleplay_memories or summaries.
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS story_memories (
+                        memoryId TEXT NOT NULL PRIMARY KEY,
+                        chatId TEXT NOT NULL,
+                        ownerId TEXT NOT NULL,
+                        scope TEXT NOT NULL,
+                        branchId TEXT,
+                        content TEXT NOT NULL,
+                        claim TEXT NOT NULL,
+                        visibility TEXT NOT NULL,
+                        review TEXT NOT NULL,
+                        lifecycle TEXT NOT NULL,
+                        hidden INTEGER NOT NULL,
+                        pinned INTEGER NOT NULL,
+                        originKind TEXT NOT NULL,
+                        sourceMessageId TEXT,
+                        sourceVariantGroupId TEXT,
+                        sourceOrderIndex INTEGER NOT NULL,
+                        sourceSpeakerType TEXT,
+                        sourceSpeakerId TEXT,
+                        sourceCreatedAtEpochMillis INTEGER,
+                        sourceSha256 TEXT,
+                        believedByKind TEXT,
+                        believedById TEXT,
+                        createdAtEpochMillis INTEGER NOT NULL,
+                        updatedAtEpochMillis INTEGER NOT NULL,
+                        userEditedAt INTEGER,
+                        FOREIGN KEY(chatId) REFERENCES chats(chatId) ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_story_memories_chatId ON story_memories(chatId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_story_memories_sourceMessageId ON story_memories(sourceMessageId)")
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS story_memory_actors (
+                        memoryId TEXT NOT NULL,
+                        actorKind TEXT NOT NULL,
+                        actorId TEXT NOT NULL,
+                        relation TEXT NOT NULL,
+                        PRIMARY KEY(memoryId, actorKind, actorId, relation),
+                        FOREIGN KEY(memoryId) REFERENCES story_memories(memoryId) ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                """.trimIndent())
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS story_memory_returns (
+                        memoryId TEXT NOT NULL,
+                        resetBoundaryOrderIndex INTEGER NOT NULL,
+                        chatId TEXT NOT NULL,
+                        branchId TEXT,
+                        approvedAtOrderIndex INTEGER NOT NULL,
+                        initiatedByUser INTEGER NOT NULL,
+                        PRIMARY KEY(memoryId, resetBoundaryOrderIndex),
+                        FOREIGN KEY(memoryId) REFERENCES story_memories(memoryId) ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                """.trimIndent())
+            }
+        }
+
         val MIGRATION_14_15 = object : Migration(14, 15) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE worlds ADD COLUMN linksJson TEXT NOT NULL DEFAULT '{\"cast_roles\":[],\"relationships\":[]}'")

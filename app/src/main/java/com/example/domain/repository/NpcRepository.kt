@@ -4,6 +4,9 @@ import androidx.room.withTransaction
 import com.example.data.AppDatabase
 import com.example.data.model.MessageEntity
 import com.example.data.model.GenerationMetadataEntity
+import com.example.data.model.CharacterEntity
+import com.example.data.model.ChatType
+import com.example.data.model.ManualCharacterFieldsCodec
 import com.example.data.model.NpcBankSettingsEntity
 import com.example.data.model.NpcDossier
 import com.example.data.model.NpcDossierEntity
@@ -15,6 +18,8 @@ import com.example.data.model.NpcLibraryBankEntity
 import com.example.data.model.NpcLibraryEntryEntity
 import com.example.domain.npc.NpcStructuredUpdate
 import com.example.domain.npc.NpcStructuredOutputParser
+import com.example.domain.npc.NpcProseDiscovery
+import com.example.data.model.SpeakerType
 import com.example.domain.story.StoryResponseCodec
 import com.example.domain.story.StorySegmentType
 import com.squareup.moshi.Json
@@ -26,9 +31,12 @@ import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 
 enum class NpcImportCollisionMode { IMPORT_AS_NEW, REPLACE_EXISTING }
+
+data class NpcPromotionResult(val characterId: String, val created: Boolean, val attachedToChat: Boolean)
 
 data class NpcUpdateApplyReport(val skippedReasons: List<String> = emptyList()) {
     fun warning(kind: String): String? = skippedReasons.takeIf { it.isNotEmpty() }?.let { reasons ->
@@ -71,7 +79,8 @@ data class NpcLibraryBank(val bank: NpcLibraryBankEntity, val entries: List<NpcL
 class NpcRepository(
     private val database: AppDatabase,
     private val moshi: Moshi,
-    private val dataCoordinator: AppDataMaintenanceCoordinator = AppDataMaintenanceCoordinator.Global
+    private val dataCoordinator: AppDataMaintenanceCoordinator = AppDataMaintenanceCoordinator.Global,
+    private val profileImageRepository: ProfileImageRepository? = null
 ) {
     private val dao get() = database.npcDao()
     private val messageDao get() = database.messageDao()
@@ -91,6 +100,199 @@ class NpcRepository(
     fun observeSettings(chatId: String): Flow<NpcBankSettingsEntity?> = dao.observeSettings(chatId)
 
     fun observeLibraryBanks(): Flow<List<NpcLibraryBankEntity>> = dao.observeLibraryBanks()
+
+    fun observeReusableCharacters(): Flow<List<CharacterEntity>> =
+        database.characterDao().getAllCharacters()
+
+    /** Internal per-chat NPC role link; not exported as independent NPC canon. */
+    private fun linkedCharacterId(base: NpcDossierEntity): String? =
+        base.extensionFieldsJson?.let { json ->
+            runCatching { mapAdapter.fromJson(json) }.getOrNull()
+        }?.get("_elsewhere_linked_character_id") as? String
+
+    /**
+     * One existing Character can appear in many independent RP chats, each
+     * with a DIFFERENT chat-local NPC dossier. They share authored identity,
+     * not chat memories, variant state, relationships, or discovered secrets.
+     * Idempotent per (chat, Character ID). No model/API request.
+     */
+    suspend fun addExistingCharacterAsNpc(chatId: String, characterId: String): String =
+        dataCoordinator.withMutation {
+            withContext(Dispatchers.IO) {
+                val result = database.withTransaction {
+                    val chat = requireNotNull(database.chatDao().getChatById(chatId)) {
+                        "The chat no longer exists."
+                    }
+                    val character = requireNotNull(
+                        database.characterDao().getCharacterById(characterId)
+                    ) { "The linked Character no longer exists." }
+                    require(!character.isArchived) {
+                        "Archived Characters cannot be linked into an active NPC Bank."
+                    }
+                    val existing = dao.getDossiers(chatId).firstOrNull { dossier ->
+                        linkedCharacterId(dossier) == characterId ||
+                            (dossier.npcId == characterId &&
+                                character.extensionFieldsJson?.let { ext ->
+                                    runCatching { mapAdapter.fromJson(ext) }.getOrNull()
+                                }?.get("_elsewhere_promoted_npc_id") == characterId)
+                    }
+                    if (existing != null) {
+                        // Repeated linking never duplicates either role.
+                        if (chat.chatType != ChatType.SCENARIO &&
+                            database.chatDao().getChatParticipant(chatId, characterId) == null
+                        ) {
+                            database.chatDao().addChatParticipantAtEnd(chatId, characterId)
+                        }
+                        return@withTransaction existing.npcId to false
+                    }
+                    val authored = ManualCharacterFieldsCodec.toEditableFields(character)
+                    val npcId = UUID.randomUUID().toString()
+                    dao.insertDossier(
+                        NpcDossierEntity(
+                            npcId = npcId,
+                            chatId = chatId,
+                            displayName = character.displayName,
+                            aliasesJson = aliasesAdapter.toJson(character.aliases),
+                            appearance = authored.appearance.take(4000),
+                            personality = authored.personality.take(4000),
+                            goals = authored.conversationalGoals.take(4000),
+                            role = "",
+                            sceneMode = "AUTO",
+                            isManualBase = true,
+                            extensionFieldsJson = mapAdapter.toJson(
+                                mapOf("_elsewhere_linked_character_id" to characterId)
+                            )
+                        )
+                    )
+                    if (chat.chatType != ChatType.SCENARIO &&
+                        database.chatDao().getChatParticipant(chatId, characterId) == null
+                    ) {
+                        // Make a selected Character available for Solo spotlight
+                        // or Group roster without ever making it the initial lead.
+                        database.chatDao().addChatParticipantAtEnd(chatId, characterId)
+                    }
+                    npcId to true
+                }
+                if (result.second) {
+                    // Copy once; subsequent imports/links never overwrite a
+                    // picture that the player edited for THIS chat's NPC.
+                    runCatching {
+                        profileImageRepository?.copyImageToKind(
+                            ProfileImageKind.CHARACTER, characterId,
+                            ProfileImageKind.NPC, result.first
+                        )
+                    }
+                }
+                result.first
+            }
+        }
+
+    /** Promoted NPC and reusable Character share their exact stable ID. */
+    fun observePromotedCharacterIds(): Flow<Set<String>> =
+        database.characterDao().getAllCharacters().map { cards ->
+            cards.filter { card ->
+                card.extensionFieldsJson?.let { json ->
+                    runCatching { mapAdapter.fromJson(json)?.get("_elsewhere_promoted_npc_id") }
+                        .getOrNull() == card.characterId
+                } == true
+            }.mapTo(mutableSetOf()) { it.characterId }
+        }
+
+    /**
+     * Promote a chat NPC into a reusable Character WITHOUT deleting the NPC,
+     * its variant-linked update history, or any prior messages. The same ID is
+     * used in both tables. Only portrayal fields cross this boundary; secrets,
+     * private author notes and per-Persona relationships never become public
+     * global Character knowledge. No model call.
+     */
+    suspend fun promoteNpcToCharacter(chatId: String, npcId: String): NpcPromotionResult =
+        dataCoordinator.withMutation {
+            withContext(Dispatchers.IO) {
+                val chat = requireNotNull(database.chatDao().getChatById(chatId)) {
+                    "This chat does not exist."
+                }
+                val source = requireNotNull(dao.getDossier(npcId)) {
+                    "This NPC no longer exists."
+                }
+                require(source.chatId == chatId) {
+                    "This NPC belongs to a different chat."
+                }
+                require(linkedCharacterId(source) == null) {
+                    "This NPC is already linked to an existing Character. " +
+                        "Use that Character instead of creating a duplicate."
+                }
+                // Snapshot selected-variant updates after Wack. Never use a
+                // non-selected historical branch as Character base material.
+                val npc = getProjectedDossiers(
+                    chatId, afterOrderIndex = chat.contextResetOrderIndex
+                ).firstOrNull { it.npcId == npcId }
+                    ?: throw IllegalStateException("The NPC could not be projected.")
+                val result = database.withTransaction {
+                    require(dao.getDossier(npcId)?.chatId == chatId) {
+                        "The original NPC was changed or removed. Nothing was promoted."
+                    }
+                    val existing = database.characterDao().getCharacterById(npcId)
+                    if (existing != null) {
+                        val origin = existing.extensionFieldsJson?.let {
+                            runCatching { mapAdapter.fromJson(it) }.getOrNull()
+                        }?.get("_elsewhere_promoted_npc_id")
+                        require(origin == npcId) {
+                            "An unrelated Character owns this ID. Nothing was changed."
+                        }
+                        require(!existing.isArchived) {
+                            "The linked Character is archived. Unarchive it before using it again."
+                        }
+                    } else {
+                        database.characterDao().insertNewCharacter(
+                            CharacterEntity(
+                                characterId = npcId,
+                                displayName = npc.displayName,
+                                characterName = npc.displayName,
+                                aliases = npc.aliases,
+                                importSchemaVersion = 1,
+                                identityJson = mapAdapter.toJson(
+                                    mapOf("name" to npc.displayName, "role" to npc.role)
+                                ),
+                                appearanceJson = npc.appearance.takeIf(String::isNotBlank)?.let {
+                                    mapAdapter.toJson(mapOf("description" to it))
+                                },
+                                personalityJson = mapAdapter.toJson(
+                                    mapOf("summary" to npc.personality, "goals" to npc.goals)
+                                ),
+                                voiceJson = null,
+                                behaviorJson = null,
+                                backstoryJson = null,
+                                knowledgeJson = null,
+                                worldContextJson = null,
+                                writingRulesJson = null,
+                                examplesJson = null,
+                                authorNotesJson = null,
+                                extensionFieldsJson = mapAdapter.toJson(
+                                    mapOf("_elsewhere_promoted_npc_id" to npcId)
+                                )
+                            )
+                        )
+                    }
+                    // Scenario episodes have a narrator, not a direct primary
+                    // Character roster. They can link this card explicitly.
+                    val attach = chat.chatType != ChatType.SCENARIO &&
+                        database.chatDao().getChatParticipant(chatId, npcId) == null
+                    if (attach) database.chatDao().addChatParticipantAtEnd(chatId, npcId)
+                    NpcPromotionResult(npcId, existing == null, attach)
+                }
+                if (result.created) {
+                    // Device-local portraits stay untouched in the NPC Bank.
+                    // A copy into Character storage is best effort, not destructive.
+                    runCatching {
+                        profileImageRepository?.copyImageToKind(
+                            ProfileImageKind.NPC, npcId,
+                            ProfileImageKind.CHARACTER, npcId
+                        )
+                    }
+                }
+                result
+            }
+        }
 
     suspend fun getLibraryBank(bankId: String): NpcLibraryBank? = withContext(Dispatchers.IO) {
         dao.getLibraryBanks().firstOrNull { it.bankId == bankId }?.let { NpcLibraryBank(it, dao.getLibraryEntries(bankId)) }
@@ -124,7 +326,13 @@ class NpcRepository(
             database.withTransaction {
                 dao.insertLibraryBank(bank)
                 dao.insertLibraryEntries(projected.mapIndexed { index, npc ->
-                    npc.toLibrary(bank.bankId, index).copy(extensionFieldsJson = baseExtensions[npc.npcId])
+                    npc.toLibrary(bank.bankId, index).copy(
+                        extensionFieldsJson = baseExtensions[npc.npcId]
+                            ?.let { raw -> runCatching { mapAdapter.fromJson(raw) }.getOrNull() }
+                            ?.filterKeys { it != "_elsewhere_linked_character_id" }
+                            ?.takeIf { it.isNotEmpty() }
+                            ?.let(mapAdapter::toJson)
+                    )
                 })
             }
             bank.bankId
@@ -165,8 +373,14 @@ class NpcRepository(
         }
     }
 
-    suspend fun getProjectedDossiers(chatId: String): List<NpcDossier> = withContext(Dispatchers.IO) {
-        project(dao.getDossiers(chatId), dao.getUpdates(chatId))
+    /** Keep the editable Bank intact; only generation-side projections honor Wack. */
+    suspend fun getProjectedDossiers(
+        chatId: String, afterOrderIndex: Long? = null
+    ): List<NpcDossier> = withContext(Dispatchers.IO) {
+        val updates = dao.getUpdates(chatId).filter {
+            afterOrderIndex == null || it.sourceOrderIndex > afterOrderIndex
+        }
+        project(dao.getDossiers(chatId), updates)
     }
 
     suspend fun saveManual(dossier: NpcDossier) = dataCoordinator.withMutation {
@@ -285,13 +499,16 @@ class NpcRepository(
                 )
                 if (dao.getSettings(message.chatId)?.isEnabled == true) {
                     val missingSpeakers = missingSpeakerDiscoveryUpdates(message, emptyList())
+                    val proseSpeakers = missingProseDiscoveryUpdates(
+                        message, missingSpeakers, activePersonaId
+                    )
                     applyStructuredUpdatesInTransaction(
                         chatId = message.chatId,
                         sourceMessageId = message.messageId,
                         variantGroupId = message.variantGroupId,
                         sourceRevision = 0,
                         isApplied = true,
-                        updates = missingSpeakers,
+                        updates = missingSpeakers + proseSpeakers,
                         activePersonaId = activePersonaId
                     )
                 }
@@ -310,15 +527,40 @@ class NpcRepository(
     ) = dataCoordinator.withMutation {
         withContext(Dispatchers.IO) {
             database.withTransaction {
+                val previous = messageDao.getMessageById(message.messageId)
+                val previouslyNamedSpeakers = StoryResponseCodec.decode(previous?.content.orEmpty())
+                    ?.segments.orEmpty()
+                    .filter { it.type == StorySegmentType.NPC }
+                    .mapNotNull { it.speakerName?.trim()?.lowercase(Locale.ROOT) }
+                    .toSet()
                 messageDao.updateMessage(message)
                 if (metadata != null) messageDao.insertGenerationMetadata(metadata)
+                // Continue rewrites one stored response with its appended segments.
+                // Discover ONLY new structured NPC speakers, never speakers that
+                // were already present in the older portion of that response.
+                val newSpeakers = if (
+                    message.isPrimaryVariant && dao.getSettings(message.chatId)?.isEnabled == true
+                ) {
+                    missingSpeakerDiscoveryUpdates(message, updates, previouslyNamedSpeakers)
+                } else emptyList()
+                val previousProseSpeakers = previous?.let {
+                    proseSpeakerNames(it, activePersonaId).map(String::lowercase).toSet()
+                }.orEmpty()
+                val newProseSpeakers = if (
+                    message.isPrimaryVariant && dao.getSettings(message.chatId)?.isEnabled == true
+                ) {
+                    missingProseDiscoveryUpdates(
+                        message, updates + newSpeakers, activePersonaId,
+                        ignoredNames = previousProseSpeakers
+                    ).take((24 - updates.size - newSpeakers.size).coerceAtLeast(0))
+                } else emptyList()
                 val metadataReport = applyStructuredUpdatesInTransaction(
                     chatId = message.chatId,
                     sourceMessageId = message.messageId,
                     variantGroupId = message.variantGroupId,
                     sourceRevision = dao.nextSourceRevision(message.messageId),
                     isApplied = message.isPrimaryVariant,
-                    updates = updates,
+                    updates = updates + newSpeakers + newProseSpeakers,
                     activePersonaId = activePersonaId,
                     skipInvalidUpdates = skipInvalidNpcMetadata
                 )
@@ -337,7 +579,8 @@ class NpcRepository(
      */
     private suspend fun missingSpeakerDiscoveryUpdates(
         message: MessageEntity,
-        metadataUpdates: List<NpcStructuredUpdate>
+        metadataUpdates: List<NpcStructuredUpdate>,
+        ignoredSpeakerNames: Set<String> = emptySet()
     ): List<NpcStructuredUpdate> {
         val story = StoryResponseCodec.decode(message.content) ?: return emptyList()
         val projected = project(dao.getDossiers(message.chatId), dao.getUpdates(message.chatId))
@@ -350,6 +593,7 @@ class NpcRepository(
                 }?.let { name -> name to it.speakerId }
             }
             .distinctBy { (name, _) -> name.lowercase(Locale.ROOT) }
+            .filterNot { (name, _) -> name.lowercase(Locale.ROOT) in ignoredSpeakerNames }
             .filterNot { (name, speakerId) ->
                 projected.any { it.npcId == speakerId && matchesNameOrAlias(it, name) } ||
                     projected.any { matchesNameOrAlias(it, name) } ||
@@ -362,6 +606,50 @@ class NpcRepository(
                 NpcStructuredUpdate(null, name, null, null, null, null, null, null, null)
             }
             .toList()
+    }
+
+    /** A minimal, provenance-linked dossier for an unambiguously quoted new speaker. */
+    private suspend fun proseSpeakerNames(
+        message: MessageEntity,
+        activePersonaId: String?
+    ): List<String> {
+        if (message.speakerType != SpeakerType.CHARACTER ||
+            database.chatDao().getChatById(message.chatId)?.chatType != ChatType.SOLO
+        ) return emptyList()
+        // No guessing if the active player identity is missing.
+        val persona = activePersonaId?.let { personaId ->
+            database.personaDao().getPersonaById(personaId)
+        } ?: return emptyList()
+        val protected = listOf(
+            message.speakerDisplayNameSnapshot,
+            persona.displayName,
+            persona.personaName
+        ) + persona.aliases
+        val story = StoryResponseCodec.decode(message.content)
+        val visible = story?.segments?.joinToString("\n") { it.content } ?: message.content
+        return NpcProseDiscovery.namedSpeakers(
+            NpcStructuredOutputParser.finalVisibleStoryText(visible), protected
+        )
+    }
+
+    private suspend fun missingProseDiscoveryUpdates(
+        message: MessageEntity,
+        otherUpdates: List<NpcStructuredUpdate>,
+        activePersonaId: String?,
+        ignoredNames: Set<String> = emptySet()
+    ): List<NpcStructuredUpdate> {
+        val projected = project(dao.getDossiers(message.chatId), dao.getUpdates(message.chatId))
+        return proseSpeakerNames(message, activePersonaId)
+            .filterNot { it.lowercase(Locale.ROOT) in ignoredNames }
+            .filterNot { name ->
+                projected.any { matchesNameOrAlias(it, name) } ||
+                    otherUpdates.any { update ->
+                        update.displayName?.equals(name, ignoreCase = true) == true ||
+                            update.aliases?.any { it.equals(name, ignoreCase = true) } == true
+                    }
+            }
+            .map { NpcStructuredUpdate(null, it, null, null, null, null, null, null, null) }
+            .take(12)
     }
 
     /** Persist stable Bank IDs instead of the model's temporary name-derived speaker IDs. */
@@ -552,6 +840,51 @@ class NpcRepository(
         }
     }
 
+    /**
+     * Active promoted Character gets only its OWN current-chat relationship
+     * with the active Persona, never the NPC Bank's narrator-only secrets,
+     * unrelated Character knowledge or another chat's relationship history.
+     * A Wack boundary requires explicit reintroduction, so no old base leaks.
+     */
+    suspend fun promotedSpeakerRelationshipContext(
+        chatId: String,
+        characterId: String,
+        activePersonaId: String,
+        asOfOrderIndex: Long? = null,
+        afterOrderIndex: Long? = null
+    ): String? = withContext(Dispatchers.IO) {
+        if (afterOrderIndex != null) return@withContext null
+        val base = dao.getDossier(characterId)?.takeIf { it.chatId == chatId }
+            ?: dao.getDossiers(chatId).firstOrNull {
+                linkedCharacterId(it) == characterId
+            }
+            ?: return@withContext null
+        val card = database.characterDao().getCharacterById(characterId)
+            ?: return@withContext null
+        val origin = card.extensionFieldsJson?.let { json ->
+            runCatching { mapAdapter.fromJson(json) }.getOrNull()
+        }?.get("_elsewhere_promoted_npc_id")
+        if (origin != characterId && linkedCharacterId(base) != characterId) {
+            return@withContext null
+        }
+        val changes = dao.getUpdates(chatId).filter {
+            asOfOrderIndex == null || it.sourceOrderIndex <= asOfOrderIndex
+        }
+        val state = project(listOf(base), changes).firstOrNull()
+            ?: return@withContext null
+        val relationship = state.personaRelationships[activePersonaId]
+            ?: state.relationshipToPersona.takeIf {
+                state.personaRelationships.isEmpty()
+            }
+        relationship?.takeIf(String::isNotBlank)?.take(4000)?.let {
+            "[CHAT-LOCAL RELATIONSHIP FOR ACTIVE CHARACTER ONLY]\n" +
+                "Character ID: $characterId\n" +
+                "Active Persona ID: $activePersonaId\n" +
+                "Established relationship: $it\n" +
+                "This does NOT transfer to any other chat, Persona or World canon."
+        }
+    }
+
     suspend fun relevantContext(
         chatId: String,
         recentMessages: List<MessageEntity>,
@@ -559,14 +892,29 @@ class NpcRepository(
         activePersonaId: String? = null,
         isGroup: Boolean = false,
         asOfOrderIndex: Long? = null,
-        limit: Int = DEFAULT_NPC_CONTEXT_LIMIT
+        limit: Int = DEFAULT_NPC_CONTEXT_LIMIT,
+        afterOrderIndex: Long? = null
     ): String? =
         withContext(Dispatchers.IO) {
             val bases = dao.getDossiers(chatId)
             val updates = dao.getUpdates(chatId).let { all ->
-                if (asOfOrderIndex == null) all else all.filter { it.sourceOrderIndex <= asOfOrderIndex }
+                all.filter { event ->
+                    (asOfOrderIndex == null || event.sourceOrderIndex <= asOfOrderIndex) &&
+                        (afterOrderIndex == null || event.sourceOrderIndex > afterOrderIndex)
+                }
             }
+            // A promoted NPC and the active Character share an ID; do not
+            // introduce that identity again as a separate supporting actor.
             val dossiers = project(bases, updates)
+                .filterNot { dossier ->
+                    // Null means there is no responding Character to exclude.
+                    // An ordinary NPC's unlinked character ID is also null:
+                    // comparing those nulls would silently remove the entire Bank
+                    // for narrator and other observer-less generation paths.
+                    observerCharacterId != null &&
+                        (dossier.npcId == observerCharacterId ||
+                            dossier.linkedCharacterId == observerCharacterId)
+                }
             if (dossiers.isEmpty()) return@withContext null
             val recentText = recentMessages.filter { it.isPrimaryVariant }.takeLast(4)
                 .joinToString("\n") {
@@ -587,10 +935,68 @@ class NpcRepository(
                 NpcContextSelection(dossier, mentionScore + if (dossier.keepInScene) 1000 else 0)
             }.sortedWith(compareByDescending<NpcContextSelection> { it.score }.thenByDescending { it.dossier.updatedAt })
                 .take(limit.coerceIn(1, 8))
-            selected.joinToString("\n\n") { selection ->
+            // Resolve suspending Room reads BEFORE entering joinToString's
+            // non-suspending rendering lambda.
+            val linkedCards = mutableMapOf<String, CharacterEntity>()
+            selected.mapNotNull { it.dossier.linkedCharacterId }.distinct().forEach { id ->
+                database.characterDao().getCharacterById(id)
+                    ?.takeUnless { it.isArchived }
+                    ?.let { linkedCards[id] = it }
+            }
+            // The Bank is both active-scene context and a bounded directory of
+            // established recurring cast. An UNKNOWN NPC has not been shown to be
+            // present: supply a tiny, non-secret casting hint so the storyteller
+            // may stage an organic entrance without the Persona naming them.
+            // Do not restore forgotten pre-Wack cast or broadcast extra cast to
+            // per-speaker Group requests. Explicit AWAY is never eligible.
+            val potentialCast = if (!isGroup && afterOrderIndex == null) {
+                val sceneWords = Regex("[\\p{L}\\p{N}]{4,}")
+                    .findAll(recentText).map { it.value }.toSet()
+                NpcSceneCastResolver.resolve(dossiers, recentMessages)
+                    .filter { it.presence == NpcScenePresence.UNKNOWN }
+                    .sortedWith(
+                        compareByDescending<com.example.domain.npc.NpcSceneMember> { member ->
+                            val roleWords = Regex("[\\p{L}\\p{N}]{4,}")
+                                .findAll(member.dossier.role.lowercase(Locale.ROOT))
+                                .map { it.value }.toSet()
+                            roleWords.count { it in sceneWords }
+                        }.thenByDescending { it.dossier.keepInScene }
+                            .thenByDescending { it.dossier.updatedAt }
+                            .thenBy { it.dossier.npcId }
+                    )
+                    .take(minOf(4, limit.coerceIn(1, 8)))
+                    .map { it.dossier }
+            } else emptyList()
+            val presentContext = selected.joinToString("\n\n") { selection ->
+                val linkedCard = selection.dossier.linkedCharacterId?.let(linkedCards::get)
                 with(selection.dossier) {
                     buildString {
                         append("[NPC id=").append(npcId).append("]\n")
+                        linkedCard?.let { card ->
+                            // Existing Character's authored identity is reusable.
+                            // NEVER read its other chat memories, personal notes,
+                            // knowledgeJson or world-specific private continuity.
+                            append("LINKED CHARACTER ID: ").append(card.characterId).append('\n')
+                            append("Use this person's authored portrayal as baseline; ")
+                                .append("the NPC Bank fields below describe THIS chat's role.\n")
+                            fun authored(label: String, raw: String?) {
+                                raw?.takeIf(String::isNotBlank)?.take(1800)?.let { value ->
+                                    append(label).append(": ").append(value).append('\n')
+                                }
+                            }
+                            authored("Authored identity", card.identityJson)
+                            authored("Authored appearance", card.appearanceJson)
+                            authored("Authored personality", card.personalityJson)
+                            authored("Authored voice", card.voiceJson)
+                            authored("Authored behavior", card.behaviorJson)
+                            authored("Authored backstory", card.backstoryJson)
+                            authored("Authored writing rules", card.writingRulesJson)
+                            ManualCharacterFieldsCodec.readStored(card)?.let { fields ->
+                                authored("Manual tone", fields.tone)
+                                authored("Manual personality", fields.personality)
+                                authored("Manual appearance", fields.appearance)
+                            }
+                        }
                         append("[STORYTELLER CONTINUITY — NOT AUTOMATIC SPEAKER KNOWLEDGE]\n")
                         append("Name: ").append(displayName).append('\n')
                         if (aliases.isNotEmpty()) append("Aliases: ").append(aliases.joinToString(", ")).append('\n')
@@ -614,7 +1020,24 @@ class NpcRepository(
                         }
                     }.trimEnd()
                 }
-            }.takeIf(String::isNotBlank)
+            }
+            val availableCastContext = if (potentialCast.isEmpty()) null else buildString {
+                append("[POTENTIAL RECURRING CAST — NOT CONFIRMED PRESENT]\n")
+                append("These are established chat-local supporting characters who are not ")
+                append("known to be in the room. They may return through a plausible, ")
+                append("scene-motivated entrance when the setting or ongoing plot calls ")
+                append("for them. Do not teleport them, make them speak before entering, ")
+                append("invent a Persona action to bring them in, or override an Away state.\n")
+                potentialCast.forEach { npc ->
+                    append("- ").append(npc.displayName.take(120))
+                    npc.role.takeIf(String::isNotBlank)?.let { role ->
+                        append(" — role: ").append(role.take(160))
+                    }
+                    append('\n')
+                }
+            }.trimEnd()
+            listOfNotNull(presentContext.takeIf(String::isNotBlank), availableCastContext)
+                .joinToString("\n\n").takeIf(String::isNotBlank)
         }
 
     suspend fun exportJson(chatId: String, includePrivateFields: Boolean = false): String = withContext(Dispatchers.IO) {
@@ -636,7 +1059,8 @@ class NpcRepository(
                 keepInScene = dossier.keepInScene,
                 extensionFields = if (includePrivateFields) {
                     bases[dossier.npcId]?.extensionFieldsJson
-                        ?.let { runCatching { mapAdapter.fromJson(it) }.getOrNull() }.orEmpty()
+                        ?.let { runCatching { mapAdapter.fromJson(it) }.getOrNull() }
+                        ?.filterKeys { it != "_elsewhere_linked_character_id" }.orEmpty()
                 } else emptyMap()
             )
         }
@@ -682,7 +1106,9 @@ class NpcRepository(
                     keepInScene = card.keepInScene,
                     sceneMode = replacing?.sceneMode ?: "AUTO",
                     isManualBase = true,
-                    extensionFieldsJson = card.extensionFields.takeIf(Map<*, *>::isNotEmpty)?.let(mapAdapter::toJson),
+                    extensionFieldsJson = card.extensionFields
+                        .filterKeys { it != "_elsewhere_linked_character_id" }
+                        .takeIf { it.isNotEmpty() }?.let(mapAdapter::toJson),
                     createdAt = replacing?.createdAt ?: System.currentTimeMillis(),
                     updatedAt = System.currentTimeMillis()
                 )
@@ -725,7 +1151,10 @@ class NpcRepository(
         role = role.trim(), appearance = appearance.trim(), personality = personality.trim(), relationshipToPersona = relationshipToPersona.trim(),
         personaRelationshipsJson = stringMapAdapter.toJson(personaRelationships.cleanMap()), characterKnowledgeJson = stringMapAdapter.toJson(characterKnowledge.cleanMap()),
         goals = goals.trim(), secrets = secrets.trim(), authorNotes = authorNotes.trim(), keepInScene = keepInScene,
-        extensionFieldsJson = extensionFields.takeIf(Map<*, *>::isNotEmpty)?.let(mapAdapter::toJson), sortPosition = position
+        extensionFieldsJson = extensionFields
+            .filterKeys { it != "_elsewhere_linked_character_id" }
+            .takeIf { it.isNotEmpty() }?.let(mapAdapter::toJson),
+        sortPosition = position
     )
 
     private fun NpcDossier.toLibrary(bankId: String, position: Int) = NpcLibraryEntryEntity(
@@ -739,7 +1168,12 @@ class NpcRepository(
         npcId = UUID.randomUUID().toString(), chatId = chatId, displayName = displayName, aliasesJson = aliasesJson, role = role,
         appearance = appearance, personality = personality, relationshipToPersona = relationshipToPersona,
         personaRelationshipsJson = personaRelationshipsJson, characterKnowledgeJson = characterKnowledgeJson, goals = goals, secrets = secrets,
-        authorNotes = authorNotes, keepInScene = keepInScene, isManualBase = true, extensionFieldsJson = extensionFieldsJson
+        authorNotes = authorNotes, keepInScene = keepInScene, isManualBase = true,
+        extensionFieldsJson = extensionFieldsJson?.let { raw ->
+            runCatching { mapAdapter.fromJson(raw) }.getOrNull()
+                ?.filterKeys { it != "_elsewhere_linked_character_id" }
+                ?.takeIf { it.isNotEmpty() }?.let(mapAdapter::toJson)
+        }
     )
 
     private fun project(
@@ -803,6 +1237,7 @@ class NpcRepository(
             authorNotes = base.authorNotes,
             keepInScene = base.keepInScene,
             sceneMode = base.sceneMode,
+            linkedCharacterId = linkedCharacterId(base),
             isManualBase = base.isManualBase,
             createdAt = base.createdAt,
             updatedAt = maxOf(base.updatedAt, relevant.maxOfOrNull { it.createdAt } ?: base.updatedAt)

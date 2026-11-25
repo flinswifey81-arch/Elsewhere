@@ -12,7 +12,8 @@ pluginManagement {
   }
 }
 
-plugins { id("org.gradle.toolchains.foojay-resolver-convention") version "1.0.0" }
+// CI and Android Studio provide the Gradle JDK directly. Do not require a
+// separately resolved toolchain plugin just to configure the project.
 
 dependencyResolutionManagement {
   repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)

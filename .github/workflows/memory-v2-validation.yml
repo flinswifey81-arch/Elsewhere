@@ -1,0 +1,76 @@
+name: Memory V2 validation
+
+on:
+  push:
+    branches:
+      - work/memory-v2-stabilization-2026-11-18
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: memory-v2-validation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v4
+      - name: Install Android SDK
+        run: sdkmanager "platforms;android-36.1" "build-tools;36.0.0"
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Run memory, migration and generation tests
+        run: |
+          bash ./gradlew :app:testDebugUnitTest --no-daemon --no-configuration-cache \
+            --tests com.example.domain.PromptPreflightTest \
+            --tests com.example.domain.PromptHistoryTrimmerTest \
+            --tests com.example.domain.StoryMemoryTemporalRetrievalTest \
+            --tests com.example.AppDatabaseMigrationTest \
+            --tests com.example.ChatDetailGenerationTest \
+            --tests com.example.domain.MemoryV2RoomScaleBenchmarkTest \
+            --tests com.example.domain.MemoryV2CrowdedSceneAcceptanceTest \
+            --tests com.example.CampaignMemoryScopeTest \
+            --tests com.example.CampaignRepositoryTest \
+            --tests com.example.ScenarioModeTest.scenarioReplayUsesOnlyStillApprovedStateFromTheOriginalPlayerTurn \
+            --tests com.example.ScenarioModeTest.largeAuthoredScenarioFitsWithoutRaisingBudgetOrRewritingCards \
+            --tests com.example.WorldDefinitionBundleTransferTest \
+            --tests com.example.WorldArchiveMemoryV2TransferTest \
+            --tests com.example.ChatPdfExportContractTest \
+            --tests com.example.SameIdJsonReplaceTest \
+            --tests com.example.ProfileJsonImportWorkflowTest
+      - name: Summarize offline test results
+        if: always()
+        run: |
+          python3 - <<'PYTHON'
+          from pathlib import Path
+          from xml.etree import ElementTree
+
+          reports = sorted(Path("app/build/test-results/testDebugUnitTest").glob("TEST-*.xml"))
+          totals = dict.fromkeys(("tests", "failures", "errors", "skipped"), 0)
+          for file in reports:
+              suite = ElementTree.parse(file).getroot()
+              for key in totals:
+                  totals[key] += int(suite.get(key, 0))
+              count = suite.get("tests", "0")
+              print(f"{suite.get('name')}: {count} cases")
+              for case in suite.findall("testcase"):
+                  if case.find("failure") is not None or case.find("error") is not None:
+                      print(f"FAIL: {case.get('classname')}.{case.get('name')}")
+          summary = (
+              ", ".join(f"{key}: {count}" for key, count in totals.items())
+              if reports else "No offline test report was produced."
+          )
+          print(summary)
+          PYTHON
+      - name: Build debug APK
+        run: bash ./gradlew :app:assembleDebug --no-daemon --no-configuration-cache

@@ -25,10 +25,11 @@ android {
     applicationId = legacyApplicationId
     minSdk = 33
     targetSdk = 36
-    // In-place update of regular Elsewhere v1.5; preserve app ID, data and signing key.
-    // Increment for a safe in-place update from the signed 1.5.1 production candidate.
-    versionCode = 3
-    versionName = "1.5.2"
+    // Prepared 1.6.0 in-place update from production 1.5.2 (versionCode 3).
+    // The stable .v15 package suffix is intentional: changing it loses app data.
+    // This source version alone does NOT authorize signing, publishing or install.
+    versionCode = 4
+    versionName = "1.6.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     buildConfigField(
@@ -96,7 +97,17 @@ android {
     compose = true
     buildConfig = true
   }
-  testOptions { unitTests { isIncludeAndroidResources = true } }
+  testOptions {
+    unitTests {
+      isIncludeAndroidResources = true
+      // Robolectric's default runtime repo1 endpoint can throttle or reject
+      // Android framework JAR downloads on fresh CI test workers.
+      // Use the canonical Maven Central endpoint; do not disable tests.
+      all {
+        it.systemProperty("robolectric.dependency.repo.url", "https://repo.maven.apache.org/maven2")
+      }
+    }
+  }
   dependenciesInfo {
     includeInApk = false
     includeInBundle = true

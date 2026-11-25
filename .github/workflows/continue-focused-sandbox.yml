@@ -2,15 +2,25 @@ name: Continue Regression Tests
 
 on:
   pull_request:
+    # No full work on drafts, but run automatically on review readiness.
+    types: [opened, reopened, synchronize, ready_for_review, converted_to_draft]
     branches:
       - main
       - feature/background-reply-notifications-2026-11-04
+  workflow_dispatch:
+
+concurrency:
+  group: elsewhere-full-continue-focused-sandbox-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
   continue-regression:
+    # Draft work runs the fast smoke gate only. Full acceptance still runs
+    # on explicit workflow_dispatch or whenever the PR is ready for review.
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     name: Validate Continue and notifications integration
     runs-on: ubuntu-latest
     timeout-minutes: 30

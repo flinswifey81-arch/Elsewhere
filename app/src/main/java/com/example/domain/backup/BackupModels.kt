@@ -78,7 +78,24 @@ data class BackupPayload(
     val worlds: List<WorldEntity> = emptyList(),
     val worldMemberships: List<WorldMembershipEntity> = emptyList(),
     val worldCast: List<WorldCastEntity> = emptyList(),
-    val worldContinuityEvents: List<WorldContinuityEventEntity> = emptyList()
+    val worldContinuityEvents: List<WorldContinuityEventEntity> = emptyList(),
+    // v16 addition: defaults preserve loading historical v15 backup payloads.
+    val storyMemories: List<StoryMemoryEntity> = emptyList(),
+    val storyMemoryActors: List<StoryMemoryActorEntity> = emptyList(),
+    val storyMemoryReturns: List<StoryMemoryReturnEntity> = emptyList(),
+    // v20, backward-compatible with earlier encrypted backup payloads.
+    val storyMemoryKnowledgeChanges: List<StoryMemoryKnowledgeChangeEntity> = emptyList(),
+    // v21 optional addition: older archives contain no synthetic perspectives.
+    val storyMemoryPerspectives: List<StoryMemoryPerspectiveEntity> = emptyList(),
+    // v22: Campaign organization is optional for historical encrypted backups.
+    val campaigns: List<CampaignEntity> = emptyList(),
+    val campaignChapters: List<CampaignChapterEntity> = emptyList(),
+    // v23: source-linked private checkpoints and Campaign Journal entries.
+    val campaignJournalEntries: List<CampaignJournalEntryEntity> = emptyList(),
+    // v24: optional private arcs, promises, threads and relationship progress.
+    val campaignContinuityItems: List<CampaignContinuityItemEntity> = emptyList(),
+    // v25: explicit, source-linked Campaign memory approvals.
+    val campaignMemoryShares: List<CampaignMemoryShareEntity> = emptyList()
 )
 
 data class BackupPreview(
@@ -97,7 +114,11 @@ data class BackupPreview(
     val includesDrafts: Boolean,
     val includesCoopHistory: Boolean,
     val coopWillRestoreOffline: Boolean,
-    val scenarios: Int = 0
+    val scenarios: Int = 0,
+    val campaigns: Int = 0,
+    val campaignJournalEntries: Int = 0,
+    val campaignContinuityItems: Int = 0,
+    val campaignMemoryShares: Int = 0
 )
 
 data class BackupInspection(

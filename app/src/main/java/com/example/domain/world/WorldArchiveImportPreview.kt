@@ -12,6 +12,7 @@ data class WorldArchiveImportPreview(
     val worldTitle: String,
     val chats: Int,
     val messages: Int,
+    val storyMemories: Int,
     val primaryResponses: Int,
     val alternativeVariants: Int,
     val characters: Int,
@@ -26,7 +27,12 @@ data class WorldArchiveImportPreview(
     val uncompressedArchiveBytes: Long,
     val containsUnsentDrafts: Boolean,
     val containsPrivateNotes: Boolean,
-    val containsNpcSecrets: Boolean
+    val containsNpcSecrets: Boolean,
+    val campaigns: Int = 0,
+    val campaignChapters: Int = 0,
+    val journalEntries: Int = 0,
+    val campaignContinuityItems: Int = 0,
+    val sharedMemories: Int = 0
 ) {
     companion object {
         fun from(state: WorldArchiveStateV1, manifest: WorldArchiveManifestV1): WorldArchiveImportPreview {
@@ -36,6 +42,12 @@ data class WorldArchiveImportPreview(
                 worldTitle = state.world.title,
                 chats = state.chats.size,
                 messages = state.messages.size,
+                storyMemories = state.storyMemories.size,
+                campaigns = state.campaigns.size,
+                campaignChapters = state.campaignChapters.size,
+                journalEntries = state.campaignJournalEntries.size,
+                campaignContinuityItems = state.campaignContinuityItems.size,
+                sharedMemories = state.campaignMemoryShares.size,
                 primaryResponses = state.messages.count { it.isPrimaryVariant },
                 alternativeVariants = state.messages.count { !it.isPrimaryVariant },
                 characters = state.characters.size,
@@ -61,7 +73,12 @@ data class WorldArchiveImportPreview(
                     state.personas.any { !it.privateNotesJson.isNullOrBlank() } ||
                     state.npcDossiers.any { it.authorNotes.isNotBlank() } ||
                     state.npcLibraryEntries.any { it.authorNotes.isNotBlank() } ||
-                    state.lorebookEntries.any { it.notes.isNotBlank() },
+                    state.lorebookEntries.any { it.notes.isNotBlank() } ||
+                    state.storyMemories.isNotEmpty() ||
+                    state.campaigns.isNotEmpty() ||
+                    state.campaignJournalEntries.isNotEmpty() ||
+                    state.campaignContinuityItems.isNotEmpty() ||
+                    state.campaignMemoryShares.isNotEmpty(),
                 containsNpcSecrets = state.npcDossiers.any { it.secrets.isNotBlank() } ||
                     state.npcLibraryEntries.any { it.secrets.isNotBlank() }
             )

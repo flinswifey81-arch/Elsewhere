@@ -200,6 +200,7 @@ fun ElsewhereApp(
                         // Full Worlds archive UI belongs in normal Elsewhere, not a preview APK.
                         archiveTransfer = container.worldArchiveTransfer,
                         chatRepository = container.chatRepository,
+                        campaignRepository = container.campaignRepository,
                         onOpenChat = { chatId ->
                             navController.navigate("chat_detail/${Uri.encode(chatId)}")
                         },
@@ -208,6 +209,11 @@ fun ElsewhereApp(
                         },
                         onCreateScenarioEpisode = { worldId ->
                             navController.navigate("world_scenarios/${Uri.encode(worldId)}")
+                        },
+                        onCreateSoloCampaignChapter = { worldId, campaignId ->
+                            navController.navigate(
+                                "campaign_create_solo/${Uri.encode(worldId)}/${Uri.encode(campaignId)}"
+                            )
                         }
                     )
                 }
@@ -343,6 +349,90 @@ fun ElsewhereApp(
                 }
             }
 
+            // Create a Campaign chapter through the ordinary chat creator.
+            // The Campaign link is a second atomic local step; if it fails, the
+            // newly created conversation is retained and can be opened or retried.
+            composable(
+                "campaign_create_solo/{worldId}/{campaignId}",
+                arguments = listOf(
+                    navArgument("worldId") { type = NavType.StringType },
+                    navArgument("campaignId") { type = NavType.StringType }
+                )
+            ) { backStackEntry ->
+                val worldId = backStackEntry.arguments?.getString("worldId").orEmpty()
+                val campaignId = backStackEntry.arguments?.getString("campaignId").orEmpty()
+                val campaignRepository = container.campaignRepository
+                val scope = rememberCoroutineScope()
+                var createdButUnlinked by remember { mutableStateOf<String?>(null) }
+                var linkError by remember { mutableStateOf<String?>(null) }
+                fun openCreatedChat(chatId: String) {
+                    navController.navigate("chat_detail/${Uri.encode(chatId)}") {
+                        popUpTo("campaign_create_solo/{worldId}/{campaignId}") { inclusive = true }
+                    }
+                }
+                suspend fun attachNewChapter(chatId: String) {
+                    val campaigns = requireNotNull(campaignRepository) {
+                        "Campaign repository is unavailable."
+                    }
+                    require(campaigns.getCampaign(campaignId)?.worldId == worldId) {
+                        "This Campaign is no longer linked to the selected World."
+                    }
+                    val created = requireNotNull(
+                        container.chatRepository.getChatSummaryById(chatId)
+                    ) { "The newly created chat could not be loaded." }
+                    campaigns.addChapter(campaignId, chatId, created.chat.displayName)
+                }
+                CreateSoloChatScreen(
+                    chatRepository = container.chatRepository,
+                    personaRepository = container.personaRepository,
+                    characterRepository = container.characterRepository,
+                    onChatCreated = { chatId ->
+                        scope.launch {
+                            try {
+                                attachNewChapter(chatId)
+                                openCreatedChat(chatId)
+                            } catch (failure: Exception) {
+                                createdButUnlinked = chatId
+                                linkError = failure.message ?: "Could not link the new chapter."
+                            }
+                        }
+                    },
+                    onNavigateBack = { navController.popBackStack() }
+                )
+                createdButUnlinked?.let { unlinkedId ->
+                    AlertDialog(
+                        onDismissRequest = {},
+                        title = { Text("Chat created, but chapter linking failed") },
+                        text = {
+                            Text(
+                                (linkError ?: "The chapter was not linked.") +
+                                    " Your chat and its messages remain saved. Retry the " +
+                                    "Campaign link or open the chat without a chapter."
+                            )
+                        },
+                        confirmButton = {
+                            TextButton(onClick = {
+                                scope.launch {
+                                    try {
+                                        attachNewChapter(unlinkedId)
+                                        createdButUnlinked = null
+                                        openCreatedChat(unlinkedId)
+                                    } catch (failure: Exception) {
+                                        linkError = failure.message ?: "Chapter linking still failed."
+                                    }
+                                }
+                            }) { Text("Retry chapter link") }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = {
+                                createdButUnlinked = null
+                                openCreatedChat(unlinkedId)
+                            }) { Text("Open saved chat") }
+                        }
+                    )
+                }
+            }
+
             composable(
                 "chat_settings/{chatId}",
                 arguments = listOf(navArgument("chatId") { type = NavType.StringType })
@@ -387,8 +477,23 @@ fun ElsewhereApp(
                         navController.navigate("context_inspector/$chatId?characterId=${Uri.encode(characterId.orEmpty())}")
                     },
                     onNavigateToLorebooks = { navController.navigate("chat_lorebooks/$chatId") },
+                    onNavigateToStoryMemories = { navController.navigate("chat_story_memories/$chatId") },
                     onNavigateToNpcBank = { navController.navigate("chat_npc_bank/$chatId") },
+                    onNavigateToScenarioSessionEditor = {
+                        navController.navigate("chat_scenario_editor/${Uri.encode(chatId)}")
+                    },
                     onNavigateToSettings = { navController.navigate("chat_settings/$chatId") },
+                )
+            }
+            composable(
+                "chat_scenario_editor/{chatId}",
+                arguments = listOf(navArgument("chatId") { type = NavType.StringType })
+            ) { backStackEntry ->
+                val chatId = backStackEntry.arguments?.getString("chatId").orEmpty()
+                ScenarioSessionEditorScreen(
+                    chatId = chatId,
+                    container = container,
+                    onNavigateBack = { navController.popBackStack() }
                 )
             }
             composable(
@@ -447,6 +552,26 @@ fun ElsewhereApp(
                     ChatLorebooksScreen(
                         chatId = chatId,
                         repository = repository,
+                        onNavigateBack = { navController.popBackStack() }
+                    )
+                }
+            }
+            composable(
+                "chat_story_memories/{chatId}",
+                arguments = listOf(navArgument("chatId") { type = NavType.StringType })
+            ) { backStackEntry ->
+                val chatId = backStackEntry.arguments?.getString("chatId") ?: ""
+                val repository = container.storyMemoryRepository
+                if (repository == null) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) {
+                        Text("Story Memories are unavailable in this environment.")
+                    }
+                } else {
+                    StoryMemoriesScreen(
+                        chatId = chatId,
+                        repository = repository,
+                        chatRepository = container.chatRepository,
+                        campaignRepository = container.campaignRepository,
                         onNavigateBack = { navController.popBackStack() }
                     )
                 }

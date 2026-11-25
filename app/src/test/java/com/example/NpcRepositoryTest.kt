@@ -99,11 +99,80 @@ class NpcRepositoryTest {
         )
 
         repository.setSceneMode("npc", com.example.data.model.NpcSceneMode.HERE)
+        val projected = repository.getProjectedDossiers("chat").single()
+        assertEquals("HERE", projected.sceneMode)
+        assertEquals(com.example.domain.npc.NpcScenePresence.PRESENT,
+            com.example.domain.npc.NpcSceneCastResolver.resolve(listOf(projected), emptyList()).single().presence)
         val context = repository.relevantContext("chat", emptyList()).orEmpty()
 
-        assertTrue(context.contains("Trusted guide"))
+        assertTrue("NPC context unexpectedly empty: " + context.isEmpty(), context.contains("Trusted guide"))
         assertTrue(context.contains("NEVER_SEND_SECRET"))
         assertFalse(context.contains("NEVER_SEND_AUTHOR_NOTE"))
+    }
+
+    @Test
+    fun narratorWithoutObservingCharacterRetainsPresentUnlinkedNpcAndRespectsAway() = runBlocking {
+        repository.saveManual(dossier().copy(sceneMode = "HERE"))
+        val visible = repository.relevantContext(
+            chatId = "chat",
+            recentMessages = emptyList(),
+            observerCharacterId = null
+        ).orEmpty()
+        assertTrue("A narrator with no observer still needs present NPCs",
+            visible.contains("[NPC id=npc]"))
+        assertTrue(visible.contains("Name: Mara"))
+        repository.setSceneMode("npc", com.example.data.model.NpcSceneMode.AWAY)
+        assertTrue("Away NPCs must not be reintroduced to satisfy null-observer context",
+            repository.relevantContext("chat", emptyList(), observerCharacterId = null).isNullOrBlank())
+    }
+
+    @Test
+    fun unmentionedBankNpcCanBeConsideredForAnEntranceWithoutPretendingPresence() = runBlocking {
+        repository.saveManual(dossier().copy(
+            npcId = "archivist-voss", displayName = "Archivist Voss",
+            role = "Archive keeper", sceneMode = "AUTO",
+            secrets = "NEVER_EXPOSE_PRIVATE_RECURRING_SECRET",
+            authorNotes = "NEVER_EXPOSE_PRIVATE_AUTHOR_NOTE",
+            keepInScene = true
+        ))
+        repository.saveManual(dossier().copy(
+            npcId = "away-guard", displayName = "Absent Guard",
+            role = "Archive guard", sceneMode = "AWAY", keepInScene = true
+        ))
+        val scene = MessageEntity(
+            chatId = "chat", speakerType = SpeakerType.PERSONA,
+            speakerId = "persona", speakerDisplayNameSnapshot = "Persona",
+            content = "We reach the archive and check the notice board.",
+            orderIndex = 8
+        )
+        val preview = repository.relevantContext("chat", listOf(scene)).orEmpty()
+        assertTrue(preview.contains("[POTENTIAL RECURRING CAST"))
+        assertTrue(preview.contains("Archivist Voss"))
+        assertTrue(preview.contains("Archive keeper"))
+        assertFalse("Unknown presence is never a full active-scene dossier",
+            preview.contains("[NPC id=archivist-voss]"))
+        assertFalse("Explicitly Away should not reappear as a candidate",
+            preview.contains("Absent Guard"))
+        assertFalse(preview.contains("NEVER_EXPOSE_PRIVATE_RECURRING_SECRET"))
+        assertFalse(preview.contains("NEVER_EXPOSE_PRIVATE_AUTHOR_NOTE"))
+        assertTrue("Group speaker context must not suggest off-scene cast",
+            repository.relevantContext("chat", listOf(scene), isGroup = true).isNullOrBlank())
+        assertTrue("Wack must not reintroduce pre-reset roster",
+            repository.relevantContext("chat", listOf(scene), afterOrderIndex = 7).isNullOrBlank())
+    }
+
+    @Test
+    fun confirmedPresentNpcKeepsFullProfileWithoutBeingDuplicatedAsCandidate() = runBlocking {
+        repository.saveManual(dossier().copy(
+            npcId = "present-guide", displayName = "Mara",
+            sceneMode = "HERE", role = "Trusted guide",
+            secrets = "ACTIVE_STORYTELLER_KNOWLEDGE"
+        ))
+        val context = repository.relevantContext("chat", emptyList()).orEmpty()
+        assertTrue(context.contains("[NPC id=present-guide]"))
+        assertTrue(context.contains("ACTIVE_STORYTELLER_KNOWLEDGE"))
+        assertFalse("Present NPC should not be treated as unknown",
+            context.contains("[POTENTIAL RECURRING CAST"))
     }
 
     @Test
@@ -577,6 +646,55 @@ class NpcRepositoryTest {
     }
 
     @Test
+    fun continueDiscoversNewNamedSpeakerButDoesNotReplayEarlierNpcSegments() = runBlocking {
+        repository.setEnabled("chat", true)
+        repository.saveManual(dossier().copy(sceneMode = "HERE"))
+        val originalStory = StoryResponse(
+            segments = listOf(StorySegment(StorySegmentType.NPC, "I will guard the door.", "npc", "Mara"))
+        )
+        val reply = MessageEntity(
+            messageId = "continued-story",
+            chatId = "chat",
+            speakerType = SpeakerType.CHARACTER,
+            speakerId = "character",
+            speakerDisplayNameSnapshot = "Character",
+            content = StoryResponseCodec.encode(originalStory),
+            orderIndex = 3L,
+            variantGroupId = "continued-story",
+            isPrimaryVariant = true
+        )
+        database.messageDao().insertMessage(reply)
+        val continuedStory = StoryResponse(
+            segments = originalStory.segments + StorySegment(
+                StorySegmentType.NPC, "The bridge is safe.", "model-temp-id", "Liora Fen"
+            )
+        )
+        repository.persistContinuationAtomically(
+            reply.copy(content = StoryResponseCodec.encode(continuedStory)),
+            metadata = null, updates = emptyList(), activePersonaId = "player"
+        )
+        val afterFirstContinue = repository.getProjectedDossiers("chat")
+        assertEquals(2, afterFirstContinue.size)
+        val liora = afterFirstContinue.single { it.displayName == "Liora Fen" }
+        assertEquals("npc", afterFirstContinue.single { it.displayName == "Mara" }.npcId)
+        val stored = requireNotNull(database.messageDao().getMessageById(reply.messageId))
+        val segments = requireNotNull(StoryResponseCodec.decode(stored.content)).segments
+        assertEquals(liora.npcId, segments.last().speakerId)
+        val updatesAfterFirstContinue = database.npcDao().getUpdatesForMessage(reply.messageId).size
+
+        repository.persistContinuationAtomically(
+            stored, metadata = null, updates = emptyList(), activePersonaId = "player"
+        )
+        assertEquals(2, repository.getProjectedDossiers("chat").size)
+        assertEquals(updatesAfterFirstContinue,
+            database.npcDao().getUpdatesForMessage(reply.messageId).size)
+        // The new speaker is a stable base entry. Replaying an unchanged
+        // continuation cannot create another NPC or duplicate an update.
+        assertEquals(liora.npcId,
+            repository.getProjectedDossiers("chat").single { it.displayName == "Liora Fen" }.npcId)
+    }
+
+    @Test
     fun continuationBatchesUseSeparateRevisionsAndDeleteTogether() = runBlocking {
         val message = MessageEntity(
             messageId = "reply",
@@ -638,4 +756,50 @@ class NpcRepositoryTest {
         createdAt = 1,
         updatedAt = 1
     )
+
+    @Test
+    fun wackExcludesEarlierNpcUpdatesFromGenerationButKeepsSavedBankIntact() = runBlocking {
+        repository.saveManual(dossier().copy(
+            role = "User-authored guide", goals = "User-approved background",
+            sceneMode = "HERE"
+        ))
+        val before = MessageEntity(
+            messageId = "before-wack", chatId = "chat",
+            speakerType = SpeakerType.CHARACTER, speakerId = "character",
+            speakerDisplayNameSnapshot = "Character", content = "Past story",
+            orderIndex = 17L
+        )
+        database.messageDao().insertMessage(before)
+        repository.applyStructuredUpdates(
+            chatId = "chat", sourceMessageId = before.messageId,
+            variantGroupId = before.variantGroupId, sourceRevision = 0, isApplied = true,
+            updates = listOf(NpcStructuredUpdate(
+                "npc", null, null, null, null, null, null, "OLD_WACK_SECRET_GOAL", null
+            ))
+        )
+        assertTrue(repository.getProjectedDossiers("chat").single().goals.contains("OLD_WACK_SECRET_GOAL"))
+        val afterBoundary = repository.getProjectedDossiers("chat", afterOrderIndex = 100L).single()
+        assertEquals("User-approved background", afterBoundary.goals)
+        assertTrue(afterBoundary.role.contains("User-authored guide"))
+        val visible = repository.relevantContext("chat", emptyList(),
+            afterOrderIndex = 100L).orEmpty()
+        assertTrue(visible.contains("User-approved background"))
+        assertFalse(visible.contains("OLD_WACK_SECRET_GOAL"))
+        // Wack never deletes or rewrites the original bank and historical records.
+        assertTrue(repository.getProjectedDossiers("chat").single().goals.contains("OLD_WACK_SECRET_GOAL"))
+        val after = before.copy(
+            messageId = "after-wack", orderIndex = 110L, variantGroupId = "after-wack",
+            content = "Present story"
+        )
+        database.messageDao().insertMessage(after)
+        repository.applyStructuredUpdates(
+            chatId = "chat", sourceMessageId = after.messageId,
+            variantGroupId = after.variantGroupId, sourceRevision = 0, isApplied = true,
+            updates = listOf(NpcStructuredUpdate(
+                "npc", null, null, null, null, null, null, "NEW_POST_WACK_GOAL", null
+            ))
+        )
+        assertEquals("NEW_POST_WACK_GOAL",
+            repository.getProjectedDossiers("chat", afterOrderIndex = 100L).single().goals)
+    }
 }

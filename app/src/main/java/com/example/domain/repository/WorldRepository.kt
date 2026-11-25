@@ -21,117 +21,126 @@ class WorldRepository(
 
     private val jsonCodec = Moshi.Builder().addLast(KotlinJsonAdapterFactory()).build()
     private val worldLinksAdapter = jsonCodec.adapter(WorldLinksV1::class.java)
+    private val resourcesMapAdapter = jsonCodec.adapter<Map<String, Any?>>(
+        Types.newParameterizedType(Map::class.java, String::class.java, Any::class.java)
+    )
     private val stringsAdapter = jsonCodec.adapter<List<String>>(
         Types.newParameterizedType(List::class.java, String::class.java)
     )
 
     /**
-     * Portable World **definition** import. Safe first phase: only World metadata,
-     * reviewed cast and accepted continuity. Never silently drops linked resources.
-     * This does not import playthrough history. Existing resources/worlds are untouched.
+     * Complete, authored World Definition bundle import. All embedded resources
+     * are validated and re-ID'd before a SINGLE atomic Room transaction.
+     * Existing app Characters, Personas, Scenarios and Lorebooks never change.
+     * Chats, attachments and actual playthrough history belong to the separately
+     * encrypted World archive, NOT this shareable plaintext definition format.
      */
     suspend fun importDefinition(json: String): WorldEntity {
         val document = WorldDefinitionCodec.parse(json)
-        require(document.resources.lorebooks.isEmpty() &&
-            document.resources.characters.isEmpty() &&
-            document.resources.personas.isEmpty() &&
-            document.resources.scenarios.isEmpty() &&
-            document.links.castRoles.isEmpty() &&
-            document.world.defaultLorebookIds.isEmpty()
-        ) { "Embedded resources and role links require the upcoming full World importer." }
-        require(document.continuity.all { it.sourceChatId == null }) {
-            "World definition cannot import references to external chats."
-        }
-        val supportedProfileKeys = setOf("identity", "appearance", "personality", "voice",
-            "backstory", "motivations", "knowledge_limits", "role")
-        require(document.resources.worldCast.all { it.profile.keys.all(supportedProfileKeys::contains) }) {
-            "A World character contains unsupported profile fields."
-        }
-
+        val plan = WorldDefinitionBundleResources(database, jsonCodec).prepare(document)
         return coordinator.withMutation {
             database.withTransaction {
-                val castIds = document.resources.worldCast.associate {
-                    it.worldCharacterId to UUID.randomUUID().toString()
+                dao.insertWorld(plan.world)
+                plan.characters.forEach { database.characterDao().insertCharacter(it) }
+                plan.personas.forEach { database.personaDao().insertPersona(it) }
+                plan.scenarios.forEach { database.scenarioDao().save(it) }
+                plan.lorebooks.forEach { book ->
+                    database.lorebookDao().saveDefinition(book.lorebook, book.entries)
                 }
-                val remappedLinks = document.links.copy(
-                    relationships = document.links.relationships.map { relation ->
-                        relation.copy(
-                            fromWorldCharacterId = requireNotNull(castIds[relation.fromWorldCharacterId]),
-                            toWorldCharacterId = requireNotNull(castIds[relation.toWorldCharacterId])
-                        )
-                    }
-                )
-                val world = WorldEntity(
-                    title = document.world.title,
-                    description = document.world.description,
-                    settingSummary = document.world.settingSummary,
-                    worldRules = document.world.worldRules,
-                    genreTagsJson = stringsAdapter.toJson(document.world.genreTags),
-                    defaultLorebookIdsJson = stringsAdapter.toJson(emptyList()),
-                    linksJson = worldLinksAdapter.toJson(remappedLinks)
-                )
-                dao.insertWorld(world)
-                for (person in document.resources.worldCast) {
-                    dao.insertCastMember(WorldCastEntity(
-                        worldCharacterId = requireNotNull(castIds[person.worldCharacterId]),
-                        worldId = world.worldId,
-                        name = person.name,
-                        aliasesJson = stringsAdapter.toJson(person.aliases),
-                        identity = person.profile["identity"].orEmpty(),
-                        appearance = person.profile["appearance"].orEmpty(),
-                        personality = person.profile["personality"].orEmpty(),
-                        voice = person.profile["voice"].orEmpty(),
-                        backstory = person.profile["backstory"].orEmpty(),
-                        motivations = person.profile["motivations"].orEmpty(),
-                        knowledgeLimits = person.profile["knowledge_limits"].orEmpty(),
-                        role = person.profile["role"].orEmpty(),
-                        provenanceKind = "import",
-                        lockedFieldsJson = stringsAdapter.toJson(person.lockedFields)
-                    ))
-                }
-                for (event in document.continuity) {
-                    dao.insertEvent(WorldContinuityEventEntity(
-                        worldId = world.worldId,
-                        title = event.title,
-                        facts = event.facts,
-                        status = "ACCEPTED",
-                        relatedCastIdsJson = stringsAdapter.toJson(
-                            event.relatedWorldCharacterIds.map { requireNotNull(castIds[it]) }
-                        )
-                    ))
-                }
-                world
+                if (plan.cast.isNotEmpty()) dao.insertCast(plan.cast)
+                if (plan.continuity.isNotEmpty()) dao.insertEvents(plan.continuity)
+                if (plan.memberships.isNotEmpty()) dao.insertMemberships(plan.memberships)
+                plan.world
             }
         }
     }
 
     /**
-     * World definition export preserves the currently representable setting, cast,
-     * relationships and accepted events. Refuse nonempty linked resources rather
-     * than falsely claiming to export their data, episodes or transcripts.
+     * Shareable authored World Definition JSON. Include all supported linked
+     * Character, Persona, Scenario and Lorebook definitions, never just IDs.
+     * No chats, attached images, unsent drafts or roleplay memory are exported:
+     * use the encrypted World archive for complete playthrough transfer.
      */
     suspend fun exportDefinition(worldId: String): String {
         val document = database.withTransaction {
             val world = requireWorld(worldId)
-            require(dao.getMemberships(worldId).isEmpty()) {
-                "World has linked resources; use complete World archive when available."
-            }
+            val memberships = dao.getMemberships(worldId)
+            require(memberships.none {
+                it.resourceType in setOf(
+                    WorldResourceType.CHAT.name, WorldResourceType.NPC_LIBRARY_BANK.name
+                )
+            }) { "Chat and NPC Bank links require an encrypted World archive." }
             val links = requireNotNull(worldLinksAdapter.fromJson(world.linksJson)) {
-                "World relationship data is invalid."
+                "World role and relationship data is invalid."
             }
-            require(links.castRoles.isEmpty() &&
-                requireNotNull(stringsAdapter.fromJson(world.defaultLorebookIdsJson)).isEmpty()) {
-                "World role/default Lorebook links require complete export."
+            require(links.castRoles.none { it.roleType == "NPC_LIBRARY" }) {
+                "NPC Library role links require an encrypted World archive."
             }
             val cast = dao.getCast(worldId)
             val castIds = cast.map { it.worldCharacterId }.toSet()
             require(links.relationships.all {
                 it.fromWorldCharacterId in castIds && it.toWorldCharacterId in castIds
             }) { "World relationship refers to a missing cast member." }
-
             val events = dao.getEvents(worldId).filter { it.status == "ACCEPTED" }
             require(events.all { it.sourceChatId == null }) {
-                "Accepted event references a chat; use complete World archive."
+                "Accepted event cites a chat; use encrypted World archive."
+            }
+
+            val scenarioIds = (
+                memberships.filter { it.resourceType == WorldResourceType.SCENARIO.name }
+                    .map { it.resourceId } +
+                links.castRoles.filter { it.roleType == "SCENARIO_NPC" }
+                    .mapNotNull { it.scenarioId } +
+                cast.filter { it.provenanceKind.uppercase() == "SCENARIO" }
+                    .mapNotNull { it.provenanceId }
+            ).toSortedSet()
+            val scenarios = scenarioIds.map { id ->
+                val saved = requireNotNull(database.scenarioDao().get(id)) {
+                    "Linked Scenario was deleted; remove the link before export."
+                }
+                WorldScenarioV1(id, ScenarioCodec.decode(saved.definitionJson))
+            }
+            val characterIds = (
+                memberships.filter { it.resourceType == WorldResourceType.CHARACTER.name }
+                    .map { it.resourceId } +
+                links.castRoles.filter { it.roleType == "CHARACTER" }
+                    .map { it.resourceId } +
+                cast.filter { it.provenanceKind.uppercase() == "CHARACTER" }
+                    .mapNotNull { it.provenanceId } +
+                scenarios.flatMap { item ->
+                    item.definition.npcs.mapNotNull { it.sourceCharacterId }
+                }
+            ).toSortedSet()
+            val personaIds = (
+                memberships.filter { it.resourceType == WorldResourceType.PERSONA.name }
+                    .map { it.resourceId } +
+                links.castRoles.filter { it.roleType == "PERSONA" }
+                    .map { it.resourceId } +
+                cast.filter { it.provenanceKind.uppercase() == "PERSONA" }
+                    .mapNotNull { it.provenanceId }
+            ).toSortedSet()
+            val defaultLorebooks = requireNotNull(
+                stringsAdapter.fromJson(world.defaultLorebookIdsJson)
+            )
+            val lorebookIds = (
+                memberships.filter { it.resourceType == WorldResourceType.LOREBOOK.name }
+                    .map { it.resourceId } + defaultLorebooks
+            ).toSortedSet()
+            val charRepo = CharacterRepository(database.characterDao(), jsonCodec)
+            val personaRepo = PersonaRepository(database.personaDao(), jsonCodec)
+            val loreRepo = LorebookRepository(database.lorebookDao(), jsonCodec)
+            fun parsedObject(raw: String, label: String): Map<String, Any?> =
+                requireNotNull(resourcesMapAdapter.fromJson(raw)) {
+                    "Linked $label returned an empty definition."
+                }
+            val characterCards = characterIds.map { id ->
+                parsedObject(charRepo.exportCharacterJson(id), "Character")
+            }
+            val personaCards = personaIds.map { id ->
+                parsedObject(personaRepo.exportPersonaJson(id), "Persona")
+            }
+            val lorebookCards = lorebookIds.map { id ->
+                parsedObject(loreRepo.exportJson(id), "Lorebook")
             }
             WorldDefinitionV1(
                 format = WorldDefinitionCodec.FORMAT,
@@ -142,34 +151,44 @@ class WorldRepository(
                     description = world.description,
                     settingSummary = world.settingSummary,
                     worldRules = world.worldRules,
-                    genreTags = requireNotNull(stringsAdapter.fromJson(world.genreTagsJson))
+                    genreTags = requireNotNull(stringsAdapter.fromJson(world.genreTagsJson)),
+                    defaultLorebookIds = defaultLorebooks
                 ),
-                resources = WorldResourcesV1(worldCast = cast.map { member ->
-                    WorldCastV1(
-                        worldCharacterId = member.worldCharacterId,
-                        name = member.name,
-                        aliases = requireNotNull(stringsAdapter.fromJson(member.aliasesJson)),
-                        profile = mapOf(
-                            "identity" to member.identity,
-                            "appearance" to member.appearance,
-                            "personality" to member.personality,
-                            "voice" to member.voice,
-                            "backstory" to member.backstory,
-                            "motivations" to member.motivations,
-                            "knowledge_limits" to member.knowledgeLimits,
-                            "role" to member.role
-                        ),
-                        provenance = WorldProvenanceV1(sourceKind = "import"),
-                        lockedFields = requireNotNull(stringsAdapter.fromJson(member.lockedFieldsJson))
-                    )
-                }),
+                resources = WorldResourcesV1(
+                    characters = characterCards,
+                    personas = personaCards,
+                    scenarios = scenarios,
+                    lorebooks = lorebookCards,
+                    worldCast = cast.map { member ->
+                        WorldCastV1(
+                            worldCharacterId = member.worldCharacterId,
+                            name = member.name,
+                            aliases = requireNotNull(stringsAdapter.fromJson(member.aliasesJson)),
+                            profile = mapOf(
+                                "identity" to member.identity,
+                                "appearance" to member.appearance,
+                                "personality" to member.personality,
+                                "voice" to member.voice,
+                                "backstory" to member.backstory,
+                                "motivations" to member.motivations,
+                                "knowledge_limits" to member.knowledgeLimits,
+                                "role" to member.role
+                            ),
+                            provenance = WorldProvenanceV1(
+                                sourceKind = member.provenanceKind,
+                                sourceId = member.provenanceId
+                            ),
+                            lockedFields = requireNotNull(
+                                stringsAdapter.fromJson(member.lockedFieldsJson)
+                            )
+                        )
+                    }
+                ),
                 links = links,
                 continuity = events.map { event ->
                     WorldContinuityV1(
-                        eventId = event.eventId,
-                        title = event.title,
-                        facts = event.facts,
-                        status = "ACCEPTED",
+                        eventId = event.eventId, title = event.title,
+                        facts = event.facts, status = "ACCEPTED",
                         relatedWorldCharacterIds = requireNotNull(
                             stringsAdapter.fromJson(event.relatedCastIdsJson)
                         )
@@ -177,6 +196,9 @@ class WorldRepository(
                 }
             )
         }
+        // The same dependency validator used by import runs BEFORE returning
+        // anything, so an export never claims to be portable when links are missing.
+        WorldDefinitionBundleResources(database, jsonCodec).prepare(document)
         return WorldDefinitionCodec.encode(document)
     }
 
@@ -291,6 +313,9 @@ class WorldRepository(
 
     /** World-only deletion: linked chat transcripts and source records survive. */
     suspend fun deleteWorld(worldId: String) = coordinator.withMutation {
+        require(database.campaignDao().forWorld(worldId).isEmpty()) {
+            "This World contains Campaigns. Delete or move their chapters explicitly first; chats will not be deleted."
+        }
         dao.deleteWorld(worldId)
     }
 

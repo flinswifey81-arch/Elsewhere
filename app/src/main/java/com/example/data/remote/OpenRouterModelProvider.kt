@@ -36,6 +36,9 @@ class OpenRouterModelProvider(
 
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
     private val imageCapabilities = ConcurrentHashMap<String, Boolean>()
+    private val cachedContextLengths = ConcurrentHashMap<String, Int>()
+
+    override fun cachedContextLength(modelId: String): Int? = cachedContextLengths[modelId]
 
     override suspend fun getModels(): List<OpenRouterModel> = withContext(Dispatchers.IO) {
         val apiKey = apiKeyProvider() ?: throw IllegalStateException("API key not configured")
@@ -71,6 +74,9 @@ class OpenRouterModelProvider(
                     pricingCompletion = pricing?.get("completion")?.toString() ?: "0",
                     inputModalities = inputModalities
                 ).also { model ->
+                    if (model.id.isNotBlank() && model.contextLength > 0) {
+                        cachedContextLengths[model.id] = model.contextLength
+                    }
                     if (inputModalities.isNotEmpty()) {
                         imageCapabilities[model.id] = "image" in inputModalities
                     }

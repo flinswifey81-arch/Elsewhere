@@ -80,6 +80,448 @@ class BackupRepositoryTest {
     }
 
     @Test
+    fun encryptedBackupRoundTripsStoryMemoryActorKnowledgeAndExplicitWackReturn() = runBlocking {
+        val source = environment()
+        val chat = ChatEntity(chatId = "story-v16", displayName = "Memory Archive", chatType = ChatType.SOLO)
+        source.database.chatDao().insertChat(chat)
+        val record = StoryMemoryEntity(
+            memoryId = "story-1", chatId = chat.chatId, ownerId = chat.chatId,
+            content = "The chapel bell conceals a letter.",
+            claim = "SECRET", visibility = "STORYTELLER_ONLY",
+            originKind = "MANUAL", sourceOrderIndex = 17L,
+            createdAtEpochMillis = 1_700L, updatedAtEpochMillis = 1_800L,
+            pinned = true
+        )
+        source.database.storyMemoryDao().insert(record)
+        source.database.storyMemoryDao().insertActor(
+            StoryMemoryActorEntity(record.memoryId, "CHARACTER", "rowan", "MENTIONED")
+        )
+        source.database.storyMemoryDao().insertReturn(
+            StoryMemoryReturnEntity(
+                memoryId = record.memoryId,
+                resetBoundaryOrderIndex = 25L,
+                chatId = chat.chatId,
+                branchId = null,
+                approvedAtOrderIndex = 26L,
+                initiatedByUser = true
+            )
+        )
+        val encrypted = ByteArrayOutputStream()
+        source.repository.exportEncrypted(encrypted, PASSPHRASE.toCharArray())
+        val target = environment()
+        target.repository.restoreEncrypted(ByteArrayInputStream(encrypted.toByteArray()), PASSPHRASE.toCharArray())
+        assertEquals(source.database.storyMemoryDao().getAll(), target.database.storyMemoryDao().getAll())
+        assertEquals(source.database.storyMemoryDao().getAllActors(), target.database.storyMemoryDao().getAllActors())
+        assertEquals(source.database.storyMemoryDao().getAllReturns(), target.database.storyMemoryDao().getAllReturns())
+        assertEquals("Memory Archive", target.database.chatDao().getChatById(chat.chatId)?.displayName)
+    }
+
+    @Test
+    fun encryptedBackupPreservesIndependentCampaignChaptersAndRestoresOverExistingCampaigns() = runBlocking {
+        val source = environment()
+        val worldRepo = com.example.domain.repository.WorldRepository(source.database)
+        val campaignRepo = com.example.domain.repository.CampaignRepository(source.database)
+        val world = worldRepo.createWorld("Shared setting")
+        val first = campaignRepo.createCampaign(world.worldId, "First playthrough")
+        val second = campaignRepo.createCampaign(world.worldId, "Second playthrough")
+        source.database.chatDao().insertChat(ChatEntity(
+            chatId = "campaign-chat-a", displayName = "Journey A", chatType = ChatType.SOLO
+        ))
+        source.database.chatDao().insertChat(ChatEntity(
+            chatId = "campaign-chat-b", displayName = "Journey B", chatType = ChatType.GROUP
+        ))
+        val chapterA = campaignRepo.addChapter(first.campaignId, "campaign-chat-a", "First chapter")
+        campaignRepo.addChapter(second.campaignId, "campaign-chat-b", "Separate chapter")
+        campaignRepo.updateChapter(first.campaignId, chapterA.chapterId, "Revised chapter",
+            "Private story recap only for A.", true)
+        source.database.messageDao().insertMessage(MessageEntity(
+            messageId = "campaign-message-a", chatId = "campaign-chat-a",
+            speakerType = SpeakerType.CHARACTER, speakerId = "npc-a",
+            speakerDisplayNameSnapshot = "NPC", content = "An existing narrative turn.",
+            orderIndex = 1L
+        ))
+        val checkpoint = campaignRepo.saveCheckpoint(
+            first.campaignId, chapterA.chapterId, "Retain selected branch", "A private checkpoint."
+        )
+        val note = campaignRepo.addJournalNote(
+            second.campaignId, "A different timeline", "Only Campaign B should see this."
+        )
+        assertEquals("campaign-message-a", checkpoint.sourceMessageId)
+        val arc = campaignRepo.addContinuityItem(
+            first.campaignId, "ARC", "Chapter arc",
+            "Only Campaign A had this arc.", chapterA.chapterId, checkpoint.journalEntryId
+        )
+        val promise = campaignRepo.addContinuityItem(
+            second.campaignId, "PROMISE", "Return a letter",
+            "Only Campaign B has this unresolved obligation."
+        )
+        val completedArc = campaignRepo.updateContinuityItem(
+            first.campaignId, arc.itemId, arc.title, arc.details,
+            "COMPLETE", "The arc ended in the first chapter.", chapterA.chapterId
+        )
+        assertEquals("COMPLETE", completedArc.status)
+        assertEquals("OPEN", promise.status)
+        val sourceMemory = com.example.domain.repository.StoryMemoryRepository(source.database)
+            .saveManual("campaign-chat-a", "A private silver compass promise.")
+        val share = campaignRepo.shareStoryMemoryWithCampaign(
+            first.campaignId, "campaign-chat-a", sourceMemory.memoryId
+        )
+        assertEquals(sourceMemory.memoryId, share.sourceMemoryId)
+        val bytes = ByteArrayOutputStream()
+        val preview = source.repository.exportEncrypted(bytes, PASSPHRASE.toCharArray())
+        assertEquals(2, preview.campaigns)
+        assertEquals(2, preview.campaignJournalEntries)
+        assertEquals(2, preview.campaignContinuityItems)
+        assertEquals(1, preview.campaignMemoryShares)
+
+        val target = environment()
+        val targetWorld = com.example.domain.repository.WorldRepository(target.database).createWorld("Pre-restore")
+        val targetCampaign = com.example.domain.repository.CampaignRepository(target.database)
+            .createCampaign(targetWorld.worldId, "Old campaign")
+        assertNotNull(target.database.campaignDao().getCampaign(targetCampaign.campaignId))
+
+        target.repository.restoreEncrypted(ByteArrayInputStream(bytes.toByteArray()), PASSPHRASE.toCharArray())
+        assertEquals(source.database.campaignDao().getAllCampaigns(),
+            target.database.campaignDao().getAllCampaigns())
+        assertEquals(source.database.campaignDao().getAllChapters(),
+            target.database.campaignDao().getAllChapters())
+        assertEquals(source.database.campaignDao().getAllJournalEntries(),
+            target.database.campaignDao().getAllJournalEntries())
+        assertEquals(source.database.campaignDao().getAllContinuityItems(),
+            target.database.campaignDao().getAllContinuityItems())
+        assertEquals(source.database.campaignDao().getAllMemoryShares(),
+            target.database.campaignDao().getAllMemoryShares())
+        assertEquals("A private silver compass promise.",
+            target.database.storyMemoryDao().get(sourceMemory.memoryId)?.content)
+        assertEquals(1, target.database.campaignDao().continuityItems(first.campaignId).size)
+        assertEquals(1, target.database.campaignDao().continuityItems(second.campaignId).size)
+        assertEquals("COMPLETE",
+            target.database.campaignDao().getContinuityItem(arc.itemId)?.status)
+        assertEquals("OPEN",
+            target.database.campaignDao().getContinuityItem(promise.itemId)?.status)
+        assertEquals(1, target.database.campaignDao().journal(first.campaignId).size)
+        assertEquals(1, target.database.campaignDao().journal(second.campaignId).size)
+        assertEquals("A private checkpoint.",
+            target.database.campaignDao().getJournalEntry(checkpoint.journalEntryId)?.body)
+        assertEquals("Only Campaign B should see this.",
+            target.database.campaignDao().getJournalEntry(note.journalEntryId)?.body)
+        assertEquals("Private story recap only for A.",
+            target.database.campaignDao().chapters(first.campaignId).single().recap)
+        assertTrue(target.database.campaignDao().chapters(second.campaignId)
+            .none { it.chatId == "campaign-chat-a" })
+        assertNotNull(target.database.messageDao().getMessageById("campaign-message-a"))
+        assertTrue(target.database.campaignDao().forWorld(targetWorld.worldId).isEmpty())
+    }
+
+    @Test
+    fun encryptedBackupPreservesPendingAndRejectedMessageCandidatesWithoutApprovingThem() = runBlocking {
+        val source = environment()
+        val chatId = "review-backup"
+        source.database.chatDao().insertChat(
+            ChatEntity(chatId = chatId, displayName = "Review archive", chatType = ChatType.SOLO)
+        )
+        source.database.messageDao().insertMessage(MessageEntity(
+            messageId = "discovery-source", chatId = chatId,
+            speakerType = SpeakerType.CHARACTER, speakerId = "rowan",
+            speakerDisplayNameSnapshot = "Rowan",
+            content = "We discovered the ancient map behind the portrait.",
+            orderIndex = 1L
+        ))
+        source.database.messageDao().insertMessage(MessageEntity(
+            messageId = "promise-source", chatId = chatId,
+            speakerType = SpeakerType.PERSONA, speakerId = "mara",
+            speakerDisplayNameSnapshot = "Mara",
+            content = "I promise to return the sapphire pendant.",
+            orderIndex = 2L
+        ))
+        val memory = com.example.domain.repository.StoryMemoryRepository(source.database)
+        assertEquals(2, memory.scanRecentCandidateMessages(chatId).newCandidates)
+        val proposal = source.database.storyMemoryDao().forChat(chatId).first {
+            it.sourceMessageId == "promise-source"
+        }
+        memory.reviewCandidate(chatId, proposal.memoryId, approve = false)
+        val originals = source.database.storyMemoryDao().forChat(chatId)
+        assertEquals(setOf("PENDING_REVIEW", "REJECTED"), originals.map { it.review }.toSet())
+
+        val encrypted = ByteArrayOutputStream()
+        source.repository.exportEncrypted(encrypted, PASSPHRASE.toCharArray())
+        val target = environment()
+        target.repository.restoreEncrypted(
+            ByteArrayInputStream(encrypted.toByteArray()), PASSPHRASE.toCharArray()
+        )
+        assertEquals(source.database.storyMemoryDao().getAll(),
+            target.database.storyMemoryDao().getAll())
+        assertEquals(setOf("PENDING_REVIEW", "REJECTED"),
+            target.database.storyMemoryDao().forChat(chatId).map { it.review }.toSet())
+        val targetStory = com.example.domain.repository.StoryMemoryRepository(target.database)
+        assertEquals(0, targetStory.scanRecentCandidateMessages(chatId).newCandidates)
+        assertTrue(targetStory.retrieveForGeneration(
+            chatId,
+            com.example.domain.memory.StoryActorRef(
+                com.example.domain.memory.StoryActorKind.NARRATOR, "narrator:$chatId"
+            ),
+            sceneText = "ancient map sapphire pendant"
+        ).selected.isEmpty())
+    }
+
+    @Test
+    fun encryptedBackupPreservesLinkedPromiseOutcomeAndNoImplicitKnowledge() = runBlocking {
+        val source = environment()
+        val chatId = "promise-backup"
+        source.database.characterDao().insertCharacter(character("rowan", "Rowan"))
+        source.database.personaDao().insertPersona(
+            PersonaEntity(
+                personaId = "mara", displayName = "Mara", personaName = "Mara",
+                aliases = emptyList(), importSchemaVersion = 1,
+                identityJson = null, appearanceJson = null, personalityJson = null,
+                roleplayProfileJson = null, backgroundJson = null,
+                worldContextJson = null, privateNotesJson = null, extensionFieldsJson = null
+            )
+        )
+        source.database.chatDao().insertChat(
+            ChatEntity(chatId = chatId, displayName = "Promise archive", chatType = ChatType.SOLO)
+        )
+        source.database.chatDao().insertChatParticipant(
+            ChatParticipantEntity(chatId = chatId, characterId = "rowan")
+        )
+        source.database.chatDao().insertChatPersonaParticipant(
+            ChatPersonaParticipantEntity(chatId = chatId, personaId = "mara")
+        )
+        val from = com.example.domain.memory.StoryActorRef(
+            com.example.domain.memory.StoryActorKind.PERSONA, "mara"
+        )
+        val to = com.example.domain.memory.StoryActorRef(
+            com.example.domain.memory.StoryActorKind.CHARACTER, "rowan"
+        )
+        val story = com.example.domain.repository.StoryMemoryRepository(source.database)
+        val original = story.savePromise(
+            chatId, from, to, "Mara promises Rowan the silver key."
+        )
+        val resolution = story.closePromise(
+            chatId, original.memory.memoryId,
+            com.example.domain.repository.StoryPromiseOutcome.KEPT,
+            "Mara delivered the key personally."
+        )
+        assertEquals(original.memory.memoryId, resolution.memory.previousStateMemoryId)
+        val encrypted = ByteArrayOutputStream()
+        source.repository.exportEncrypted(encrypted, PASSPHRASE.toCharArray())
+        val target = environment()
+        target.repository.restoreEncrypted(
+            ByteArrayInputStream(encrypted.toByteArray()), PASSPHRASE.toCharArray()
+        )
+        assertEquals(source.database.storyMemoryDao().getAll(),
+            target.database.storyMemoryDao().getAll())
+        assertEquals(source.database.storyMemoryDao().getAllActors(),
+            target.database.storyMemoryDao().getAllActors())
+        val restored = com.example.domain.repository.StoryMemoryRepository(target.database)
+        val history = restored.getPromiseHistory(chatId)
+        assertEquals(2, history.size)
+        assertEquals(listOf("SUPERSEDED", "RESOLVED"), history.map { it.memory.lifecycle })
+        assertEquals("KEPT", history.last().memory.promiseOutcome)
+        assertEquals(history.first().memory.memoryId, history.last().memory.previousStateMemoryId)
+        assertEquals(from, history.last().from)
+        assertEquals(to, history.last().to)
+        assertTrue(restored.getCharacterKnowers(chatId, history.last().memory.memoryId).isEmpty())
+    }
+
+    @Test
+    fun encryptedBackupPreservesTypedRelationshipHistoryAndSupersededState() = runBlocking {
+        val source = environment()
+        val chatId = "relationship-backup"
+        source.database.characterDao().insertCharacter(character("rowan", "Rowan"))
+        source.database.personaDao().insertPersona(
+            PersonaEntity(
+                personaId = "mara", displayName = "Mara", personaName = "Mara",
+                aliases = emptyList(), importSchemaVersion = 1,
+                identityJson = null, appearanceJson = null, personalityJson = null,
+                roleplayProfileJson = null, backgroundJson = null,
+                worldContextJson = null, privateNotesJson = null,
+                extensionFieldsJson = null
+            )
+        )
+        source.database.chatDao().insertChat(
+            ChatEntity(chatId = chatId, displayName = "Relationship history", chatType = ChatType.SOLO)
+        )
+        source.database.chatDao().insertChatParticipant(
+            ChatParticipantEntity(chatId = chatId, characterId = "rowan")
+        )
+        source.database.chatDao().insertChatPersonaParticipant(
+            ChatPersonaParticipantEntity(chatId = chatId, personaId = "mara")
+        )
+        val story = com.example.domain.repository.StoryMemoryRepository(source.database)
+        val from = com.example.domain.memory.StoryActorRef(
+            com.example.domain.memory.StoryActorKind.PERSONA, "mara"
+        )
+        val to = com.example.domain.memory.StoryActorRef(
+            com.example.domain.memory.StoryActorKind.CHARACTER, "rowan"
+        )
+        val first = story.saveRelationshipChange(
+            chatId, from, to, "Mara distrusts Rowan after their argument."
+        )
+        story.setCharacterKnowledge(chatId, first.memory.memoryId, setOf("rowan"))
+        story.setCharacterKnowledge(chatId, first.memory.memoryId, emptySet())
+        assertEquals(2, source.database.storyMemoryDao().getAllKnowledgeChanges().size)
+        story.recordCharacterPerspective(
+            chatId, first.memory.memoryId, "rowan",
+            com.example.domain.memory.StoryCharacterPerspective.SUSPECTS,
+            "The apology may be a trap."
+        )
+        story.recordCharacterPerspective(
+            chatId, first.memory.memoryId, "rowan",
+            com.example.domain.memory.StoryCharacterPerspective.BELIEVES,
+            "Rowan considers forgiveness plausible."
+        )
+        story.saveRelationshipChange(
+            chatId, from, to, "Rowan made amends; Mara forgives him.",
+            supersedeMemoryId = first.memory.memoryId
+        )
+
+        val encrypted = ByteArrayOutputStream()
+        source.repository.exportEncrypted(encrypted, PASSPHRASE.toCharArray())
+        val target = environment()
+        target.repository.restoreEncrypted(
+            ByteArrayInputStream(encrypted.toByteArray()), PASSPHRASE.toCharArray()
+        )
+        assertEquals(source.database.storyMemoryDao().getAll(),
+            target.database.storyMemoryDao().getAll())
+        assertEquals(source.database.storyMemoryDao().getAllActors(),
+            target.database.storyMemoryDao().getAllActors())
+        assertEquals(source.database.storyMemoryDao().getAllKnowledgeChanges(),
+            target.database.storyMemoryDao().getAllKnowledgeChanges())
+        assertEquals(source.database.storyMemoryDao().getAllPerspectives(),
+            target.database.storyMemoryDao().getAllPerspectives())
+        val restored = com.example.domain.repository.StoryMemoryRepository(target.database)
+            .getRelationshipHistory(chatId)
+        assertEquals(2, restored.size)
+        assertEquals(listOf("SUPERSEDED", "ACTIVE"),
+            restored.map { it.memory.lifecycle })
+        assertEquals(listOf(from, from), restored.map { it.from })
+        assertEquals(listOf(to, to), restored.map { it.to })
+        assertEquals("Mara distrusts Rowan after their argument.",
+            restored.first().memory.content)
+        assertEquals("Rowan made amends; Mara forgives him.",
+            restored.last().memory.content)
+    }
+
+    @Test
+    fun historicalPayloadWithoutV16MemoryListsDecodesToEmptyCollections() {
+        val json = BackupArchiveIO(moshi, BuildConfig.APPLICATION_ID).payloadToJson(completePayload())
+        val historical = listOf("storyMemories", "storyMemoryActors", "storyMemoryReturns")
+            .fold(json) { current, field ->
+                current.replace(Regex(""",\s*"$field"\s*:\s*\[\]"""), "")
+            }
+        assertNotEquals(json, historical)
+        val decoded = requireNotNull(moshi.adapter(BackupPayload::class.java).fromJson(historical))
+        assertTrue(decoded.storyMemories.isEmpty())
+        assertTrue(decoded.storyMemoryActors.isEmpty())
+        assertTrue(decoded.storyMemoryReturns.isEmpty())
+        assertEquals(completePayload().chats, decoded.chats)
+    }
+
+    /**
+     * A synthetic v15-format encrypted archive, with v16 collections ABSENT
+     * (not present as empty lists), must restore through the real v16 archive
+     * validator and database replacement path. This is not a device-derived
+     * production backup and does not satisfy the release's real-data QA gate.
+     */
+    @Test
+    fun encryptedV15ShapeRestoresLegacyHistoryVariantsMemoryAndWackIntoV16() = runBlocking {
+        val source = environment()
+        val oldCharacter = character("historical-character", "Old Character")
+        source.database.characterDao().insertCharacter(oldCharacter)
+        val chat = ChatEntity(
+            chatId = "historical-chat", displayName = "Old Story",
+            chatType = ChatType.SOLO, contextResetOrderIndex = 15L
+        )
+        source.database.chatDao().insertChat(chat)
+        val selected = MessageEntity(
+            messageId = "historical-selected", chatId = chat.chatId,
+            speakerType = SpeakerType.CHARACTER, speakerId = oldCharacter.characterId,
+            speakerDisplayNameSnapshot = "Old Character",
+            content = "I promised to bring the map.", orderIndex = 30L,
+            variantGroupId = "historical-fork", isPrimaryVariant = true
+        )
+        val alternate = selected.copy(
+            messageId = "historical-alternate",
+            content = "I promised to bring the lantern.",
+            isPrimaryVariant = false
+        )
+        source.database.messageDao().insertMessage(selected)
+        source.database.messageDao().insertMessage(alternate)
+        val originalMemory = RoleplayMemoryEntity(
+            memoryId = "historical-memory", chatId = chat.chatId,
+            characterId = oldCharacter.characterId,
+            category = MemoryCategory.PROMISE,
+            content = "Bring the map back to the chapel.",
+            sourceMessageId = selected.messageId
+        )
+        source.database.backupDao().insertRoleplayMemories(listOf(originalMemory))
+        source.database.backupDao().insertConversationSummaries(listOf(
+            ConversationSummaryEntity(chat.chatId, "They crossed the ruined bridge.", 30L)
+        ))
+
+        val historicalPayload = source.readPayload()
+        val archive = BackupArchiveIO(moshi, BuildConfig.APPLICATION_ID)
+        val currentJson = archive.payloadToJson(historicalPayload)
+        val historicalJson = listOf(
+            "storyMemories", "storyMemoryActors", "storyMemoryReturns"
+        ).fold(currentJson) { json, field ->
+            json.replace(Regex(""",\s*"$field"\s*:\s*\[\]"""), "")
+        }
+        assertNotEquals(currentJson, historicalJson)
+        assertFalse(historicalJson.contains("storyMemories"))
+        val manifest = BackupManifest(
+            formatVersion = BackupArchiveIO.FORMAT_VERSION,
+            applicationId = BuildConfig.APPLICATION_ID,
+            appVersionCode = 1L,
+            appVersionName = "simulated-v15",
+            databaseVersion = 15,
+            createdAt = 1_000L,
+            payloadSha256 = BackupArchiveIO.sha256(
+                ByteArrayInputStream(historicalJson.toByteArray(Charsets.UTF_8))
+            ),
+            files = emptyList(),
+            excludedCategories = emptyList(),
+            coopRestoreMode = "OFFLINE_NON_RESUMABLE_HISTORY"
+        )
+        val plain = ByteArrayOutputStream()
+        archive.writePlainZip(
+            BackupSnapshot(
+                manifest = manifest, payload = historicalPayload,
+                payloadJson = historicalJson, binaries = emptyList(),
+                stagingDirectory = context.cacheDir
+            ), plain
+        )
+        val encrypted = ByteArrayOutputStream()
+        BackupCrypto.encrypt(
+            ByteArrayInputStream(plain.toByteArray()), encrypted,
+            PASSPHRASE.toCharArray()
+        )
+
+        val target = environment()
+        val bytes = encrypted.toByteArray()
+        val inspection = target.repository.inspectEncryptedForRestore(
+            ByteArrayInputStream(bytes), PASSPHRASE.toCharArray()
+        )
+        assertEquals(15, inspection.preview.databaseVersion)
+        val result = target.repository.restoreEncrypted(
+            ByteArrayInputStream(bytes), PASSPHRASE.toCharArray(),
+            expectedEncryptedSha256 = inspection.encryptedSha256
+        )
+        val restored = target.readPayload()
+        assertEquals(2, result.restoredMessages)
+        assertEquals(historicalPayload.chats, restored.chats)
+        assertEquals(historicalPayload.messages.toSet(), restored.messages.toSet())
+        assertEquals(historicalPayload.roleplayMemories, restored.roleplayMemories)
+        assertEquals(historicalPayload.conversationSummaries, restored.conversationSummaries)
+        assertEquals(1, restored.messages.count { it.isPrimaryVariant })
+        assertEquals(15L, target.database.chatDao().getChatById(chat.chatId)?.contextResetOrderIndex)
+        assertTrue(target.database.storyMemoryDao().getAll().isEmpty())
+        assertTrue(target.database.storyMemoryDao().getAllActors().isEmpty())
+        assertTrue(target.database.storyMemoryDao().getAllReturns().isEmpty())
+    }
+
+    @Test
     fun staleWorldChatLinkDoesNotBlockEncryptedBackup() = runBlocking {
         val source = environment()
         val chat = ChatEntity(chatId = "removed-world-chat", displayName = "Disposable", chatType = ChatType.SOLO)

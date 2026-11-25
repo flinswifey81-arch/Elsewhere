@@ -15,6 +15,10 @@ interface CharacterDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertCharacter(character: CharacterEntity)
 
+    /** New identities must never delete/recreate an existing Character row. */
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertNewCharacter(character: CharacterEntity)
+
     @Update
     suspend fun updateCharacter(character: CharacterEntity)
 

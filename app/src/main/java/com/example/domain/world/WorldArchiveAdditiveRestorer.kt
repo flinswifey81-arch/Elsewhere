@@ -286,6 +286,18 @@ class WorldArchiveAdditiveRestorer(
         if (state.chatSettings.isNotEmpty()) backup.insertChatSettings(state.chatSettings)
         if (state.generationMetadata.isNotEmpty()) backup.insertGenerationMetadata(state.generationMetadata)
         if (state.roleplayMemories.isNotEmpty()) backup.insertRoleplayMemories(state.roleplayMemories)
+        // Story Memory V2's parent and every child record must join the SAME atomic
+        // World restore. Its Wack/knowledge provenance must not be reconstructed.
+        val storyMemoryDao = database.storyMemoryDao()
+        if (state.storyMemories.isNotEmpty()) storyMemoryDao.insertAll(state.storyMemories)
+        if (state.storyMemoryActors.isNotEmpty()) storyMemoryDao.insertActors(state.storyMemoryActors)
+        if (state.storyMemoryReturns.isNotEmpty()) storyMemoryDao.insertReturns(state.storyMemoryReturns)
+        if (state.storyMemoryKnowledgeChanges.isNotEmpty()) {
+            storyMemoryDao.insertKnowledgeChanges(state.storyMemoryKnowledgeChanges)
+        }
+        if (state.storyMemoryPerspectives.isNotEmpty()) {
+            storyMemoryDao.insertPerspectives(state.storyMemoryPerspectives)
+        }
         if (state.conversationSummaries.isNotEmpty()) backup.insertConversationSummaries(state.conversationSummaries)
         if (state.lorebooks.isNotEmpty()) backup.insertLorebooks(state.lorebooks)
         if (state.lorebookEntries.isNotEmpty()) backup.insertLorebookEntries(state.lorebookEntries)
@@ -312,6 +324,20 @@ class WorldArchiveAdditiveRestorer(
         if (state.memberships.isNotEmpty()) world.insertMemberships(state.memberships)
         if (state.cast.isNotEmpty()) world.insertCast(state.cast)
         if (state.continuity.isNotEmpty()) world.insertEvents(state.continuity)
+        // Preserve private Campaign organization after World/chat/memory parents exist.
+        // Every row remains inside this same rollback-safe Room transaction.
+        val campaign = database.campaignDao()
+        if (state.campaigns.isNotEmpty()) campaign.insertCampaigns(state.campaigns)
+        if (state.campaignChapters.isNotEmpty()) campaign.insertChapters(state.campaignChapters)
+        if (state.campaignJournalEntries.isNotEmpty()) {
+            campaign.insertJournalEntries(state.campaignJournalEntries)
+        }
+        if (state.campaignContinuityItems.isNotEmpty()) {
+            campaign.insertContinuityItems(state.campaignContinuityItems)
+        }
+        if (state.campaignMemoryShares.isNotEmpty()) {
+            campaign.insertMemoryShares(state.campaignMemoryShares)
+        }
     }
 
     private fun journalFile(worldId: String): File {

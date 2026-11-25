@@ -1,0 +1,161 @@
+name: Disposable Android Emulator v15 to v21 Package Upgrade
+
+on:
+  pull_request:
+    # No full work on drafts, but run automatically on review readiness.
+    types: [opened, reopened, synchronize, ready_for_review, converted_to_draft]
+    branches:
+      - main
+    paths:
+      - 'qa/device-upgrade/**'
+      - '.github/workflows/android-emulator-v15-v21-upgrade.yml'
+      - 'qa/v15-v21/FullV15RoomFixtureExportTest.kt'
+      - 'app/src/main/**'
+      - 'app/src/androidTest/**'
+      - 'app/build.gradle.kts'
+      - 'build.gradle.kts'
+      - 'settings.gradle.kts'
+      - 'gradle/**'
+  # Run the same isolated gate on an explicitly queued draft checkpoint.
+  # Routine draft changes still do not start hardware/fixture rehearsals.
+  push:
+    branches:
+      - work/memory-v2-stabilization-2026-11-18
+    paths:
+      - 'qa/offline-release-checkpoint.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: elsewhere-full-emulator-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+# Keep the established workflow/job check identity so existing required checks
+# remain enforced while the target Room version advances from v21 to v22.
+jobs:
+  emulator-v15-to-v21:
+    # Ordinary draft PR events skip this gate. A checkpoint push or manual
+    # dispatch can run it without changing the draft's review state.
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
+    name: Fresh emulator / actual install -r / Room v15 to v21 retention
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      ELSEWHERE_V15_FIXTURE_PATH: /tmp/elsewhere-emulator-v15-synthetic.db
+      ELSEWHERE_DISPOSABLE_EMULATOR_ONLY: '1'
+    steps:
+      - name: Check out draft candidate (no write credentials)
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Check out pinned original v1.5.2 (separate temporary folder)
+        uses: actions/checkout@v4
+        with:
+          ref: b2295d69877ba003e6473c8a40e1f7a514c560f7
+          path: pinned-v15-emulator
+          persist-credentials: false
+
+      - name: Verify frozen baseline and Python test syntax
+        run: |
+          set -euo pipefail
+          test "$(git -C pinned-v15-emulator rev-parse HEAD)" = b2295d69877ba003e6473c8a40e1f7a514c560f7
+          grep -q 'const val APP_DATABASE_VERSION = 15' pinned-v15-emulator/app/src/main/java/com/example/data/AppDatabase.kt
+          grep -q 'const val APP_DATABASE_VERSION = 26' app/src/main/java/com/example/data/AppDatabase.kt
+          python3 -m py_compile qa/device-upgrade/verify_disposable_upgrade.py
+          python3 -m unittest discover -s qa/device-upgrade -p 'test_*.py' -v
+          cp qa/v15-v21/FullV15RoomFixtureExportTest.kt pinned-v15-emulator/app/src/test/java/com/example/
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools
+
+      - name: Install compile SDK / Android APK inspection tools
+        run: sdkmanager "platforms;android-36.1" "build-tools;36.0.0"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Generate genuine synthetic Room v15 DB and historical debuggable APK
+        working-directory: pinned-v15-emulator
+        run: |
+          set -euo pipefail
+          bash ./gradlew :app:testDebugUnitTest --no-daemon --no-configuration-cache \
+            --tests com.example.FullV15RoomFixtureExportTest
+          bash ./gradlew :app:assembleDebug --no-daemon --no-configuration-cache
+          test -s "$ELSEWHERE_V15_FIXTURE_PATH"
+          test -s app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Verify prepared 1.6.0 candidate version and stage test instrumentation
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          source = Path("app/build.gradle.kts").read_text()
+          assert source.count("    versionCode = 4\n    versionName = \"1.6.0\"") == 1, (
+              "Emulator must test the same 1.6.0 (4) version configured for release"
+          )
+          print("QA_VERSION_MATCH: real source version 1.6.0 (4); "
+                "emulator uses DEBUG-only signer and disposable synthetic data")
+          PY
+          mkdir -p app/src/androidTest/java/com/example
+          cp qa/device-upgrade/UpgradeRehearsalInstrumentedTest.kt \
+            app/src/androidTest/java/com/example/UpgradeRehearsalInstrumentedTest.kt
+
+      - name: Build isolated candidate debug APK plus synthetic read-only instrumentation
+        run: |
+          bash ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest --no-daemon --no-configuration-cache
+          test -s app/build/outputs/apk/debug/app-debug.apk
+          test -s app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+
+      - name: Reject incorrect packages, signer or fixture before starting an emulator
+        run: |
+          python3 qa/device-upgrade/verify_disposable_upgrade.py \
+            --baseline pinned-v15-emulator/app/build/outputs/apk/debug/app-debug.apk \
+            --candidate app/build/outputs/apk/debug/app-debug.apk \
+            --fixture "$ELSEWHERE_V15_FIXTURE_PATH" \
+            --aapt "$ANDROID_HOME/build-tools/36.0.0/aapt" \
+            --apksigner "$ANDROID_HOME/build-tools/36.0.0/apksigner"
+
+      - name: Enable KVM for the disposable GitHub-hosted emulator
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Install v15 then update to v22 on an isolated emulator; verify row/file retention
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          # AOSP/userdebug is REQUIRED: the harness verifies emulator identity
+          # then uses adb root strictly to push/pull synthetic app-private files.
+          # Never substitute a Play Store user build or a physical device.
+          target: default
+          arch: x86_64
+          profile: pixel_5
+          disable-animations: true
+          emulator-options: -no-snapshot-load -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -camera-front none
+          # This action executes script through 'sh -c'. Supply ONE command rather
+          # than a YAML multiline shell continuation: in the initial run only
+          # the Python filename was passed and argparse rejected missing flags.
+          script: python3 qa/device-upgrade/verify_disposable_upgrade.py --baseline pinned-v15-emulator/app/build/outputs/apk/debug/app-debug.apk --candidate app/build/outputs/apk/debug/app-debug.apk --fixture "$ELSEWHERE_V15_FIXTURE_PATH" --test-apk app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk --aapt "$ANDROID_HOME/build-tools/36.0.0/aapt" --apksigner "$ANDROID_HOME/build-tools/36.0.0/apksigner" --on-emulator
+
+      - name: Delete temporary APKs, synthetic database and throwaway debug key
+        if: always()
+        run: |
+          rm -f "$ELSEWHERE_V15_FIXTURE_PATH" \
+            pinned-v15-emulator/app/build/outputs/apk/debug/app-debug.apk \
+            app/build/outputs/apk/debug/app-debug.apk \
+            app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk \
+            "$HOME/.android/debug.keystore"
+          echo "Only synthetic emulator data and disposable QA builds were used. No APK uploaded or installed on an owner's device."

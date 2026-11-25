@@ -74,8 +74,26 @@ class NpcStructuredOutputParser(moshi: Moshi) {
             val envelope = requireNotNull(adapter.fromJson(json)) { "Empty NPC metadata" }
             require(envelope.schemaVersion == SCHEMA_VERSION) { "Unsupported NPC metadata schema" }
             require(envelope.updates.size <= MAX_UPDATES) { "Too many NPC updates" }
-            val updates = envelope.updates.map(::validated)
-            ParsedNpcOutput(story, updates)
+            // One malformed dossier must not silently discard unrelated valid
+            // NPC creations in the same otherwise well-formed response.
+            // Envelope structure, schema, field allowlist and size still fail
+            // closed at the envelope level. Only per-entry semantic validation
+            // errors are isolated; never coerce unsafe fields into records.
+            var skipped = 0
+            val updates = envelope.updates.mapNotNull { entry ->
+                try {
+                    validated(entry)
+                } catch (_: IllegalArgumentException) {
+                    skipped++
+                    null
+                }
+            }
+            ParsedNpcOutput(
+                story, updates,
+                warning = if (skipped > 0)
+                    "$skipped invalid NPC update(s) were ignored; valid updates were retained."
+                else null
+            )
         } catch (_: Exception) {
             ParsedNpcOutput(story, warning = "Malformed NPC metadata was removed and ignored.")
         }

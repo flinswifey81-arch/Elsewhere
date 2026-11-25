@@ -16,6 +16,9 @@ import com.example.domain.story.StoryOutputParser
 import com.example.domain.story.StorySegmentType
 import com.example.domain.story.StoryResponseCodec
 import com.example.domain.story.StorySpeakerIdentity
+import com.example.domain.memory.StoryMemoryRecord
+import com.example.domain.memory.StoryMemoryOwnerScope
+import com.example.domain.memory.promptClaimLabel
 
 class ContextCompilerV1 {
 
@@ -30,6 +33,7 @@ class ContextCompilerV1 {
         customTargetMax: Int?,
         customHardMax: Int?,
         durableMemories: List<RoleplayMemoryEntity> = emptyList(),
+        storyMemories: List<StoryMemoryRecord> = emptyList(),
         rollingSummary: String? = null,
         recentMessageLimit: Int = 24,
         groupParticipantNames: List<String> = emptyList(),
@@ -112,7 +116,7 @@ class ContextCompilerV1 {
             if (narratorEnabled) {
                 append("--- NARRATOR GUIDANCE ---\n")
                 if (ensembleNarrationEnabled) {
-                    append("Create one flowing literary exchange in this single response. Alternate narration, the primary Character, and contextually relevant NPCs as the scene requires. Narration may convey atmosphere, pauses, transitions, consequences, and subtle emotional tension, but should not interrupt every line or overexplain the scene. Let quiet conversation, action, and existing tension develop at the Persona's pace. Keep each speaker's knowledge, motivations, and voice distinct. Never write dialogue, actions, thoughts, feelings, decisions, or internal state for the user's Persona. Storyteller-only continuity may guide narration, but it does not become knowledge held by a Character unless visible history or explicitly speaker-scoped knowledge establishes it.\n")
+                    append("Write one flowing scene response featuring narration, the primary Character, and present, relevant NPCs only. This is one AI turn, NOT a completed exchange with the user. The user's Persona is not an NPC, co-lead, or narrator-controlled speaker. Never invent, quote, complete, or attribute new Persona dialogue, gestures, reactions, actions, thoughts, feelings, or decisions—even to bridge between Character and NPC lines or provide comedic timing. Refer to Persona behavior only when already explicitly established in the player's actual messages; do not extend it. Leave the next Persona turn unwritten. Narration may convey atmosphere, pauses, transitions, consequences, and subtle emotional tension, but should not interrupt every line or overexplain the scene. Let quiet conversation, action, and existing tension develop at the Persona's pace. Keep each speaker's knowledge, motivations, and voice distinct. Never write dialogue, actions, thoughts, feelings, decisions, or internal state for the user's Persona. Storyteller-only continuity may guide narration, but it does not become knowledge held by a Character unless visible history or explicitly speaker-scoped knowledge establishes it.\n")
                 } else {
                     append("This is guidance for the same normal response, not an independent AI, speaker turn, or second model call. You may include scene, world, atmosphere, consequences, and supporting-cast narration alongside the selected Character's response. Never write dialogue, actions, thoughts, feelings, or decisions for the user's Persona. Preserve the selected Character's identity and voice. In a group, respond only as the selected Character and do not portray another AI Character's dialogue, actions, thoughts, or decisions. Storyteller-only continuity may guide narration, but it does not become knowledge held by any Character unless visible history or that Character's explicitly scoped knowledge establishes it.\n")
                 }
@@ -210,6 +214,24 @@ class ContextCompilerV1 {
                 append('\n')
             }
 
+            if (storyMemories.isNotEmpty()) {
+                val hasCampaign = storyMemories.any {
+                    it.scope == StoryMemoryOwnerScope.CAMPAIGN
+                }
+                appendLine(
+                    if (hasCampaign)
+                        "--- RELEVANT CHAT & CAMPAIGN STORY MEMORY (RECIPIENT APPROVED) ---"
+                    else "--- RELEVANT CHAT STORY MEMORY (RECIPIENT APPROVED) ---"
+                )
+                appendLine("Only the responding Character may treat these approved local memories as known. Campaign memories are player-shared history from earlier chapters of THIS Campaign, not universal knowledge. Do not transfer private knowledge to other Characters, override later events, or promote them to shared World canon.")
+                storyMemories.forEach { memory ->
+                    val scopeLabel = if (memory.scope == StoryMemoryOwnerScope.CAMPAIGN)
+                        "CAMPAIGN / " else ""
+                    appendLine("- [${scopeLabel}${memory.promptClaimLabel()}] ${memory.content}")
+                }
+                appendLine()
+            }
+
             if (!rollingSummary.isNullOrBlank()) {
                 append("--- ROLLING CONVERSATION SUMMARY ---\n")
                 append(rollingSummary)
@@ -244,7 +266,7 @@ class ContextCompilerV1 {
                 if (groupParticipantNames.isNotEmpty()) {
                     append("Respond only as ${character.displayName}; do not portray another AI Character's dialogue, actions, thoughts, feelings, or decisions. ")
                 } else {
-                    append("The structured Character segments may portray only ${character.displayName}; other speakers must be identified as NPCs. ")
+                    append("The structured Character segments may portray only ${character.displayName}; other speakers must be identified as NPCs. The user Persona ${persona.displayName} is never an NPC speaker, even if the model tries to label them as one. End before the Persona's next response; do not invent it. ")
                 }
                 append("Do not treat storyteller-only continuity as Character knowledge unless visible history or that Character's explicitly scoped knowledge establishes it.")
             }
@@ -253,7 +275,7 @@ class ContextCompilerV1 {
         messages.add(RoleplayMessage(role = Role.SYSTEM, content = coreInstruction))
         
         // Older messages are represented by the persisted rolling summary. Keep recent turns verbatim.
-        val trimmedHistory = chatHistory.filter { it.isPrimaryVariant }.takeLast(recentMessageLimit)
+        val trimmedHistory = RecentPrimaryMessageWindow.take(chatHistory, recentMessageLimit)
         fun promptContent(message: MessageEntity): String {
             val visibleContent = NpcStructuredOutputParser.finalVisibleStoryText(message.content)
             val promptHistory = if (
@@ -348,6 +370,7 @@ class ContextCompilerV1 {
         customTargetMax: Int?,
         customHardMax: Int?,
         durableMemories: List<RoleplayMemoryEntity> = emptyList(),
+        storyMemories: List<StoryMemoryRecord> = emptyList(),
         rollingSummary: String? = null,
         recentMessageLimit: Int = 24,
         activeLore: List<ActiveLoreEntry> = emptyList(),
@@ -368,6 +391,7 @@ class ContextCompilerV1 {
             customTargetMax = customTargetMax,
             customHardMax = customHardMax,
             durableMemories = durableMemories,
+            storyMemories = storyMemories,
             rollingSummary = rollingSummary,
             recentMessageLimit = recentMessageLimit,
             groupParticipantNames = activeCharacterNames,

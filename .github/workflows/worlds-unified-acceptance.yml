@@ -2,6 +2,8 @@ name: Worlds and RP Integrated Acceptance
 
 on:
   pull_request:
+    # No full work on drafts, but run automatically on review readiness.
+    types: [opened, reopened, synchronize, ready_for_review, converted_to_draft]
     branches:
       - main
       - feature/world-archive-test-ui-2026-11-05
@@ -14,12 +16,15 @@ permissions:
   contents: read
 
 concurrency:
-  # Push and both stacked PRs at the same HEAD need one acceptance run, not three.
-  group: worlds-unified-${{ github.event.pull_request.head.sha || github.sha }}
+  # Cancel obsolete commits on the same PR rather than rerunning its full suite.
+  group: worlds-unified-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
   integrated-sandbox:
+    # Draft work runs the fast smoke gate only. Full acceptance still runs
+    # on explicit workflow_dispatch or whenever the PR is ready for review.
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     name: Validate Worlds archives and existing RP lifecycle
     runs-on: ubuntu-latest
     timeout-minutes: 40
@@ -45,6 +50,14 @@ jobs:
           bash ./gradlew :app:testSandboxUnitTest --no-daemon \
             --tests com.example.AppDatabaseMigrationTest \
             --tests com.example.WorldRepositoryTest \
+            --tests com.example.CampaignRepositoryTest \
+            --tests com.example.CampaignMemoryScopeTest \
+            --tests com.example.CampaignWorldsScreenTest \
+            --tests com.example.WorldDefinitionBundleTransferTest \
+            --tests com.example.SameIdJsonReplaceTest \
+            --tests com.example.LorebookSameIdReplaceTest \
+            --tests com.example.BatchJsonImportTest \
+            --tests com.example.ProfileJsonImportWorkflowTest \
             --tests com.example.WorldEpisodeContextCompilerTest \
             --tests com.example.WorldDefinitionCodecTest \
             --tests com.example.WorldsScreenTest \
@@ -53,9 +66,11 @@ jobs:
             --tests com.example.WorldArchiveEncryptedIOTest \
             --tests com.example.WorldArchiveAdditiveRestorerTest \
             --tests com.example.WorldArchiveTransferCoordinatorTest \
+            --tests com.example.WorldArchiveMemoryV2TransferTest \
             --tests com.example.RetainedChatViewModelStoresTest \
             --tests com.example.ReplyNotificationPolicyTest \
             --tests com.example.NpcSceneCastResolverTest \
+            --tests com.example.NpcRepositoryTest \
             --tests com.example.NpcSpeakerPortraitResolverTest \
             --tests com.example.NpcStructuredOutputParserTest \
             --tests com.example.StoryResponseTest \
@@ -63,12 +78,21 @@ jobs:
             --tests com.example.domain.backup.BackupRepositoryTest \
             --tests com.example.ProfileImageRepositoryTest \
             --tests com.example.ChatMessageReadingUiTest \
+            --tests com.example.ChatPdfExportContractTest \
             --tests com.example.OpenRouterModelProviderTest \
             --tests com.example.ChatDetailGenerationTest.continueFromCharacterGreetingNeedsNoPersonaTurn \
             --tests com.example.ChatDetailGenerationTest.malformedNarratedOutputIsSavedWithoutExposingControlMarkers \
             --tests com.example.ChatDetailGenerationTest.structuredContinueAppendsToTheSameLogicalResponseWithoutRepeatingSegments \
             --tests com.example.LocalGroupGenerationTest.groupRetryRegenerateAndContinueKeepSelectedSpeakerAndNonPersistedDirectorTurn \
-            --tests com.example.ScenarioModeTest.oneRequestPortraysMultipleNpcsAndPreservesModelSettingsAndNarratorIdentity
+            --tests com.example.ScenarioModeTest.oneRequestPortraysMultipleNpcsAndPreservesModelSettingsAndNarratorIdentity \
+            --tests com.example.LivingCastPromotionTest \
+            --tests com.example.CharacterToNpcLinkTest \
+            --tests com.example.SoloSpotlightControlsTest \
+            --tests com.example.NpcBankPromotionUiTest \
+            --tests com.example.ChatDetailGenerationTest.promotedNpcSpotlightSwitchesRealProviderResponderWithoutRestartingStory \
+            --tests com.example.ChatDetailGenerationTest.linkedExistingCharacterActsAsSupportingNpcThenCanTakeSoloSpotlight \
+            --tests com.example.ScenarioActiveSessionEditTest \
+            --tests com.example.ScenarioEditorTest
 
       - name: Print focused test failures
         if: failure()

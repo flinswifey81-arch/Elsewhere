@@ -34,6 +34,7 @@ interface AppContainer {
     val generationNotifications: AndroidGenerationNotifications? get() = null
     val scenarioRepository: com.example.domain.repository.ScenarioRepository? get() = null
     val worldRepository: com.example.domain.repository.WorldRepository? get() = null
+    val campaignRepository: com.example.domain.repository.CampaignRepository? get() = null
     val modelProvider: com.example.domain.provider.ModelProvider
     val characterRepository: CharacterRepository
     val personaRepository: PersonaRepository
@@ -42,6 +43,7 @@ interface AppContainer {
     val chatRepository: ChatRepository
     val messageRepository: MessageRepository
     val memoryRepository: MemoryRepository
+    val storyMemoryRepository: com.example.domain.repository.StoryMemoryRepository? get() = null
     val lorebookRepository: LorebookRepository? get() = null
     val coopRepository: CoopRepository? get() = null
     val coopSessionManager: CoopSessionManager? get() = null
@@ -89,7 +91,18 @@ class DefaultAppContainer(private val context: Context) : AppContainer {
                 AppDatabase.MIGRATION_11_12,
                 AppDatabase.MIGRATION_12_13,
                 AppDatabase.MIGRATION_13_14,
-                AppDatabase.MIGRATION_14_15
+                AppDatabase.MIGRATION_14_15,
+                AppDatabase.MIGRATION_15_16,
+                AppDatabase.MIGRATION_16_17,
+                AppDatabase.MIGRATION_17_18,
+                AppDatabase.MIGRATION_18_19,
+                AppDatabase.MIGRATION_19_20,
+                AppDatabase.MIGRATION_20_21,
+                AppDatabase.MIGRATION_21_22,
+                AppDatabase.MIGRATION_22_23,
+                AppDatabase.MIGRATION_23_24,
+                AppDatabase.MIGRATION_24_25,
+                AppDatabase.MIGRATION_25_26
             )
             .build()
     }
@@ -107,6 +120,7 @@ class DefaultAppContainer(private val context: Context) : AppContainer {
 
     override val scenarioRepository by lazy { com.example.domain.repository.ScenarioRepository(database, dataCoordinator) }
     override val worldRepository by lazy { com.example.domain.repository.WorldRepository(database, dataCoordinator) }
+    override val campaignRepository by lazy { com.example.domain.repository.CampaignRepository(database, dataCoordinator) }
 
     override val characterRepository: CharacterRepository by lazy {
         CharacterRepository(database.characterDao(), moshi, profileImageRepository, dataCoordinator)
@@ -136,6 +150,8 @@ class DefaultAppContainer(private val context: Context) : AppContainer {
         MessageRepository(database.messageDao(), dataCoordinator)
     }
 
+    override val storyMemoryRepository by lazy { com.example.domain.repository.StoryMemoryRepository(database, dataCoordinator) }
+
     override val memoryRepository: MemoryRepository by lazy {
         MemoryRepository(database.memoryDao(), dataCoordinator)
     }
@@ -153,7 +169,7 @@ class DefaultAppContainer(private val context: Context) : AppContainer {
     }
 
     override val npcRepository: NpcRepository by lazy {
-        NpcRepository(database, moshi, dataCoordinator)
+        NpcRepository(database, moshi, dataCoordinator, profileImageRepository)
     }
 
     override val npcOutputParser: NpcStructuredOutputParser by lazy {

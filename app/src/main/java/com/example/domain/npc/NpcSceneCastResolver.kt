@@ -1,5 +1,6 @@
 package com.example.domain.npc
 
+import com.example.domain.compiler.RecentPrimaryMessageWindow
 import com.example.data.model.MessageEntity
 import com.example.data.model.NpcDossier
 import com.example.data.model.NpcSceneMode
@@ -19,11 +20,19 @@ data class NpcSceneMember(
 /** Conservative scene presence. Remembered NPCs do not become participants by default. */
 object NpcSceneCastResolver {
     fun resolve(dossiers: List<NpcDossier>, recentMessages: List<MessageEntity>): List<NpcSceneMember> {
-        val recent = recentMessages.filter { it.isPrimaryVariant }.takeLast(24)
+        val recent = RecentPrimaryMessageWindow.take(recentMessages, 24)
             .map { message ->
-                message to StoryResponseCodec.promptTranscript(
+                val content = StoryResponseCodec.promptTranscript(
                     NpcStructuredOutputParser.finalVisibleStoryText(message.content)
                 )
+                // Reuse the same explicit spoken-NPC evidence that powers
+                // the Bank's name-only dossier creation. Compute once per
+                // recent message, not once per NPC, to bound prompt overhead.
+                val attributedSpeakers = if (message.speakerType == SpeakerType.CHARACTER) {
+                    NpcProseDiscovery.namedSpeakers(content, emptyList())
+                        .map { it.lowercase(Locale.ROOT) }.toSet()
+                } else emptySet()
+                RecentSceneText(message, content, attributedSpeakers)
             }
         return dossiers.map { npc ->
             val mode = runCatching { NpcSceneMode.valueOf(npc.sceneMode) }.getOrDefault(NpcSceneMode.AUTO)
@@ -36,10 +45,16 @@ object NpcSceneCastResolver {
         }
     }
 
-    private fun infer(npc: NpcDossier, recent: List<Pair<MessageEntity, String>>): NpcScenePresence {
+    private data class RecentSceneText(
+        val message: MessageEntity,
+        val content: String,
+        val attributedSpeakers: Set<String>
+    )
+
+    private fun infer(npc: NpcDossier, recent: List<RecentSceneText>): NpcScenePresence {
         val aliases = (listOf(npc.displayName) + npc.aliases)
             .filter(String::isNotBlank).distinctBy { it.lowercase(Locale.ROOT) }
-        for ((message, content) in recent.asReversed()) {
+        for ((message, content, attributedSpeakers) in recent.asReversed()) {
             val cues = aliases.flatMap { alias ->
                 val name = "(?<![\\p{L}\\p{N}_])" + Regex.escape(alias) + "(?![\\p{L}\\p{N}_])"
                 val gone = Regex(
@@ -55,6 +70,11 @@ object NpcSceneCastResolver {
             }
             val latest = cues.maxByOrNull { it.first }?.second
             if (latest != null) return latest
+            // Direct speech attribution is evidence of physical participation
+            // even when the model skipped structured NPC speaker markers.
+            if (aliases.any { it.lowercase(Locale.ROOT) in attributedSpeakers }) {
+                return NpcScenePresence.PRESENT
+            }
             // An attributed, persisted NPC dialogue segment confirms participation.
             // Plain mentions and Character/Narrator prose do not.
             val segments = if (message.speakerType == SpeakerType.CHARACTER) {

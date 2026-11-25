@@ -26,6 +26,7 @@ fun ScenariosScreen(
     val repository = container.scenarioRepository ?: return
     val scenarios by repository.observeAll().collectAsState(emptyList())
     val personas by container.personaRepository.getAllPersonas().collectAsState(emptyList())
+    val characters by container.characterRepository.getAllCharacters().collectAsState(emptyList())
     val worlds = container.worldRepository?.observeWorlds()?.collectAsState(initial = emptyList())?.value.orEmpty()
     val scope = rememberCoroutineScope()
     var editingId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -52,7 +53,8 @@ fun ScenariosScreen(
             },
             onCancel = { showDiscard = true },
             artwork = { ProfileImageEditor(container.profileImageRepository, ProfileImageKind.SCENARIO, editingId, definition.title) },
-            busy = busy, error = error
+            busy = busy, error = error,
+            availableCharacters = characters
         )
         androidx.activity.compose.BackHandler { showDiscard = true }
         if (showDiscard) AlertDialog(onDismissRequest = { showDiscard = false }, title = { Text("Discard editor changes?") },
@@ -127,12 +129,24 @@ fun ScenariosScreen(
 
 @Composable
 internal fun ScenarioEditor(definition: ScenarioDefinition, onChange: (ScenarioDefinition) -> Unit,
-    onSave: () -> Unit, onCancel: () -> Unit, artwork: @Composable () -> Unit = {}, busy: Boolean = false, error: String? = null) {
+    onSave: () -> Unit, onCancel: () -> Unit, artwork: @Composable () -> Unit = {},
+    busy: Boolean = false, error: String? = null,
+    editingActiveSession: Boolean = false,
+    availableCharacters: List<CharacterEntity> = emptyList()
+) {
     var advanced by rememberSaveable { mutableStateOf(definition.experience == ScenarioExperience.SANDBOX) }
     var cast by rememberSaveable { mutableStateOf(false) }
+    var linkingNpcId by remember { mutableStateOf<String?>(null) }
+    var linkSearch by remember { mutableStateOf("") }
     LazyColumn(Modifier.fillMaxSize().imePadding().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item { Text(if (definition.experience == ScenarioExperience.QUICK_SCENE) "Quick Scene" else "Open World / Sandbox", style = MaterialTheme.typography.headlineMedium) }
-        item { Text("Only title and premise are required. You can expand this scenario later. Saved edits apply to new playthroughs; existing stories retain their starting configuration.") }
+        item {
+            Text(
+                if (editingActiveSession)
+                    "Editing this playthrough only. New responses use these changes; past messages, the reusable Scenario template, and other playthroughs stay unchanged."
+                else "Only title and premise are required. You can expand this scenario later. Saved edits apply to new playthroughs; existing stories retain their starting configuration."
+            )
+        }
         item { ScenarioField("Scenario Title", definition.title) { onChange(definition.copy(title = it)) } }
         item { ScenarioField("Premise / Scene Setup", definition.premise) { onChange(definition.copy(premise = it)) } }
         item { ScenarioField("Opening Message (optional)", definition.openingMessage) { onChange(definition.copy(openingMessage = it)) } }
@@ -168,18 +182,85 @@ internal fun ScenarioEditor(definition: ScenarioDefinition, onChange: (ScenarioD
                     ScenarioField("Relationships", npc.relationships) { update(npc.copy(relationships = it)) }
                     ScenarioField("Narrative Role", npc.narrativeRole) { update(npc.copy(narrativeRole = it)) }
                     ScenarioField("Additional Character Instructions", npc.instructions) { update(npc.copy(instructions = it)) }
+                    val linked = availableCharacters.firstOrNull {
+                        it.characterId == npc.sourceCharacterId
+                    }
+                    Text(
+                        when {
+                            npc.sourceCharacterId == null -> "Standalone Scenario NPC"
+                            linked != null -> "Linked Character: ${linked.displayName}"
+                            else -> "Linked Character missing — reassign or unlink before generating"
+                        },
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TextButton(onClick = {
+                            linkingNpcId = npc.npcId
+                            linkSearch = ""
+                        }) { Text(if (npc.sourceCharacterId == null) "Link Character" else "Change linked Character") }
+                        if (npc.sourceCharacterId != null) {
+                            TextButton(onClick = { update(npc.copy(sourceCharacterId = null)) }) {
+                                Text("Unlink Character")
+                            }
+                        }
+                    }
                     TextButton(onClick = { onChange(definition.copy(npcs = definition.npcs.filterNot { it.npcId == npc.npcId })) }) { Text("Remove NPC") }
                 } }
+            }
+            // Keep Character selection inside the existing lazy editor instead of
+            // creating a nested, scrolling AlertDialog. The dialog caused an
+            // infinite-idle loop in Robolectric when tapping a Character choice.
+            val targetNpcId = linkingNpcId
+            if (targetNpcId != null) {
+                item(key = "linked_character_search") {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            "Link an existing Character — uses its authored identity and " +
+                                "portrayal, not its other chats or private memories.",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        OutlinedTextField(
+                            value = linkSearch,
+                            onValueChange = { linkSearch = it.take(100) },
+                            label = { Text("Search Character cards") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true
+                        )
+                        TextButton(onClick = { linkingNpcId = null }) { Text("Cancel linking") }
+                    }
+                }
+                val choices = availableCharacters.filter {
+                    !it.isArchived && it.displayName.contains(linkSearch, ignoreCase = true)
+                }.sortedBy { it.displayName.lowercase() }
+                items(choices.take(40), key = { "link_choice_" + it.characterId }) { character ->
+                    TextButton(
+                        onClick = {
+                            onChange(definition.copy(npcs = definition.npcs.map { npc ->
+                                if (npc.npcId == targetNpcId) {
+                                    npc.copy(sourceCharacterId = character.characterId)
+                                } else npc
+                            }))
+                            linkingNpcId = null
+                        }
+                    ) { Text(character.displayName) }
+                }
+                if (choices.isEmpty()) item { Text("No matching active Character cards.") }
+                if (choices.size > 40) item {
+                    Text("Showing first 40 matches. Narrow the search to see more.")
+                }
             }
             item { OutlinedButton(onClick = { onChange(definition.copy(npcs = definition.npcs + ScenarioNpc())) }) { Text("Add NPC") } }
         }
         item { error?.let { Text(it, color = MaterialTheme.colorScheme.error) } }
         item { Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = onSave, enabled = !busy && definition.title.isNotBlank() && definition.premise.isNotBlank()) { Text(if (busy) "Saving…" else "Save scenario") }
+            Button(onClick = onSave, enabled = !busy && definition.title.isNotBlank() && definition.premise.isNotBlank()) {
+                Text(if (busy) "Saving…" else if (editingActiveSession) "Save playthrough" else "Save scenario")
+            }
             TextButton(onClick = onCancel, enabled = !busy) { Text("Cancel") }
         } }
         item { Spacer(Modifier.height(24.dp)) }
     }
+
 }
 
 @Composable

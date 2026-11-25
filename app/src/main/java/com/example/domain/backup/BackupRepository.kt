@@ -188,6 +188,11 @@ class BackupRepository internal constructor(
                 chatSettings = backupDao.getChatSettings(),
                 generationMetadata = backupDao.getGenerationMetadata(),
                 roleplayMemories = backupDao.getRoleplayMemories(),
+                storyMemories = database.storyMemoryDao().getAll(),
+                storyMemoryActors = database.storyMemoryDao().getAllActors(),
+                storyMemoryReturns = database.storyMemoryDao().getAllReturns(),
+                storyMemoryKnowledgeChanges = database.storyMemoryDao().getAllKnowledgeChanges(),
+                storyMemoryPerspectives = database.storyMemoryDao().getAllPerspectives(),
                 conversationSummaries = backupDao.getConversationSummaries(),
                 lorebooks = backupDao.getLorebooks(),
                 lorebookEntries = backupDao.getLorebookEntries(),
@@ -208,6 +213,11 @@ class BackupRepository internal constructor(
                 npcLibraryBanks = backupDao.getNpcLibraryBanks(),
                 npcLibraryEntries = backupDao.getNpcLibraryEntries(),
                 worlds = database.worldDao().getWorlds(),
+                campaigns = database.campaignDao().getAllCampaigns(),
+                campaignChapters = database.campaignDao().getAllChapters(),
+                campaignJournalEntries = database.campaignDao().getAllJournalEntries(),
+                campaignContinuityItems = database.campaignDao().getAllContinuityItems(),
+                campaignMemoryShares = database.campaignDao().getAllMemoryShares(),
                 worldMemberships = database.worldDao().getExportableMemberships(),
                 worldCast = database.worldDao().getAllCast(),
                 worldContinuityEvents = database.worldDao().getAllEvents(),
@@ -464,6 +474,14 @@ class BackupRepository internal constructor(
     private suspend fun replaceDatabaseContents(payload: BackupPayload) {
         // FK cascade removes only World-owned membership/cast/event records.
         // All source Characters, Lorebooks, Scenarios and chats remain separate.
+        // Campaigns RESTRICT World deletion so no private playthrough structure
+        // is discarded accidentally. Full restore explicitly clears the old
+        // Campaign graph first, inside the same rollback-protected transaction.
+        database.campaignDao().clearMemoryShares()
+        database.campaignDao().clearContinuityItems()
+        database.campaignDao().clearJournalEntries()
+        database.campaignDao().clearChapters()
+        database.campaignDao().clearCampaigns()
         database.worldDao().clearWorlds()
         database.scenarioDao().clearSessions()
         database.scenarioDao().clearScenarios()
@@ -485,6 +503,9 @@ class BackupRepository internal constructor(
         backupDao.deleteLorebookEntries()
         backupDao.deleteLorebooks()
         backupDao.deleteConversationSummaries()
+        // User-created v16 memories must not survive a full restore by accident.
+        // Cascade clears linked knowledge and explicit Wack grants.
+        database.storyMemoryDao().clearAll()
         backupDao.deleteRoleplayMemories()
         backupDao.deleteRelationships()
         backupDao.deleteMessages()
@@ -509,6 +530,15 @@ class BackupRepository internal constructor(
         if (payload.chatSettings.isNotEmpty()) backupDao.insertChatSettings(payload.chatSettings)
         if (payload.generationMetadata.isNotEmpty()) backupDao.insertGenerationMetadata(payload.generationMetadata)
         if (payload.roleplayMemories.isNotEmpty()) backupDao.insertRoleplayMemories(payload.roleplayMemories)
+        if (payload.storyMemories.isNotEmpty()) database.storyMemoryDao().insertAll(payload.storyMemories)
+        if (payload.storyMemoryActors.isNotEmpty()) database.storyMemoryDao().insertActors(payload.storyMemoryActors)
+        if (payload.storyMemoryReturns.isNotEmpty()) database.storyMemoryDao().insertReturns(payload.storyMemoryReturns)
+        if (payload.storyMemoryKnowledgeChanges.isNotEmpty()) {
+            database.storyMemoryDao().insertKnowledgeChanges(payload.storyMemoryKnowledgeChanges)
+        }
+        if (payload.storyMemoryPerspectives.isNotEmpty()) {
+            database.storyMemoryDao().insertPerspectives(payload.storyMemoryPerspectives)
+        }
         if (payload.conversationSummaries.isNotEmpty()) {
             backupDao.insertConversationSummaries(payload.conversationSummaries)
         }
@@ -540,6 +570,17 @@ class BackupRepository internal constructor(
         if (payload.worldMemberships.isNotEmpty()) database.worldDao().insertMemberships(payload.worldMemberships)
         if (payload.worldCast.isNotEmpty()) database.worldDao().insertCast(payload.worldCast)
         if (payload.worldContinuityEvents.isNotEmpty()) database.worldDao().insertEvents(payload.worldContinuityEvents)
+        if (payload.campaigns.isNotEmpty()) database.campaignDao().insertCampaigns(payload.campaigns)
+        if (payload.campaignChapters.isNotEmpty()) database.campaignDao().insertChapters(payload.campaignChapters)
+        if (payload.campaignJournalEntries.isNotEmpty()) {
+            database.campaignDao().insertJournalEntries(payload.campaignJournalEntries)
+        }
+        if (payload.campaignContinuityItems.isNotEmpty()) {
+            database.campaignDao().insertContinuityItems(payload.campaignContinuityItems)
+        }
+        if (payload.campaignMemoryShares.isNotEmpty()) {
+            database.campaignDao().insertMemoryShares(payload.campaignMemoryShares)
+        }
     }
 
     private fun prepareProfileImages(validated: ValidatedBackup, stageRoot: File) {
@@ -593,6 +634,11 @@ class BackupRepository internal constructor(
             payload.chatSettings.size,
             payload.generationMetadata.size,
             payload.roleplayMemories.size,
+            payload.storyMemories.size,
+            payload.storyMemoryActors.size,
+            payload.storyMemoryReturns.size,
+            payload.storyMemoryKnowledgeChanges.size,
+            payload.storyMemoryPerspectives.size,
             payload.conversationSummaries.size,
             payload.lorebooks.size,
             payload.lorebookEntries.size,
@@ -613,7 +659,12 @@ class BackupRepository internal constructor(
             payload.worlds.size,
             payload.worldMemberships.size,
             payload.worldCast.size,
-            payload.worldContinuityEvents.size
+            payload.worldContinuityEvents.size,
+            payload.campaigns.size,
+            payload.campaignChapters.size,
+            payload.campaignJournalEntries.size,
+            payload.campaignContinuityItems.size,
+            payload.campaignMemoryShares.size
         ).sumOf(Int::toLong)
         if (entityCount > MAX_TOTAL_ENTITY_RECORDS || payload.messages.size > MAX_MESSAGE_RECORDS) {
             throw BackupValidationException("Backup contains too many data records.")
@@ -625,6 +676,15 @@ class BackupRepository internal constructor(
             return values.toSet()
         }
         val worldIds = unique("World", payload.worlds.map { it.worldId })
+        val campaignIds = unique("Campaign", payload.campaigns.map { it.campaignId })
+        unique("Campaign chapter", payload.campaignChapters.map { it.chapterId })
+        unique("Campaign chapter chat", payload.campaignChapters.map { it.chatId })
+        unique("Campaign journal entry", payload.campaignJournalEntries.map { it.journalEntryId })
+        unique("Campaign continuity item", payload.campaignContinuityItems.map { it.itemId })
+        uniqueComposite("Campaign memory share", payload.campaignMemoryShares.map {
+            "${it.campaignId}\u0000${it.sourceMemoryId}"
+        })
+        uniqueComposite("Campaign chapter position", payload.campaignChapters.map { "${it.campaignId}\\u0000${it.ordinal}" })
         val worldCastIds = unique("World cast member", payload.worldCast.map { it.worldCharacterId })
         unique("World continuity event", payload.worldContinuityEvents.map { it.eventId })
         uniqueComposite("World membership", payload.worldMemberships.map { "${it.worldId}\u0000${it.resourceType}\u0000${it.resourceId}" })
@@ -656,6 +716,19 @@ class BackupRepository internal constructor(
         }
         unique("relationship", payload.relationships.map { it.relationshipId })
         unique("memory", payload.roleplayMemories.map { it.memoryId })
+        val storyMemoryIds = unique("story memory", payload.storyMemories.map { it.memoryId })
+        uniqueComposite("story memory actor", payload.storyMemoryActors.map {
+            "${it.memoryId}\u0000${it.actorKind}\u0000${it.actorId}\u0000${it.relation}"
+        })
+        uniqueComposite("story memory Wack grant", payload.storyMemoryReturns.map {
+            "${it.memoryId}\u0000${it.resetBoundaryOrderIndex}"
+        })
+        uniqueComposite("story memory knowledge change", payload.storyMemoryKnowledgeChanges.map {
+            "${it.memoryId}\u0000${it.revision}\u0000${it.characterId}"
+        })
+        uniqueComposite("story memory perspective", payload.storyMemoryPerspectives.map {
+            "${it.memoryId}\u0000${it.characterId}\u0000${it.revision}"
+        })
         unique("co-op event", payload.coopEvents.map { it.eventId })
         unique("NPC update", payload.npcDossierUpdates.map { it.updateId })
         unique("chat settings", payload.chatSettings.map { it.chatId })
@@ -689,6 +762,62 @@ class BackupRepository internal constructor(
         requireRefs(payload.chatSettings, "chat settings") { it.chatId in chatIds }
         requireRefs(payload.generationMetadata, "generation metadata") { it.messageId in messageIds }
         requireRefs(payload.roleplayMemories, "memory") { it.chatId in chatIds && (it.characterId in characterIds || (it.chatId in scenarioChatIds && it.characterId == "narrator:${it.chatId}")) }
+        requireRefs(payload.storyMemories, "story memory") { it.chatId in chatIds && it.ownerId == it.chatId && it.scope == "CHAT" && it.content.isNotBlank() && it.content.length <= 12_000 && it.review in setOf("APPROVED", "PENDING_REVIEW", "REJECTED") && it.lifecycle in setOf("ACTIVE", "RESOLVED", "SUPERSEDED") && it.claim in com.example.domain.memory.StoryMemoryClaim.entries.map { claim -> claim.name } && it.visibility in com.example.domain.memory.StoryMemoryVisibility.entries.map { v -> v.name } && (it.originKind == "MANUAL" || (it.originKind == "MESSAGE" && it.sourceMessageId != null && it.sourceVariantGroupId != null && it.sourceSpeakerType != null && it.sourceSpeakerId != null && it.sourceCreatedAtEpochMillis != null)) }
+        // A missing predecessor may have been deliberately deleted by the
+        // player; a surviving predecessor must belong to the SAME story and
+        // claim type. Never accept cross-chat continuity links in backups.
+        val storyMemoriesById = payload.storyMemories.associateBy { it.memoryId }
+        requireRefs(payload.storyMemories, "story memory transition") { memory ->
+            val priorId = memory.previousStateMemoryId
+            val prior = priorId?.let { storyMemoriesById[it] }
+            (priorId == null || (priorId != memory.memoryId &&
+                (prior == null || (prior.chatId == memory.chatId &&
+                    prior.claim == memory.claim &&
+                    prior.sourceOrderIndex < memory.sourceOrderIndex)))) &&
+                (memory.promiseOutcome == null ||
+                    (memory.claim == "PROMISE" &&
+                        memory.lifecycle == "RESOLVED" &&
+                        memory.promiseOutcome in setOf("KEPT", "BROKEN", "RELEASED") &&
+                        priorId != null))
+        }
+        val membersByChat = payload.chatParticipants.groupBy { it.chatId }
+            .mapValues { (_, participants) -> participants.map { it.characterId }.toSet() }
+        requireRefs(payload.storyMemoryPerspectives, "story memory perspective") { perspective ->
+            val memory = storyMemoriesById[perspective.memoryId]
+            memory != null &&
+                perspective.revision > 0L &&
+                perspective.characterId in membersByChat[memory.chatId].orEmpty() &&
+                perspective.stance in setOf("KNOWS", "BELIEVES", "SUSPECTS", "UNAWARE") &&
+                perspective.contentSha256.matches(Regex("[0-9a-f]{64}")) &&
+                (perspective.note == null || perspective.note.length <= 2_000)
+        }
+        requireRefs(payload.storyMemoryKnowledgeChanges, "story memory knowledge change") { change ->
+            change.memoryId in storyMemoryIds &&
+                change.characterId in characterIds &&
+                change.revision > 0L &&
+                change.change in setOf("GRANTED", "REVOKED") &&
+                // Knowledge revisions refer only to an existing chat-local memory.
+                storyMemoriesById[change.memoryId]?.scope == "CHAT"
+        }
+        requireRefs(payload.storyMemoryActors, "story memory actor") { actor ->
+            actor.memoryId in storyMemoryIds &&
+                actor.actorId.isNotBlank() &&
+                actor.actorKind in com.example.domain.memory.StoryActorKind.entries.map { it.name } &&
+                when (actor.relation) {
+                    "KNOWS", "MENTIONED" -> true
+                    "RELATIONSHIP_FROM", "RELATIONSHIP_TO",
+                    "PROMISE_FROM", "PROMISE_TO" ->
+                        actor.actorKind in setOf("CHARACTER", "PERSONA") &&
+                            payload.storyMemories.any { memory ->
+                                memory.memoryId == actor.memoryId &&
+                                    memory.claim == (if (actor.relation.startsWith("PROMISE_"))
+                                        "PROMISE" else "RELATIONSHIP") &&
+                                    memory.scope == "CHAT"
+                            }
+                    else -> false
+                }
+        }
+        requireRefs(payload.storyMemoryReturns, "story memory restoration") { it.memoryId in storyMemoryIds && it.chatId in chatIds && payload.storyMemories.any { m -> m.memoryId == it.memoryId && m.chatId == it.chatId && m.branchId == it.branchId && m.sourceOrderIndex <= it.resetBoundaryOrderIndex } && it.initiatedByUser && it.approvedAtOrderIndex > it.resetBoundaryOrderIndex }
         requireRefs(payload.conversationSummaries, "conversation summary") { it.chatId in chatIds }
         requireRefs(payload.lorebookEntries, "Lorebook entry") { it.lorebookId in lorebookIds }
         requireRefs(payload.chatLorebookAttachments, "chat Lorebook attachment") {
@@ -717,6 +846,86 @@ class BackupRepository internal constructor(
             it.chatId in chatIds && it.npcId in npcIds && it.sourceMessageId in messageIds
         }
         requireRefs(payload.npcLibraryEntries, "NPC library entry") { it.bankId in npcLibraryBankIds }
+        requireRefs(payload.campaigns, "Campaign") {
+            it.worldId in worldIds && it.title.isNotBlank() && it.title.length <= 200 &&
+                it.summary.length <= 4_000
+        }
+        val campaignsById = payload.campaigns.associateBy { it.campaignId }
+        val membershipsByChat = payload.worldMemberships
+            .filter { it.resourceType == WorldResourceType.CHAT.name }
+            .groupBy { it.resourceId }
+        requireRefs(payload.campaignChapters, "Campaign chapter") { chapter ->
+            val campaign = campaignsById[chapter.campaignId]
+            campaign != null && chapter.chatId in chatIds &&
+                chapter.ordinal > 0 && chapter.title.isNotBlank() &&
+                chapter.title.length <= 200 && chapter.recap.length <= 12_000 &&
+                chapter.state in setOf("ACTIVE", "COMPLETE") &&
+                membershipsByChat[chapter.chatId].orEmpty().let { memberships ->
+                    memberships.size == 1 && memberships.single().worldId == campaign.worldId
+                }
+        }
+        val chaptersById = payload.campaignChapters.associateBy { it.chapterId }
+        val messagesById = payload.messages.associateBy { it.messageId }
+        requireRefs(payload.campaignJournalEntries, "Campaign journal entry") { entry ->
+            val chapter = entry.chapterId?.let(chaptersById::get)
+            val message = entry.sourceMessageId?.let(messagesById::get)
+            entry.campaignId in campaignIds &&
+                (entry.chapterId == null || (chapter != null && chapter.campaignId == entry.campaignId)) &&
+                (entry.sourceMessageId == null ||
+                    (message != null && message.chatId == entry.sourceChatId)) &&
+                (entry.entryType == "JOURNAL" || entry.entryType == "CHECKPOINT") &&
+                entry.title.isNotBlank() && entry.title.length <= 200 &&
+                entry.body.length <= 12_000 &&
+                (entry.sourceContentSha256 == null ||
+                    entry.sourceContentSha256.matches(Regex("[0-9a-f]{64}"))) &&
+                (entry.entryType != "JOURNAL" ||
+                    (entry.sourceMessageId == null && entry.sourceOrderIndex == null)) &&
+                (entry.entryType != "CHECKPOINT" ||
+                    (entry.sourceChatId != null &&
+                        (chapter == null || chapter.chatId == entry.sourceChatId)))
+        }
+        val journalById = payload.campaignJournalEntries.associateBy { it.journalEntryId }
+        val continuityTypes = setOf(
+            "ARC", "THREAD", "PROMISE", "QUEST", "DISCOVERY", "RELATIONSHIP"
+        )
+        requireRefs(payload.campaignContinuityItems, "Campaign continuity item") { item ->
+            val start = item.openedChapterId?.let(chaptersById::get)
+            val end = item.closedChapterId?.let(chaptersById::get)
+            val source = item.sourceJournalEntryId?.let(journalById::get)
+            val openStatus = if (item.itemType == "ARC") "ACTIVE" else "OPEN"
+            val closeStatus = if (item.itemType == "ARC") "COMPLETE" else "RESOLVED"
+            item.campaignId in campaignIds &&
+                item.itemType in continuityTypes &&
+                item.status in setOf(openStatus, closeStatus) &&
+                item.title.isNotBlank() && item.title.length <= 200 &&
+                item.details.length <= 12_000 &&
+                (item.itemType != "ARC" || item.details.isNotBlank()) &&
+                item.resolution.length <= 12_000 &&
+                (item.openedChapterId == null ||
+                    (start != null && start.campaignId == item.campaignId)) &&
+                (item.closedChapterId == null ||
+                    (end != null && end.campaignId == item.campaignId &&
+                        item.status == closeStatus &&
+                        (start == null || end.ordinal >= start.ordinal))) &&
+                (item.sourceJournalEntryId == null ||
+                    (source != null && source.campaignId == item.campaignId &&
+                        (start == null || source.chapterId == null ||
+                            source.chapterId == start.chapterId))) &&
+                (item.status != openStatus ||
+                    (item.closedChapterId == null && item.resolution.isBlank()))
+        }
+        val chaptersForMemory = payload.campaignChapters.associateBy { it.chapterId }
+        val memoriesForShare = payload.storyMemories.associateBy { it.memoryId }
+        requireRefs(payload.campaignMemoryShares, "Campaign memory share") { share ->
+            val chapter = chaptersForMemory[share.sourceChapterId]
+            val source = memoriesForShare[share.sourceMemoryId]
+            share.campaignId in campaignIds &&
+                chapter != null && chapter.campaignId == share.campaignId &&
+                source != null && source.chatId == chapter.chatId &&
+                source.scope == "CHAT" && source.ownerId == source.chatId &&
+                source.branchId == null &&
+                share.sourceContentSha256.matches(Regex("[0-9a-f]{64}"))
+        }
         requireRefs(payload.worldCast, "World cast member") { it.worldId in worldIds && it.name.isNotBlank() }
         requireRefs(payload.worldContinuityEvents, "World continuity event") {
             it.worldId in worldIds && it.status in setOf("DRAFT", "ACCEPTED", "NONCANON")
@@ -891,7 +1100,7 @@ class BackupRepository internal constructor(
         personas = payload.personas.size,
         chats = payload.chats.size,
         messages = payload.messages.size,
-        memories = payload.roleplayMemories.size,
+        memories = payload.roleplayMemories.size + payload.storyMemories.size,
         lorebooks = payload.lorebooks.size,
         npcDossiers = payload.npcDossiers.size,
         messageAttachments = payload.messageAttachments.size,
@@ -902,7 +1111,11 @@ class BackupRepository internal constructor(
             payload.messageAttachments.any { it.messageId == null },
         includesCoopHistory = payload.coopRooms.isNotEmpty() || payload.coopEvents.isNotEmpty(),
         coopWillRestoreOffline = true,
-        scenarios = payload.scenarios.size
+        scenarios = payload.scenarios.size,
+        campaigns = payload.campaigns.size,
+        campaignJournalEntries = payload.campaignJournalEntries.size,
+        campaignContinuityItems = payload.campaignContinuityItems.size,
+        campaignMemoryShares = payload.campaignMemoryShares.size
     )
 
     private fun BackupAppearanceSettings.toDomain(): AppearanceSettings = AppearanceSettings(
