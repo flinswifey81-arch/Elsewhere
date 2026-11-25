@@ -1153,7 +1153,8 @@ class ChatDetailViewModel(
             history = scopedHistory,
             isContinuation = isContinuation,
             characterId = characterId,
-            includeScenarioPlaythrough = !isContinuation && variantGroupId == null
+            includeScenarioPlaythrough = true,
+            replayScenarioPlaythrough = isContinuation || variantGroupId != null
         ) ?: return
         val fullCharacter = prepared.character
         updateSuccessState {
@@ -1427,7 +1428,7 @@ class ChatDetailViewModel(
 
     private suspend fun prepareScenario(
         current: MessageEntity, history: List<MessageEntity>, continuation: Boolean,
-        includePlaythrough: Boolean
+        includePlaythrough: Boolean, historicalReplay: Boolean
     ): PreparedGeneration? {
         val settings = chatRepository.getEffectiveChatSettings(chatId) ?: currentChatSettings ?: return null
         val session = scenarioRepository?.session(chatId)
@@ -1470,8 +1471,11 @@ class ChatDetailViewModel(
             chatId, history, current, AutomaticMemoryManager.DEFAULT_RECENT_MESSAGE_LIMIT
         ).orEmpty()
         val worldContext = scenarioRepository?.worldContextForChat(chatId)
-        val playthroughContext = if (includePlaythrough && current.speakerType == SpeakerType.PERSONA) {
-            scenarioRepository?.approvedPlaythroughContext(chatId, current.createdAt)
+        // A replay is tied to the preceding player turn, never the later
+        // narration/variant timestamp or the current clock. A scripted opening
+        // with no eligible player turn has no historical playthrough context.
+        val playthroughContext = if (includePlaythrough) latestPersonaMessage?.let { playerTurn ->
+            scenarioRepository?.approvedPlaythroughContext(chatId, playerTurn.createdAt, historicalReplay)
         } else null
         val scenarioDefinition = com.example.data.model.ScenarioCodec.decode(session.definitionJson)
         // The link is a stable authored Character ID, NOT a name match and never a
@@ -1555,12 +1559,13 @@ class ChatDetailViewModel(
         history: List<MessageEntity>,
         isContinuation: Boolean,
         characterId: String?,
-        includeScenarioPlaythrough: Boolean = false
+        includeScenarioPlaythrough: Boolean = false,
+        replayScenarioPlaythrough: Boolean = false
     ): PreparedGeneration? {
         val summary = chatSummary ?: return null
         val settings = chatRepository.getEffectiveChatSettings(chatId) ?: currentChatSettings ?: return null
         if (summary.chat.chatType == ChatType.SCENARIO) return prepareScenario(
-            currentMessage, history, isContinuation, includeScenarioPlaythrough
+            currentMessage, history, isContinuation, includeScenarioPlaythrough, replayScenarioPlaythrough
         )
         // A SOLO spotlight uses the persisted participant ordering. The
         // original transcript, Wack and Story Memory ownership never move.

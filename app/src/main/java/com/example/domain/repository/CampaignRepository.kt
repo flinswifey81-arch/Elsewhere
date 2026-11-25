@@ -185,15 +185,21 @@ class CampaignRepository(
     /**
      * Only explicitly shared facts for this Scenario's narrator. Fail closed
      * across Wack, unlinked episodes and revisions newer than the player turn.
+     * For historical actions, still-shared facts and episode links must strictly
+     * predate that turn. Equal timestamps cannot prove ordering. A changed or
+     * revoked value is omitted, not reconstructed from a superseded version.
      * No Character/NPC knowledge grants are created and nothing is sent here.
      */
-    suspend fun narratorPlaythroughContext(chatId: String, asOfEpochMillis: Long): String? =
+    suspend fun narratorPlaythroughContext(
+        chatId: String, asOfEpochMillis: Long, historicalReplay: Boolean = false
+    ): String? =
         database.withTransaction {
             val chat = database.chatDao().getChatById(chatId) ?: return@withTransaction null
             if (chat.chatType != ChatType.SCENARIO || chat.contextResetOrderIndex != null) {
                 return@withTransaction null
             }
             val chapter = dao.chapterForChat(chatId) ?: return@withTransaction null
+            if (historicalReplay && chapter.createdAt >= asOfEpochMillis) return@withTransaction null
             val chapters = dao.chapters(chapter.campaignId)
             val chapterById = chapters.associateBy { it.chapterId }
             val selected = campaignPlaythroughStateAt(chapter, chapters, dao.continuityItems(chapter.campaignId))
@@ -202,8 +208,10 @@ class CampaignRepository(
             for (item in selected) {
                 if (item.resolution != PLAYTHROUGH_NARRATOR_APPROVED ||
                     item.updatedAt > asOfEpochMillis || lines.size >= 8) continue
-                val sourceChatId = item.openedChapterId?.let(chapterById::get)?.chatId ?: continue
-                val sourceChat = database.chatDao().getChatById(sourceChatId) ?: continue
+                if (historicalReplay && item.updatedAt >= asOfEpochMillis) continue
+                val sourceChapter = item.openedChapterId?.let(chapterById::get) ?: continue
+                if (historicalReplay && sourceChapter.createdAt >= asOfEpochMillis) continue
+                val sourceChat = database.chatDao().getChatById(sourceChapter.chatId) ?: continue
                 if (sourceChat.contextResetOrderIndex != null) continue
                 val field = CampaignPlaythroughField.fromItemType(item.itemType) ?: continue
                 fun singleLine(text: String) = text.lineSequence().joinToString(" ") { it.trim() }

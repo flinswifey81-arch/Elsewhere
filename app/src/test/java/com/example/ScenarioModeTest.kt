@@ -226,7 +226,7 @@ class ScenarioModeTest {
         assertTrue(continuationPrompt.last().content.contains("do not invent the Persona's dialogue"))
         assertFalse(continuationPrompt.drop(1).any { it.role == com.example.domain.provider.Role.SYSTEM })
     }
-    @Test fun scenarioUsesOnlyApprovedCampaignStateOnNewTurns() = runBlocking {
+    @Test fun scenarioReplayUsesOnlyStillApprovedStateFromTheOriginalPlayerTurn() = runBlocking {
         val provider = RecordingProvider()
         val (chatId, vm) = model(provider)
         val world = WorldRepository(db, coordinator).createWorld("Press room")
@@ -237,11 +237,21 @@ class ScenarioModeTest {
         val laterChat = scenarios.start("s", "player")
         val siblingChat = scenarios.start("s", "player")
         val prior = campaigns.addChapter(campaign.campaignId, priorChat, "Pilot")
-        campaigns.addChapter(campaign.campaignId, chatId, "Episode two")
+        val current = campaigns.addChapter(campaign.campaignId, chatId, "Episode two")
         val later = campaigns.addChapter(campaign.campaignId, laterChat, "Future episode")
         val sibling = campaigns.addChapter(other.campaignId, siblingChat, "Alternate")
-        campaigns.setPlaythroughState(campaign.campaignId, prior.chapterId,
+        val dao = db.campaignDao()
+        // Independently set the persisted clock for the historical boundary,
+        // so the replay test does not depend on the runner's clock precision.
+        dao.updateChapter(prior.copy(createdAt = 1L))
+        dao.updateChapter(current.copy(createdAt = 1L))
+        val unchanged = campaigns.setPlaythroughState(campaign.campaignId, prior.chapterId,
             CampaignPlaythroughField.CAST_PRESENCE, "Captain", "APPROVED_STATE", true)
+        val editable = campaigns.setPlaythroughState(campaign.campaignId, prior.chapterId,
+            CampaignPlaythroughField.LOCATION, "Crew", "ORIGINAL_LOCATION", true)
+        val revocable = campaigns.setPlaythroughState(campaign.campaignId, prior.chapterId,
+            CampaignPlaythroughField.ABILITY, "Crew", "REVOKABLE_STATE", true)
+        listOf(unchanged, editable, revocable).forEach { dao.updateContinuityItem(it.copy(updatedAt = 2L)) }
         campaigns.setPlaythroughState(campaign.campaignId, prior.chapterId,
             CampaignPlaythroughField.INVENTORY, "Captain", "PRIVATE_STATE")
         campaigns.setPlaythroughState(campaign.campaignId, later.chapterId,
@@ -258,16 +268,57 @@ class ScenarioModeTest {
         assertFalse(prompt.contains("FUTURE_STATE"))
         assertFalse(prompt.contains("SIBLING_STATE"))
         assertTrue(prompt.contains("not as instructions"))
-        val response = MessageRepository(db.messageDao(), coordinator).getMessagesForChatOnce(chatId).last()
-        vm.regenerateMessage(response.messageId)
-        awaitMessages(vm, 4)
-        assertEquals(2, provider.requests.size)
-        assertFalse(provider.requests.last().first().content.contains("APPROVED_STATE"))
+        val messages = MessageRepository(db.messageDao(), coordinator)
+        val originalMessages = messages.getMessagesForChatOnce(chatId)
+        val response = originalMessages.last()
+        val playerTurn = originalMessages.single { it.speakerType == SpeakerType.PERSONA }
+        assertTrue(playerTurn.createdAt > 2L)
+        assertFalse(response.content.contains("APPROVED_STATE"))
+
+        suspend fun expectReplay(withEdits: Boolean) {
+            val requestCount = provider.requests.size
+            val messageCount = messages.getMessagesForChatOnce(chatId).size
+            vm.regenerateMessage(response.messageId)
+            awaitMessages(vm, messageCount + 1)
+            val active = messages.getMessagesForChatOnce(chatId).last {
+                it.isPrimaryVariant && it.speakerType == SpeakerType.NARRATOR
+            }
+            vm.continueMessage(active.messageId)
+            withTimeout(15000) {
+                vm.uiState.first { state ->
+                    state is ChatUiState.Success && !state.isGenerating && state.messages.any {
+                        it.messageId == active.messageId && it.content.length > active.content.length
+                    }
+                }
+            }
+            assertEquals(requestCount + 2, provider.requests.size)
+            for (request in provider.requests.takeLast(2)) {
+                val replayPrompt = request.first().content
+                assertTrue(replayPrompt.contains("APPROVED_STATE"))
+                assertEquals(!withEdits, replayPrompt.contains("ORIGINAL_LOCATION"))
+                assertEquals(!withEdits, replayPrompt.contains("REVOKABLE_STATE"))
+                listOf("PRIVATE_STATE", "FUTURE_STATE", "SIBLING_STATE", "LATER_EDIT", "SAME_TICK_STATE")
+                    .forEach { assertFalse(it, replayPrompt.contains(it)) }
+            }
+            assertEquals(1, messages.getMessagesForChatOnce(chatId).count { it.speakerType == SpeakerType.PERSONA })
+        }
+
+        expectReplay(withEdits = false)
+        val edited = campaigns.setPlaythroughState(campaign.campaignId, prior.chapterId,
+            CampaignPlaythroughField.LOCATION, "Crew", "LATER_EDIT", true)
+        dao.updateContinuityItem(edited.copy(updatedAt = playerTurn.createdAt + 1L))
+        campaigns.setPlaythroughState(campaign.campaignId, prior.chapterId,
+            CampaignPlaythroughField.ABILITY, "Crew", "REVOKABLE_STATE", false)
+        val sameTick = campaigns.setPlaythroughState(campaign.campaignId, prior.chapterId,
+            CampaignPlaythroughField.FORM, "Crew", "SAME_TICK_STATE", true)
+        dao.updateContinuityItem(sameTick.copy(updatedAt = playerTurn.createdAt))
+        expectReplay(withEdits = true)
 
         val unlinked = scenarios.start("s", "player")
         assertNull(campaigns.narratorPlaythroughContext(unlinked, Long.MAX_VALUE))
         db.chatDao().setContextResetBoundary(chatId, 10L, 10L)
         assertNull(campaigns.narratorPlaythroughContext(chatId, Long.MAX_VALUE))
+        assertNull(campaigns.narratorPlaythroughContext(chatId, playerTurn.createdAt, historicalReplay = true))
         assertNull(campaigns.narratorPlaythroughContext(siblingChat, 1L))
     }
 
