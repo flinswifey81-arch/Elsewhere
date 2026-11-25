@@ -1,6 +1,6 @@
 # Elsewhere 1.6.0 — production-signed release *candidate* preparation
 
-**Status:** Prepared in draft PR #49 for verification only. **Not yet production-signed, distributed, approved or installed.** This document does not grant permission to deploy an APK. No production keystore, owner app data or device is required for normal PR CI.
+**Status:** Merged to `main` after PR #49 verification. **Not yet production-signed, distributed, approved or installed.** This document does not grant permission to deploy an APK. No production keystore, owner app data or device is required for normal PR CI.
 
 ## Identity and owner-confirmed provenance
 
@@ -23,7 +23,7 @@ The `.v15` segment in the production package name is historical and intentionall
 
 Ordinary PR-triggered workflows continue to use throwaway **QA/debug** credentials, synthetic Room data, a disposable Android emulator, and isolated Test app packages. The emulator rehearsal now reads the real 1.6.0/4 source version rather than rewriting it in temporary CI; a genuine historical v1.5.2/3 debug-signed APK is updated in place to the candidate debug build and original records/files must survive. No production signing secrets are accessed in these ordinary PR jobs.
 
-The existing `.github/workflows/build-v15-release-apk.yml` is repurposed into a **manual-only candidate builder** because it is the existing workflow already wired to the historical signing secret names. The former automated `push` trigger has been removed. It refuses to run unless the owner deliberately selects PR #49's branch `work/memory-v2-stabilization-2026-11-18` and types `PREPARE_1_6_0` into the confirmation input. It runs app/backup/Worlds regression tests and the APK identity verifier before restoring the existing production keystore. A completed signed APK is then checked for:
+The existing `.github/workflows/build-v15-release-apk.yml` is repurposed into a **manual-only candidate builder** because it is the existing workflow already wired to the historical signing secret names. The former automated `push` trigger has been removed. It refuses to run unless the owner deliberately selects the `main` branch and types `PREPARE_1_6_0` into the confirmation input. It runs app/backup/Worlds regression tests and the APK identity verifier before restoring the existing production keystore. A completed signed APK is then checked for:
 
 - Exact existing package ID and prepared version 1.6.0/code 4.
 - The historical production signing certificate, **not** a new/QA/debug signer.
@@ -34,9 +34,9 @@ Any mismatch or missing secret **fails the job**. The signed APK is available on
 
 ## When the owner chooses to create the signed candidate
 
-**Do not trigger this manual builder until draft PR #49's eight applicable CI workflows all pass for the exact current SHA and its source changes are reviewed.** It is not automatically triggered by edits or ordinary PR verification.
+**Do not trigger this manual builder until the release source has passed its applicable CI checks and been merged to `main`.** It is not automatically triggered by edits or ordinary PR verification.
 
-In GitHub Actions, select **Prepare Elsewhere 1.6.0 Signed Candidate (manual, no install)**, choose branch `work/memory-v2-stabilization-2026-11-18`, and type `PREPARE_1_6_0`. Do not use another branch. GitHub's existing `ELSEWHERE_V15_*` secrets must still be configured; their presence and usability have not been independently confirmed by ordinary PR CI. If the job reports missing or incompatible credentials, **stop** and recover the original key under the owner's control—never substitute a freshly generated key.
+In GitHub Actions, select **Prepare Elsewhere 1.6.0 Signed Candidate (manual, no install)**, choose branch `main`, and type `PREPARE_1_6_0`. Do not use another branch. GitHub's existing `ELSEWHERE_V15_*` secrets must still be configured; their presence and usability have not been independently confirmed by ordinary PR CI. If the job reports missing or incompatible credentials, **stop** and recover the original key under the owner's control—never substitute a freshly generated key.
 
 When the manual job succeeds, review the artifact's attached metadata and the finished APK certificate with the frozen historical identity. The artifact is a *candidate*, not an instruction to install.
 

@@ -5,6 +5,7 @@ These tests lock versioning and the manual-only release workflow guardrails.
 """
 from pathlib import Path
 import re
+import subprocess
 import unittest
 
 
@@ -33,11 +34,32 @@ class CandidateReleaseContracts(unittest.TestCase):
         self.assertNotIn("\n  push:", header)
         self.assertIn('test "$GITHUB_EVENT_NAME" = "workflow_dispatch"', source)
         self.assertIn('test "$CONFIRM_CANDIDATE" = "PREPARE_1_6_0"', source)
-        self.assertIn('test "$GITHUB_REF_NAME" = "work/memory-v2-stabilization-2026-11-18"', source)
         self.assertLess(
             source.index("Require explicit owner-requested 1.6.0 candidate build"),
             source.index("Restore v1.5 release signing key"),
         )
+
+    def test_candidate_guard_accepts_only_confirmed_manual_main(self):
+        source = WORKFLOW.read_text()
+        step = source.split("      - name: Require explicit owner-requested", 1)[1]
+        step = step.split("\n      - name:", 1)[0]
+        script = step.split("        run: |\n", 1)[1]
+        script = "\n".join(line[10:] for line in script.splitlines())
+        for event, ref, confirmation, expected in (
+            ("workflow_dispatch", "refs/heads/main", "PREPARE_1_6_0", 0),
+            ("workflow_dispatch", "refs/tags/main", "PREPARE_1_6_0", 1),
+            ("workflow_dispatch", "refs/heads/work/memory-v2-stabilization-2026-11-18", "PREPARE_1_6_0", 1),
+            ("workflow_dispatch", "refs/heads/main", "wrong", 1),
+            ("push", "refs/heads/main", "PREPARE_1_6_0", 1),
+        ):
+            with self.subTest(event=event, ref=ref, confirmation=confirmation):
+                result = subprocess.run(
+                    ["/bin/bash", "-c", script],
+                    env={"GITHUB_EVENT_NAME": event, "GITHUB_REF": ref,
+                         "CONFIRM_CANDIDATE": confirmation},
+                    capture_output=True, text=True, check=False,
+                )
+                self.assertEqual(expected, result.returncode, result.stderr)
 
     def test_release_key_is_existing_and_candidate_apk_is_verified_before_artifact(self):
         source = WORKFLOW.read_text()

@@ -28,9 +28,12 @@ jobs:
         run: |
           set -euo pipefail
           test "$GITHUB_EVENT_NAME" = "workflow_dispatch"
-          test "$GITHUB_REF_NAME" = "work/memory-v2-stabilization-2026-11-18"
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "Select the main branch for the signed Elsewhere 1.6.0 candidate." >&2
+            exit 1
+          fi
           test "$CONFIRM_CANDIDATE" = "PREPARE_1_6_0"
-          echo "Manual 1.6.0 candidate approved for build on draft integration ref; no installation or publication."
+          echo "Manual 1.6.0 candidate approved for build from main; no installation or publication."
 
       - name: Check out selected branch
         uses: actions/checkout@v4
