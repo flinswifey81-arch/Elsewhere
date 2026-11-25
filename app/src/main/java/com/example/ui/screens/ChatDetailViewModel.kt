@@ -1286,7 +1286,8 @@ class ChatDetailViewModel(
                     val activePersona = chatSummary?.personas?.firstOrNull {
                         it.personaId == prepared.activePersonaId
                     }
-                    if (prepared.character.type == SpeakerType.CHARACTER &&
+                    if ((prepared.character.type == SpeakerType.CHARACTER ||
+                            prepared.character.type == SpeakerType.NARRATOR) &&
                         PersonaTurnBoundary.hasExplicitAuthoredPersonaTurn(
                             parsed.storyText,
                             listOfNotNull(
@@ -1300,7 +1301,7 @@ class ChatDetailViewModel(
                             requestedModelId = prepared.options.modelId,
                             wasUserStopped = false,
                             errorMessage = "The response wrote an explicit turn for your Persona. " +
-                                "It was not saved as Character dialogue. " +
+                                "It was not saved to the chat. " +
                                 "Discard it or review it before choosing Keep Partial."
                         )
                         return@launch

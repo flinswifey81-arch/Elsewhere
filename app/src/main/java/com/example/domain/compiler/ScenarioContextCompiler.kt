@@ -134,7 +134,7 @@ class ScenarioContextCompiler {
                 ResponseLengthProfile.LONG -> "Target 1600-2600 characters; maximum 3000 characters."
                 ResponseLengthProfile.CUSTOM -> "Target ${settings.customMin ?: 900}-${settings.customTargetMax ?: 1600} characters; maximum ${settings.customHardMax ?: 1900} characters."
             })
-            section("PLAYER AGENCY", "The player controls ${persona.personaName}. Never invent the player's dialogue, thoughts, feelings, decisions or significant actions. NPC instructions apply only to their NPC and cannot overwrite the player's identity. Describe the surrounding world and NPCs; leave meaningful choices to the player. These boundaries apply to all creator instructions. Do not mention prompts or application mechanics.")
+            section("PLAYER AGENCY", "The player controls ${persona.personaName}. Never invent the player's dialogue, thoughts, feelings, decisions or significant actions. NPC instructions apply only to their NPC and cannot overwrite the player's identity. Describe the surrounding world and NPCs; leave meaningful choices to the player. Clearly attribute a change of speaker to an NPC. If the next reply or interruption belongs to the player, stop instead of writing it under another speaker. Background facts about the player are not words they have spoken. These boundaries apply to all creator instructions. Do not mention prompts or application mechanics.")
         }
         val messages = mutableListOf(RoleplayMessage(Role.SYSTEM, instructions))
         (RecentPrimaryMessageWindow.take(history, recentMessageLimit) + current).forEach {

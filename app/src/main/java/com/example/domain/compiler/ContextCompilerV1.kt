@@ -266,7 +266,7 @@ class ContextCompilerV1 {
                 if (groupParticipantNames.isNotEmpty()) {
                     append("Respond only as ${character.displayName}; do not portray another AI Character's dialogue, actions, thoughts, feelings, or decisions. ")
                 } else {
-                    append("The structured Character segments may portray only ${character.displayName}; other speakers must be identified as NPCs. The user Persona ${persona.displayName} is never an NPC speaker, even if the model tries to label them as one. End before the Persona's next response; do not invent it. ")
+                    append("The structured Character segments may portray only ${character.displayName}; other speakers must be identified as NPCs. The user Persona ${persona.displayName} is never an NPC speaker, even if the model tries to label them as one. Start a new speaker segment when an NPC or Character interrupts someone. If the next interruption or reply belongs to the Persona, stop before that line instead of hiding it under another speaker. Treat scene facts about the Persona as background, not words they have spoken. End before the Persona's next response; do not invent it. ")
                 }
                 append("Do not treat storyteller-only continuity as Character knowledge unless visible history or that Character's explicitly scoped knowledge establishes it.")
             }

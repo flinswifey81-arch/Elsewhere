@@ -219,6 +219,24 @@ class StoryResponseTest {
     }
 
     @Test
+    fun recognizesOwnedDialogueWithinAnNpcParagraphWithoutGuessingFromPronouns() {
+        val player = listOf("Mira")
+        val blocked = listOf(
+            "Conductor: “The tram is delayed.” “Delayed?” *Mira checks the clock.* “I need to get across town.”",
+            "Conductor: “The tram is delayed.” “I need to get across town,” Mira replied. The conductor sighed.",
+            "Conductor: “The tram is delayed.” Mira replied, “I need to get across town.”"
+        )
+        blocked.forEach { assertTrue(PersonaTurnBoundary.hasExplicitAuthoredPersonaTurn(it, player)) }
+        val allowed = listOf(
+            "Conductor: “Mira, the tram is delayed.” “I know,” Tess said. The conductor sighed.",
+            "“The tram is delayed.” *The conductor follows Mira’s earlier gesture.* “See the clock?”",
+            "The conductor recalled that Mira had asked about the delay.",
+            "“The tram is delayed.” *Her colleague checks the clock.* “I need to get across town.”"
+        )
+        allowed.forEach { assertFalse(PersonaTurnBoundary.hasExplicitAuthoredPersonaTurn(it, player)) }
+    }
+
+    @Test
     fun narratorToggleRecognizesExplicitCharacterPrefixWithoutTouchingProse() {
         val varka = StorySpeakerIdentity("varka", "Varka")
         val leaked = "Character (Varka): *Varka drops the bags.* \"You're sitting down.\""

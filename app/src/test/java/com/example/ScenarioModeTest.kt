@@ -202,6 +202,20 @@ class ScenarioModeTest {
         assertEquals(listOf(SpeakerType.PERSONA, SpeakerType.NARRATOR), messages.map { it.speakerType })
         assertEquals(1, provider.requests.size)
     }
+    @Test fun explicitPlayerDialogueFromScenarioNarratorIsNotSaved() = runBlocking {
+        val provider = RecordingProvider(responseText = "Guest 1: Welcome.\nMira: I accept the invitation.")
+        val (id, vm) = model(provider, definition().copy(openingMessage = ""))
+        vm.onDraftChanged("I look at the invitation."); vm.sendMessage()
+        withTimeout(15000) {
+            vm.uiState.first { it is ChatUiState.Success && !it.isGenerating &&
+                it.partialStopped && it.generationError.orEmpty().contains("explicit turn for your Persona") }
+        }
+        val saved = MessageRepository(db.messageDao(), coordinator).getMessagesForChatOnce(id)
+        assertEquals(listOf(SpeakerType.PERSONA), saved.map { it.speakerType })
+        assertEquals("I look at the invitation.", saved.single().content)
+        assertEquals(1, provider.requests.size)
+    }
+
     @Test fun oneRequestPortraysMultipleNpcsAndPreservesModelSettingsAndNarratorIdentity() = runBlocking {
         val provider = RecordingProvider()
         val (id, vm) = model(provider)
@@ -442,7 +456,8 @@ class ScenarioModeTest {
     }
     private class RecordingProvider(
         val failFirst: Boolean = false, val waitForStop: Boolean = false,
-        val contextWindow: Int? = null
+        val contextWindow: Int? = null,
+        val responseText: String = "Guest 1: Welcome. Guest 2: Good evening."
     ): ModelProvider {
         override fun cachedContextLength(modelId: String): Int? = contextWindow
         val requests = mutableListOf<List<RoleplayMessage>>()
@@ -452,7 +467,7 @@ class ScenarioModeTest {
         override fun streamResponse(messages: List<RoleplayMessage>, options: GenerationOptions): Flow<StreamEvent> = flow {
             requests += messages; this@RecordingProvider.options += options
             if (failFirst && requests.size == 1) emit(StreamEvent.Error(IllegalStateException("Try again")))
-            else { emit(StreamEvent.Content("Guest 1: Welcome. Guest 2: Good evening.")); if (waitForStop) awaitCancellation() else emit(StreamEvent.Done(null)) }
+            else { emit(StreamEvent.Content(responseText)); if (waitForStop) awaitCancellation() else emit(StreamEvent.Done(null)) }
         }
     }
 }
