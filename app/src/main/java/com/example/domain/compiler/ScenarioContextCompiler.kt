@@ -151,7 +151,7 @@ class ScenarioContextCompiler {
                 SpeakerType.PERSONA -> Role.USER
                 SpeakerType.NARRATOR, SpeakerType.CHARACTER -> Role.ASSISTANT
                 else -> Role.SYSTEM
-            }, content, sourceMessageId = it.messageId
+            }, content, sourceMessageId = it.messageId)
         }
         if (continuation) {
             // The narrator's prior message is assistant-role history. A synthetic user-role
