@@ -42,6 +42,7 @@ jobs:
             --tests com.example.CampaignMemoryScopeTest \
             --tests com.example.CampaignRepositoryTest \
             --tests com.example.ScenarioModeTest.scenarioReplayUsesOnlyStillApprovedStateFromTheOriginalPlayerTurn \
+            --tests com.example.ScenarioModeTest.largeAuthoredScenarioFitsWithoutRaisingBudgetOrRewritingCards \
             --tests com.example.WorldDefinitionBundleTransferTest \
             --tests com.example.WorldArchiveMemoryV2TransferTest \
             --tests com.example.ChatPdfExportContractTest \

@@ -23,7 +23,8 @@ data class PromptOptionalContextFit(
     val legacyMemoriesOmitted: Boolean,
     val storyMemoriesOmitted: Boolean,
     val summaryOmitted: Boolean,
-    val decision: PromptPreflightDecision
+    val decision: PromptPreflightDecision,
+    val scenarioExcerptsUsed: Boolean = false
 ) {
     /** Only flags and counts; never disclose the prompt or excluded memory text. */
     fun countsOnlyNotice(): String? {
@@ -33,9 +34,13 @@ data class PromptOptionalContextFit(
             if (storyMemoriesOmitted) add("optional approved story memories")
             if (summaryOmitted) add("generated conversation summary")
         }
-        return if (changes.isEmpty()) null
-        else "Context budget: omitted ${changes.joinToString(", ")} for this request only. " +
-            "Saved chat data and memories were not changed."
+        if (changes.isEmpty() && !scenarioExcerptsUsed) return null
+        return buildString {
+            append("Context budget: ")
+            if (scenarioExcerptsUsed) append("used excerpts of Scenario, World, cast, Persona and active lore as needed. ")
+            if (changes.isNotEmpty()) append("Omitted ${changes.joinToString(", ")} for this request only. ")
+            append("Saved chat data and memories were not changed.")
+        }
     }
 }
 

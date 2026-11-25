@@ -4,6 +4,7 @@ import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.example.data.AppDatabase
 import com.example.data.model.*
+import com.example.domain.compiler.PromptPreflight
 import com.example.domain.compiler.ScenarioContextCompiler
 import com.example.domain.provider.*
 import com.example.domain.repository.*
@@ -100,7 +101,8 @@ class ScenarioModeTest {
 
     private suspend fun model(
         provider: RecordingProvider,
-        scenarioDefinition: ScenarioDefinition = definition()
+        scenarioDefinition: ScenarioDefinition = definition(),
+        lorebookRepository: LorebookRepository? = null
     ): Pair<String, ChatDetailViewModel> {
         persona(); scenarios.save("s", scenarioDefinition)
         val id = scenarios.start("s", "player")
@@ -108,7 +110,8 @@ class ScenarioModeTest {
         chats.insertChatSettings(ChatSettingsEntity(id, selectedModelId = "chosen/model", temperature = 0.7f, topP = 0.8f))
         val vm = owner.create(ChatDetailViewModel::class.java) { ChatDetailViewModel(id, chats,
             MessageRepository(db.messageDao(), coordinator), CharacterRepository(db.characterDao(), moshi), PersonaRepository(db.personaDao(), moshi), provider,
-            MemoryRepository(db.memoryDao(), coordinator), dataCoordinator = coordinator, scenarioRepository = scenarios) }
+            MemoryRepository(db.memoryDao(), coordinator), lorebookRepository = lorebookRepository,
+            dataCoordinator = coordinator, scenarioRepository = scenarios) }
         withTimeout(15000) { vm.uiState.first { it is ChatUiState.Success && it.historyLoaded } }
         return id to vm
     }
@@ -320,6 +323,67 @@ class ScenarioModeTest {
         assertNull(campaigns.narratorPlaythroughContext(chatId, Long.MAX_VALUE))
         assertNull(campaigns.narratorPlaythroughContext(chatId, playerTurn.createdAt, historicalReplay = true))
         assertNull(campaigns.narratorPlaythroughContext(siblingChat, 1L))
+    }
+
+    @Test fun largeAuthoredScenarioFitsWithoutRaisingBudgetOrRewritingCards() = runBlocking {
+        fun detail(label: String) = "$label " + "Long setting detail. ".repeat(130) + "UNSENT_FIELD_TAIL"
+        val cards = CharacterRepository(db.characterDao(), moshi)
+        val linkedId = cards.importCharacterJson(
+            """{"schema_version":1,"character_id":"budget-captain","display_name":"Captain","character_name":"Captain","aliases":[],"voice":{"tone":"${detail("LINKED_VOICE")}"},"author_notes":{"secret":"PRIVATE_CARD_NOTE"}}"""
+        )
+        val large = definition().copy(
+            premise = detail("CORE_PREMISE"), setting = detail("SETTING"),
+            locations = detail("LOCATIONS"), factions = detail("FACTIONS"),
+            worldRules = detail("RULES"), instructions = detail("NARRATION_DIRECTIVE"),
+            openingMessage = "",
+            npcs = (1..3).map { index ->
+                ScenarioNpc(
+                    name = "Budget NPC $index",
+                    sourceCharacterId = linkedId.takeIf { index == 1 },
+                    personality = detail("NPC_TRAIT_$index"), background = detail("BACKGROUND"),
+                    appearance = detail("APPEARANCE"), motivations = detail("MOTIVATION"),
+                    relationships = detail("RELATIONSHIPS"), narrativeRole = detail("NARRATIVE_ROLE"),
+                    instructions = detail("NPC_DIRECTIVE_$index")
+                )
+            }
+        )
+        val provider = RecordingProvider()
+        val lore = LorebookRepository(db.lorebookDao(), moshi, coordinator)
+        val (id, vm) = model(provider, large, lore)
+        val book = LorebookEntity(lorebookId = "budget-book", name = "Budget Lore")
+        lore.saveDefinition(book, (1..9).map { index ->
+            LorebookEntryEntity(
+                entryId = "budget-entry-$index", lorebookId = book.lorebookId,
+                title = "Budget lore $index", activationMode = "always", priority = 10 - index,
+                currentContent = detail("ACTIVE_LORE_$index"), notes = "PRIVATE_LORE_NOTE"
+            )
+        })
+        lore.attachLorebook(id, book.lorebookId)
+
+        val playerText = "PLAYER_TURN_UNABRIDGED " + "Please check the archive. ".repeat(12)
+        vm.onDraftChanged(playerText)
+        vm.sendMessage()
+        withTimeout(15000) {
+            val state = vm.uiState.first {
+                it is ChatUiState.Success && !it.isGenerating &&
+                    (it.messages.size == 2 || it.generationError != null)
+            } as ChatUiState.Success
+            assertNull(state.generationError)
+        }
+        val request = provider.requests.single()
+        val budget = PromptPreflight.inspect(request, null)
+        assertTrue(budget.allowed)
+        assertEquals(12_000, budget.inputCeilingTokens)
+        val prompt = request.first().content
+        listOf("CORE_PREMISE", "NARRATION_DIRECTIVE", "LINKED CHARACTER IDENTITY: Captain",
+            "LINKED_VOICE", "Budget NPC 3", "NPC_DIRECTIVE_3", "ACTIVE_LORE_1",
+            "PLAYER AGENCY", "PLAYER PERSONA (controlled only by the player)", "Mira", "[excerpt]"
+        ).forEach { assertTrue(it, prompt.contains(it)) }
+        listOf("UNSENT_FIELD_TAIL", "PRIVATE_CARD_NOTE", "PRIVATE_LORE_NOTE")
+            .forEach { assertFalse(it, prompt.contains(it)) }
+        assertEquals(playerText.trim(), request.last().content.substringAfter(": "))
+        assertEquals(large, ScenarioCodec.decode(requireNotNull(scenarios.session(id)).definitionJson))
+        assertEquals(9, db.lorebookDao().getEntries(book.lorebookId).size)
     }
 
     @Test fun failedNarrationRetryDoesNotDuplicatePlayerTurn() = runBlocking {

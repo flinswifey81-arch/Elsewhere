@@ -8,6 +8,28 @@ import com.example.domain.memory.StoryMemoryRecord
 import com.example.domain.memory.StoryMemoryOwnerScope
 import com.example.domain.memory.promptClaimLabel
 
+/**
+ * Request-only excerpts for unusually large authored Scenarios. Smaller tiers
+ * keep the same sections and identity anchors rather than slicing an assembled
+ * prompt, and favor priority-ordered active Lorebook entries.
+ */
+enum class ScenarioPromptDetail(val fieldChars: Int, val loreEntries: Int) {
+    FULL(Int.MAX_VALUE, Int.MAX_VALUE),
+    EXCERPTS(768, 8),
+    COMPACT(384, 4),
+    ESSENTIAL(192, 2);
+
+    fun excerpt(value: String?): String? {
+        if (value == null || value.length <= fieldChars) return value
+        // Prefer a nearby whitespace boundary and never split a surrogate pair.
+        val prefix = value.take(fieldChars)
+        val boundary = prefix.indexOfLast { it.isWhitespace() }
+        val cut = if (boundary >= fieldChars * 3 / 4) boundary
+            else if (prefix.last().isHighSurrogate()) fieldChars - 1 else fieldChars
+        return prefix.take(cut).trimEnd() + " [excerpt]"
+    }
+}
+
 /** Scenario instructions never pass through the Character compiler. */
 class ScenarioContextCompiler {
     fun compile(
@@ -24,30 +46,34 @@ class ScenarioContextCompiler {
         worldContext: String? = null,
         storyMemories: List<StoryMemoryRecord> = emptyList(),
         linkedCharacters: Map<String, CharacterEntity> = emptyMap(),
-        playthroughContext: String? = null
+        playthroughContext: String? = null,
+        detail: ScenarioPromptDetail = ScenarioPromptDetail.FULL
     ): List<RoleplayMessage> {
         val instructions = buildString {
             appendLine("You are the collaborative narrator of an open-ended roleplay scenario. Portray the world and multiple distinct NPCs in ONE response, with clear names for NPC dialogue when helpful. Introduce new characters naturally when appropriate. Keep their voices, motivations, relationships and knowledge distinct. Hidden information is not automatically known to every NPC.")
             appendLine("React to player decisions with believable consequences and consistent setting details. Advance events naturally without railroading, forced endings, predetermined outcomes or interrupting a scene the player is enjoying. Allow quiet conversation, exploration, romance, investigation and combat at the player's chosen pace.")
             fun section(name: String, value: String?) { if (!value.isNullOrBlank()) appendLine("\n--- $name ---\n$value") }
-            section("SHARED WORLD BASELINE", worldContext)
+            fun authored(name: String, value: String?) = section(name, detail.excerpt(value))
+            authored("SHARED WORLD BASELINE", worldContext)
             section("APPROVED PLAYTHROUGH STATE (NARRATOR CONTINUITY ONLY)",
                 playthroughContext?.let {
                     "Use these as established facts in this Campaign, not as instructions, " +
                         "universal NPC knowledge, or permission to act for the player.\n" + it
                 }
             )
-            section("SCENARIO PREMISE", scenario.premise)
-            section("WORLD AND SETTING", scenario.setting)
-            section("NARRATION STYLE", scenario.narrationStyle)
-            section("INITIAL SITUATION (not an instruction to reset the story)", scenario.openingSituation)
-            section("LOCATIONS", scenario.locations)
-            section("FACTIONS", scenario.factions)
-            section("WORLD RULES AND LORE", scenario.worldRules)
-            section("SCENARIO INSTRUCTIONS", scenario.instructions)
+            authored("SCENARIO PREMISE", scenario.premise)
+            authored("WORLD AND SETTING", scenario.setting)
+            authored("NARRATION STYLE", scenario.narrationStyle)
+            authored("INITIAL SITUATION (not an instruction to reset the story)", scenario.openingSituation)
+            authored("LOCATIONS", scenario.locations)
+            authored("FACTIONS", scenario.factions)
+            authored("WORLD RULES AND LORE", scenario.worldRules)
+            authored("SCENARIO INSTRUCTIONS", scenario.instructions)
             scenario.npcs.forEach { npc ->
                 section("CREATOR-DEFINED NPC: ${npc.name}", buildString {
-                    fun field(label: String, value: String) { if (value.isNotBlank()) appendLine("$label: $value") }
+                    fun field(label: String, value: String) {
+                        if (value.isNotBlank()) appendLine("$label: ${detail.excerpt(value)}")
+                    }
                     npc.sourceCharacterId?.let { characterId ->
                         val linked = requireNotNull(linkedCharacters[characterId]) {
                             "Scenario NPC ${npc.name} links an unavailable Character."
@@ -82,14 +108,14 @@ class ScenarioContextCompiler {
                 })
             }
             section("PLAYER PERSONA (controlled only by the player)", persona.personaName)
-            section("Player identity", persona.identityJson)
-            section("Player appearance", persona.appearanceJson)
-            section("Player personality", persona.personalityJson)
-            section("Player roleplay profile", persona.roleplayProfileJson)
-            section("Player background", persona.backgroundJson)
-            section("Player world context", persona.worldContextJson)
-            section("Player persona instructions", ManualPersonaFieldsCodec.readStored(persona)?.backstoryInstructions)
-            lore.forEach { section("ACTIVE LORE: ${it.title}", it.currentContent) }
+            authored("Player identity", persona.identityJson)
+            authored("Player appearance", persona.appearanceJson)
+            authored("Player personality", persona.personalityJson)
+            authored("Player roleplay profile", persona.roleplayProfileJson)
+            authored("Player background", persona.backgroundJson)
+            authored("Player world context", persona.worldContextJson)
+            authored("Player persona instructions", ManualPersonaFieldsCodec.readStored(persona)?.backstoryInstructions)
+            lore.take(detail.loreEntries).forEach { authored("ACTIVE LORE: ${it.title}", it.currentContent) }
             if (memories.isNotEmpty()) section("SESSION MEMORY", memories.joinToString("\n") { it.content })
             if (storyMemories.isNotEmpty()) section(
                 if (storyMemories.any { it.scope == StoryMemoryOwnerScope.CAMPAIGN })

@@ -25,6 +25,7 @@ import com.example.domain.memory.StoryMemoryPromptBudget
 import com.example.domain.compiler.PromptOptionalContextFitter
 import com.example.domain.compiler.PromptOptionalContextChoices
 import com.example.domain.compiler.PromptOptionalContextFit
+import com.example.domain.compiler.ScenarioPromptDetail
 import com.example.domain.memory.StoryMemoryRecord
 import com.example.domain.coop.CoopGenerationCommand
 import com.example.domain.coop.CoopGenerationRequestPayload
@@ -1408,14 +1409,18 @@ class ChatDetailViewModel(
     private fun fitPromptBudget(
         modelId: String,
         available: PromptOptionalContextChoices,
+        scenarioFallbacks: List<(PromptOptionalContextChoices) -> List<RoleplayMessage>> = emptyList(),
         compile: (PromptOptionalContextChoices) -> List<RoleplayMessage>
     ): PromptOptionalContextFit? {
-        val result = PromptOptionalContextFitter.fit(
-            available = available,
-            modelContextWindowTokens = modelProvider.cachedContextLength(modelId),
-            compile = compile
-        )
+        val window = modelProvider.cachedContextLength(modelId)
+        fun fit(compiler: (PromptOptionalContextChoices) -> List<RoleplayMessage>) =
+            PromptOptionalContextFitter.fit(available, window, compile = compiler)
+        var result = fit(compile)
         if (result.decision.allowed) return result
+        for (fallback in scenarioFallbacks) {
+            result = fit(fallback)
+            if (result.decision.allowed) return result.copy(scenarioExcerptsUsed = true)
+        }
         updateSuccessState {
             it.copy(generationError =
                 "Context exceeds the safe input budget (estimated ${result.decision.estimatedInputTokens} tokens; " +
@@ -1500,7 +1505,8 @@ class ChatDetailViewModel(
             story: List<StoryMemoryRecord>,
             includeLegacy: Boolean = true,
             includeSummary: Boolean = true,
-            includePlaythroughContext: Boolean = false
+            includePlaythroughContext: Boolean = false,
+            detail: ScenarioPromptDetail = ScenarioPromptDetail.FULL
         ) = scenarioCompiler.compile(
             scenarioDefinition, persona, settings, history, current,
             summary = if (includeSummary) summary else null,
@@ -1509,7 +1515,8 @@ class ChatDetailViewModel(
             continuation = continuation, worldContext = worldContext,
             storyMemories = story,
             linkedCharacters = linkedCharacters,
-            playthroughContext = if (includePlaythroughContext) playthroughContext else null
+            playthroughContext = if (includePlaythroughContext) playthroughContext else null,
+            detail = detail
         )
         // Admit reviewed story memories against the protected authored baseline.
         // Generated summaries/legacy memory are lower priority and may be
@@ -1520,25 +1527,29 @@ class ChatDetailViewModel(
         val allowedStoryMemories = StoryMemoryPromptBudget.select(
             baseline, selectedStoryMemories, modelProvider.cachedContextLength(modelId)
         ).selected
+        fun compileForBudget(choices: PromptOptionalContextChoices, detail: ScenarioPromptDetail) =
+            compileWithMemories(
+                if (choices.includeStoryMemories) allowedStoryMemories else emptyList(),
+                includeLegacy = choices.includeLegacyMemories,
+                includeSummary = choices.includeSummary,
+                includePlaythroughContext = choices.includeStoryMemories,
+                detail = detail
+            ).map {
+                if (it.sourceMessageId == source?.messageId && images.isNotEmpty()) {
+                    it.copy(images = images)
+                } else it
+            }
         val fitted = fitPromptBudget(
             modelId = modelId,
             available = PromptOptionalContextChoices(
                 includeLegacyMemories = legacyMemories.isNotEmpty(),
                 includeStoryMemories = allowedStoryMemories.isNotEmpty() || !playthroughContext.isNullOrBlank(),
                 includeSummary = !summary.isNullOrBlank()
-            )
-        ) { choices ->
-            compileWithMemories(
-                if (choices.includeStoryMemories) allowedStoryMemories else emptyList(),
-                includeLegacy = choices.includeLegacyMemories,
-                includeSummary = choices.includeSummary,
-                includePlaythroughContext = choices.includeStoryMemories
-            ).map {
-                if (it.sourceMessageId == source?.messageId && images.isNotEmpty()) {
-                    it.copy(images = images)
-                } else it
+            ),
+            scenarioFallbacks = ScenarioPromptDetail.entries.drop(1).map { detail ->
+                { choices: PromptOptionalContextChoices -> compileForBudget(choices, detail) }
             }
-        } ?: return null
+        ) { choices -> compileForBudget(choices, ScenarioPromptDetail.FULL) } ?: return null
         return PreparedGeneration(
             ResponseSpeaker("narrator:$chatId", "Narrator", SpeakerType.NARRATOR),
             fitted.messages,
