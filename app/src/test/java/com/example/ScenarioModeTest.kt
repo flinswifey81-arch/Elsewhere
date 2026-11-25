@@ -381,7 +381,8 @@ class ScenarioModeTest {
         ).forEach { assertTrue(it, prompt.contains(it)) }
         listOf("UNSENT_FIELD_TAIL", "PRIVATE_CARD_NOTE", "PRIVATE_LORE_NOTE")
             .forEach { assertFalse(it, prompt.contains(it)) }
-        assertEquals(playerText.trim(), request.last().content.substringAfter(": "))
+        assertEquals(Role.USER, request.last().role)
+        assertEquals("Player: $playerText", request.last().content)
         assertEquals(large, ScenarioCodec.decode(requireNotNull(scenarios.session(id)).definitionJson))
         assertEquals(9, db.lorebookDao().getEntries(book.lorebookId).size)
     }
