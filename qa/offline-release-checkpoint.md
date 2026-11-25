@@ -1,6 +1,8 @@
 # Offline release rehearsal
 
-Checkpoint: 2026-11-24 — first Memory V2 and PDF release rehearsal.
+Checkpoint: 2026-11-25 — draft rehearsal after World Scenario replay and
+large-World prompt budgeting. Validate this exact draft with synthetic data;
+private author files are never part of CI.
 
 Update this checkpoint on the Elsewhere development draft only when the
 current candidate is ready for the two longer offline checks:

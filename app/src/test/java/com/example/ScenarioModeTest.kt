@@ -102,7 +102,8 @@ class ScenarioModeTest {
     private suspend fun model(
         provider: RecordingProvider,
         scenarioDefinition: ScenarioDefinition = definition(),
-        lorebookRepository: LorebookRepository? = null
+        lorebookRepository: LorebookRepository? = null,
+        storyMemoryRepository: StoryMemoryRepository? = null
     ): Pair<String, ChatDetailViewModel> {
         persona(); scenarios.save("s", scenarioDefinition)
         val id = scenarios.start("s", "player")
@@ -111,7 +112,8 @@ class ScenarioModeTest {
         val vm = owner.create(ChatDetailViewModel::class.java) { ChatDetailViewModel(id, chats,
             MessageRepository(db.messageDao(), coordinator), CharacterRepository(db.characterDao(), moshi), PersonaRepository(db.personaDao(), moshi), provider,
             MemoryRepository(db.memoryDao(), coordinator), lorebookRepository = lorebookRepository,
-            dataCoordinator = coordinator, scenarioRepository = scenarios) }
+            dataCoordinator = coordinator, scenarioRepository = scenarios,
+            storyMemoryRepository = storyMemoryRepository) }
         withTimeout(15000) { vm.uiState.first { it is ChatUiState.Success && it.historyLoaded } }
         return id to vm
     }
@@ -349,7 +351,23 @@ class ScenarioModeTest {
         )
         val provider = RecordingProvider()
         val lore = LorebookRepository(db.lorebookDao(), moshi, coordinator)
-        val (id, vm) = model(provider, large, lore)
+        val memories = StoryMemoryRepository(db, coordinator)
+        val (id, vm) = model(provider, large, lore, memories)
+        val worlds = WorldRepository(db, coordinator)
+        val world = worlds.createWorld("Synthetic archive")
+        val campaigns = CampaignRepository(db, coordinator)
+        val season = campaigns.createCampaign(world.worldId, "Primary playthrough")
+        val alternate = campaigns.createCampaign(world.worldId, "Sibling playthrough")
+        val pilot = scenarios.start("s", "player")
+        val siblingPilot = scenarios.start("s", "player")
+        campaigns.addChapter(season.campaignId, pilot, "Pilot")
+        campaigns.addChapter(season.campaignId, id, "Next episode")
+        campaigns.addChapter(alternate.campaignId, siblingPilot, "Alternate pilot")
+        val approved = memories.saveManual(pilot, "The archive has the APPROVED_ARCHIVE_KEY.")
+        campaigns.shareStoryMemoryWithCampaign(season.campaignId, pilot, approved.memoryId)
+        memories.saveManual(pilot, "The archive has the UNSHARED_ARCHIVE_KEY.")
+        val sibling = memories.saveManual(siblingPilot, "The archive has the SIBLING_ARCHIVE_KEY.")
+        campaigns.shareStoryMemoryWithCampaign(alternate.campaignId, siblingPilot, sibling.memoryId)
         val book = LorebookEntity(lorebookId = "budget-book", name = "Budget Lore")
         lore.saveDefinition(book, (1..9).map { index ->
             LorebookEntryEntity(
@@ -377,9 +395,11 @@ class ScenarioModeTest {
         val prompt = request.first().content
         listOf("CORE_PREMISE", "NARRATION_DIRECTIVE", "LINKED CHARACTER IDENTITY: Captain",
             "LINKED_VOICE", "Budget NPC 3", "NPC_DIRECTIVE_3", "ACTIVE_LORE_1",
-            "PLAYER AGENCY", "PLAYER PERSONA (controlled only by the player)", "Mira", "[excerpt]"
+            "PLAYER AGENCY", "PLAYER PERSONA (controlled only by the player)", "Mira", "[excerpt]",
+            "APPROVED_ARCHIVE_KEY"
         ).forEach { assertTrue(it, prompt.contains(it)) }
-        listOf("UNSENT_FIELD_TAIL", "PRIVATE_CARD_NOTE", "PRIVATE_LORE_NOTE")
+        listOf("UNSENT_FIELD_TAIL", "PRIVATE_CARD_NOTE", "PRIVATE_LORE_NOTE",
+            "UNSHARED_ARCHIVE_KEY", "SIBLING_ARCHIVE_KEY")
             .forEach { assertFalse(it, prompt.contains(it)) }
         assertEquals(Role.USER, request.last().role)
         assertEquals("Player: $playerText", request.last().content)

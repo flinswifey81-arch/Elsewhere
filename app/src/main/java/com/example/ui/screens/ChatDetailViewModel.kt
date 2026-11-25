@@ -1518,32 +1518,38 @@ class ChatDetailViewModel(
             playthroughContext = if (includePlaythroughContext) playthroughContext else null,
             detail = detail
         )
-        // Admit reviewed story memories against the protected authored baseline.
-        // Generated summaries/legacy memory are lower priority and may be
-        // excluded by the final shared prompt fitter if space is tight.
-        val baseline = compileWithMemories(
-            emptyList(), includeLegacy = false, includeSummary = false
-        )
-        val allowedStoryMemories = StoryMemoryPromptBudget.select(
-            baseline, selectedStoryMemories, modelProvider.cachedContextLength(modelId)
-        ).selected
+        fun attachCurrentImages(messages: List<RoleplayMessage>) = messages.map {
+            if (it.sourceMessageId == source?.messageId && images.isNotEmpty()) {
+                it.copy(images = images)
+            } else it
+        }
+        // The full authored prompt may admit no memories even when a shorter
+        // Scenario tier has room. Budget the same pre-screened records once
+        // per tried tier, against that tier's actual authored baseline.
+        val memoryByDetail = mutableMapOf<ScenarioPromptDetail, List<StoryMemoryRecord>>()
+        val window = modelProvider.cachedContextLength(modelId)
+        fun admittedMemories(detail: ScenarioPromptDetail): List<StoryMemoryRecord> {
+            if (selectedStoryMemories.isEmpty()) return emptyList()
+            return memoryByDetail.getOrPut(detail) {
+                val baseline = attachCurrentImages(compileWithMemories(
+                    emptyList(), includeLegacy = false, includeSummary = false, detail = detail
+                ))
+                StoryMemoryPromptBudget.select(baseline, selectedStoryMemories, window).selected
+            }
+        }
         fun compileForBudget(choices: PromptOptionalContextChoices, detail: ScenarioPromptDetail) =
-            compileWithMemories(
-                if (choices.includeStoryMemories) allowedStoryMemories else emptyList(),
+            attachCurrentImages(compileWithMemories(
+                if (choices.includeStoryMemories) admittedMemories(detail) else emptyList(),
                 includeLegacy = choices.includeLegacyMemories,
                 includeSummary = choices.includeSummary,
                 includePlaythroughContext = choices.includeStoryMemories,
                 detail = detail
-            ).map {
-                if (it.sourceMessageId == source?.messageId && images.isNotEmpty()) {
-                    it.copy(images = images)
-                } else it
-            }
+            ))
         val fitted = fitPromptBudget(
             modelId = modelId,
             available = PromptOptionalContextChoices(
                 includeLegacyMemories = legacyMemories.isNotEmpty(),
-                includeStoryMemories = allowedStoryMemories.isNotEmpty() || !playthroughContext.isNullOrBlank(),
+                includeStoryMemories = selectedStoryMemories.isNotEmpty() || !playthroughContext.isNullOrBlank(),
                 includeSummary = !summary.isNullOrBlank()
             ),
             scenarioFallbacks = ScenarioPromptDetail.entries.drop(1).map { detail ->
