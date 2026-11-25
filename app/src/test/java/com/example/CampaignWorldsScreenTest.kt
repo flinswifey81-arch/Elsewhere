@@ -58,7 +58,13 @@ class CampaignWorldsScreenTest {
         compose.onNodeWithTag("open_campaign_" + campaign.campaignId).performClick()
         compose.onNodeWithTag("worlds_list")
             .performScrollToNode(hasTestTag("campaign_new_arc"))
-        compose.onNodeWithTag("campaign_new_arc").assertIsEnabled().performClick()
+        // The matching LazyColumn item is the whole Campaign card. Scroll
+        // the nested action itself into view before opening its dialog.
+        compose.onNodeWithTag("campaign_new_arc")
+            .performScrollTo().assertIsDisplayed().assertIsEnabled().performClick()
+        compose.waitUntil(20_000) {
+            compose.onAllNodesWithTag("campaign_continuity_title").fetchSemanticsNodes().isNotEmpty()
+        }
         compose.onNodeWithTag("campaign_continuity_title").performTextInput("The First Arc")
         compose.onNodeWithTag("campaign_continuity_details")
             .performTextInput("Our story began here.")
@@ -130,7 +136,13 @@ class CampaignWorldsScreenTest {
         compose.onNodeWithTag("open_campaign_" + campaign.campaignId).performClick()
         compose.onNodeWithTag("worlds_list")
             .performScrollToNode(hasTestTag("add_campaign_journal"))
-        compose.onNodeWithTag("add_campaign_journal").assertIsEnabled().performClick()
+        // The matching LazyColumn item is the whole Campaign card. Scroll
+        // the nested action itself into view before opening its dialog.
+        compose.onNodeWithTag("add_campaign_journal")
+            .performScrollTo().assertIsDisplayed().assertIsEnabled().performClick()
+        compose.waitUntil(20_000) {
+            compose.onAllNodesWithTag("campaign_journal_title").fetchSemanticsNodes().isNotEmpty()
+        }
         compose.onNodeWithTag("campaign_journal_title").performTextInput("First Discovery")
         compose.onNodeWithTag("campaign_journal_body")
             .performTextInput("The observatory is still unexplored.")
