@@ -83,6 +83,36 @@ class EnsembleNarrationUiTest {
 
 
     @Test
+    fun scenarioNarratorTurnRendersNarrationAndTwoNpcBubblesWithAvatars() {
+        val story = StoryResponse(segments = listOf(
+            StorySegment(StorySegmentType.NARRATION, "The station clock chimed."),
+            StorySegment(StorySegmentType.NPC, "The platform is clear.", "porter", "Porter"),
+            StorySegment(StorySegmentType.NPC, "We can leave now.", "driver", "Driver")
+        ))
+        val message = MessageEntity(
+            messageId = "scenario-response", chatId = "scenario",
+            speakerType = SpeakerType.NARRATOR, speakerId = "narrator:scenario",
+            speakerDisplayNameSnapshot = "Narrator", content = StoryResponseCodec.encode(story),
+            orderIndex = 1
+        )
+        composeRule.setContent {
+            MaterialTheme {
+                MessageBubble(
+                    group = MessageGroup(message, listOf(message)),
+                    onSwitchVariant = {}, onRegenerate = {}, onContinue = {}, onCopy = {},
+                    onEdit = { _, _ -> }, onDelete = {}, onShowMetadata = {}
+                )
+            }
+        }
+        composeRule.onNodeWithTag("story_narration_0").assertExists()
+        composeRule.onNodeWithTag("story_message_bubble_1").assertExists()
+        composeRule.onNodeWithTag("story_message_bubble_2").assertExists()
+        composeRule.onNodeWithTag("story_speaker_NPC_1").assertExists()
+        composeRule.onNodeWithTag("story_speaker_NPC_2").assertExists()
+        composeRule.onNodeWithTag("story_speaker_CHARACTER_0").assertDoesNotExist()
+    }
+
+    @Test
     fun alreadySavedFlinsAndVarkaProseRendersTwoSeparateBubbles() {
         val varka = NpcDossier(
             npcId = "npc-varka", chatId = "chat", displayName = "Varka",

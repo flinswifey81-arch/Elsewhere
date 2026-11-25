@@ -47,6 +47,10 @@ import com.example.domain.npc.NpcScenePresence
 import com.example.domain.story.StoryOutputParser
 import com.example.domain.story.StoryResponseCodec
 import com.example.domain.story.StorySpeakerIdentity
+import com.example.domain.story.StoryParseResult
+import com.example.domain.story.StorySegmentType
+import com.example.data.model.ScenarioCodec
+import com.example.data.model.ScenarioNpc
 import com.example.domain.story.PersonaTurnBoundary
 import com.example.domain.repository.CharacterRepository
 import com.example.domain.repository.ChatRepository
@@ -163,7 +167,8 @@ sealed class ChatUiState {
         val generationWarning: String? = null,
         val inChatToolStatus: InChatToolStatus? = null,
         val attachments: List<MessageAttachmentEntity> = emptyList(),
-        val draftAttachments: List<MessageAttachmentEntity> = emptyList()
+        val draftAttachments: List<MessageAttachmentEntity> = emptyList(),
+        val scenarioNpcs: List<ScenarioNpc> = emptyList()
     ) : ChatUiState()
 }
 
@@ -294,6 +299,18 @@ class ChatDetailViewModel(
                 historyLoaded = false,
                 selectedGroupCharacterId = selectedGroupCharacterId
             )
+
+            if (summary.chat.chatType == ChatType.SCENARIO) {
+                val sessions = scenarioRepository?.observeSession(chatId)
+                if (sessions != null) launch {
+                    sessions.collect { session ->
+                        val npcs = session?.let {
+                            runCatching { ScenarioCodec.decode(it.definitionJson).npcs }.getOrNull()
+                        }.orEmpty()
+                        updateSuccessState { it.copy(scenarioNpcs = npcs) }
+                    }
+                }
+            }
 
             launch {
                 chatRepository.getChatSettingsFlow(chatId).filterNotNull().collect { latestSettings ->
@@ -1277,6 +1294,9 @@ class ChatDetailViewModel(
                         StoryOutputParser.hasExplicitSpeakerFormatting(
                             parsed.storyText, fullCharacter.displayName
                         )
+                    val storyParsed = if (prepared.ensembleNarrationEnabled || explicitSpeakerFormat) {
+                        parseStoryOutput(parsed.storyText, prepared, final = true)
+                    } else null
                     // Block only explicit model-authored Persona turns. Do not
                     // silently attribute them to the primary Character or
                     // spend another provider call attempting an invisible repair.
@@ -1286,14 +1306,17 @@ class ChatDetailViewModel(
                     val activePersona = chatSummary?.personas?.firstOrNull {
                         it.personaId == prepared.activePersonaId
                     }
-                    if ((prepared.character.type == SpeakerType.CHARACTER ||
+                    val personaNames = listOfNotNull(activePersona?.displayName, activePersona?.personaName) +
+                        activePersona?.aliases.orEmpty()
+                    val scenarioPersonaSegment = prepared.character.type == SpeakerType.NARRATOR &&
+                        storyParsed?.response?.segments.orEmpty().any { segment ->
+                            segment.type == StorySegmentType.NPC &&
+                                (segment.speakerId == prepared.activePersonaId ||
+                                    personaNames.any { it.trim().equals(segment.speakerName, ignoreCase = true) })
+                        }
+                    if (scenarioPersonaSegment || ((prepared.character.type == SpeakerType.CHARACTER ||
                             prepared.character.type == SpeakerType.NARRATOR) &&
-                        PersonaTurnBoundary.hasExplicitAuthoredPersonaTurn(
-                            parsed.storyText,
-                            listOfNotNull(
-                                activePersona?.displayName, activePersona?.personaName
-                            ) + activePersona?.aliases.orEmpty()
-                        )
+                        PersonaTurnBoundary.hasExplicitAuthoredPersonaTurn(parsed.storyText, personaNames))
                     ) {
                         retainPartialGeneration(
                             visibleContent = safeVisibleGeneratedContent(generatedContent, prepared),
@@ -1306,14 +1329,6 @@ class ChatDetailViewModel(
                         )
                         return@launch
                     }
-                    val storyParsed = if (prepared.ensembleNarrationEnabled || explicitSpeakerFormat) {
-                        storyOutputParser.parse(
-                            output = parsed.storyText,
-                            primaryCharacter = StorySpeakerIdentity(fullCharacter.characterId, fullCharacter.displayName),
-                            knownNpcs = prepared.knownNpcSpeakers,
-                            final = true
-                        )
-                    } else null
                     val persistedContent = storyParsed?.response?.let(StoryResponseCodec::encode)
                         ?: parsed.storyText
                     val formatWarning = listOfNotNull(parsed.warning, storyParsed?.warning)
@@ -1399,7 +1414,9 @@ class ChatDetailViewModel(
     }
 
     private fun searchScene(history: List<MessageEntity>, current: MessageEntity): String =
-        (history.takeLast(6) + current).joinToString(" ") { it.content }.takeLast(4_000)
+        (history.takeLast(6) + current).joinToString(" ") {
+            if (it.speakerType == SpeakerType.NARRATOR) StoryResponseCodec.visibleText(it.content) else it.content
+        }.takeLast(4_000)
 
     /**
      * Personal chats fit to the selected model, not an app-wide token cap.
@@ -1573,6 +1590,8 @@ class ChatDetailViewModel(
                 temperature = settings.temperature, topP = settings.topP, maxTokens = null
             ),
             activePersonaId = personaId,
+            ensembleNarrationEnabled = true,
+            knownNpcSpeakers = scenarioDefinition.npcs.map { StorySpeakerIdentity(it.npcId, it.name.trim()) },
             contextReductionNotice = fitted.countsOnlyNotice()
         )
     }
@@ -2021,7 +2040,10 @@ class ChatDetailViewModel(
                 content = StoryResponseCodec.append(
                     existing = continuationTarget.content,
                     addition = content,
-                    primaryCharacter = StorySpeakerIdentity(character.characterId, character.displayName)
+                    primaryCharacter = StorySpeakerIdentity(character.characterId, character.displayName),
+                    unstructuredType = if (character.type == SpeakerType.NARRATOR) {
+                        StorySegmentType.NARRATION
+                    } else StorySegmentType.CHARACTER
                 )
             )
             val persistedMetadata = metadata?.copy(messageId = continuationTarget.messageId)
@@ -2488,16 +2510,14 @@ class ChatDetailViewModel(
             (prepared.character.type != SpeakerType.CHARACTER ||
                 !StoryOutputParser.hasExplicitSpeakerFormatting(storyText, prepared.character.displayName))
         ) return storyText
-        val parsed = storyOutputParser.parse(
-            output = storyText,
-            primaryCharacter = StorySpeakerIdentity(
-                prepared.character.characterId,
-                prepared.character.displayName
-            ),
-            knownNpcs = prepared.knownNpcSpeakers,
-            final = false
-        )
-        return StoryResponseCodec.encode(parsed.response)
+        return StoryResponseCodec.encode(parseStoryOutput(storyText, prepared, final = false).response)
+    }
+
+    private fun parseStoryOutput(output: String, prepared: PreparedGeneration, final: Boolean): StoryParseResult {
+        val speaker = StorySpeakerIdentity(prepared.character.characterId, prepared.character.displayName)
+        return if (prepared.character.type == SpeakerType.NARRATOR) {
+            storyOutputParser.parseScenario(output, speaker, prepared.knownNpcSpeakers, final)
+        } else storyOutputParser.parse(output, speaker, prepared.knownNpcSpeakers, final)
     }
 
     private fun hasVisibleContent(content: String): Boolean =
@@ -2786,7 +2806,16 @@ class ChatDetailViewModel(
         val targetMessage = state.messages.find { it.messageId == messageId } ?: return
         if (!canMutateCoop()) return
         viewModelScope.launch {
-            val edited = targetMessage.copy(content = newContent, editedAt = System.currentTimeMillis())
+            val content = if (targetMessage.speakerType == SpeakerType.NARRATOR &&
+                StoryResponseCodec.isEncoded(targetMessage.content)
+            ) {
+                StoryResponseCodec.encode(storyOutputParser.parseScenario(
+                    newContent,
+                    StorySpeakerIdentity(targetMessage.speakerId.orEmpty(), targetMessage.speakerDisplayNameSnapshot),
+                    state.scenarioNpcs.map { StorySpeakerIdentity(it.npcId, it.name.trim()) }
+                ).response)
+            } else newContent
+            val edited = targetMessage.copy(content = content, editedAt = System.currentTimeMillis())
             val room = coopSessionManager?.state?.value?.room?.takeIf { it.chatId == chatId }
             if (room == null) {
                 messageRepository.updateMessage(edited)

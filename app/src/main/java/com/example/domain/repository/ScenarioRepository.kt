@@ -14,6 +14,7 @@ class ScenarioRepository(
         Types.newParameterizedType(List::class.java, String::class.java)
     )
 
+    fun observeSession(chatId: String) = database.scenarioDao().observeSession(chatId)
     fun observeAll() = database.scenarioDao().observeAll()
     suspend fun get(id: String) = database.scenarioDao().get(id)
     suspend fun session(chatId: String) = database.scenarioDao().session(chatId)

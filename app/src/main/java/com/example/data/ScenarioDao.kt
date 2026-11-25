@@ -20,6 +20,8 @@ interface ScenarioDao {
     suspend fun insertForWorldImport(scenario: ScenarioEntity)
     @Query("SELECT * FROM scenario_sessions WHERE chatId = :chatId")
     suspend fun session(chatId: String): ScenarioSessionEntity?
+    @Query("SELECT * FROM scenario_sessions WHERE chatId = :chatId")
+    fun observeSession(chatId: String): Flow<ScenarioSessionEntity?>
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insertSession(session: ScenarioSessionEntity)
 

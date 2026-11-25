@@ -49,6 +49,8 @@ jobs:
             --tests com.example.NpcProseDiscoveryTest \
             --tests com.example.NpcSceneCastResolverTest \
             --tests com.example.StoryResponseTest \
+            --tests com.example.ScenarioModeTest \
+            --tests com.example.EnsembleNarrationUiTest \
             --tests com.example.ChatDetailGenerationTest.streamedPersonaActionBeatIsHeldForReviewOnSend \
             --tests com.example.ChatDetailGenerationTest.streamedPersonaActionBeatCannotOverwriteContinueTarget \
             --tests com.example.ChatDetailGenerationTest.streamedPersonaActionBeatCannotReplacePrimaryVariant \
