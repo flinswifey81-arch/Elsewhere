@@ -62,6 +62,7 @@ object PromptOptionalContextFitter {
         modelContextWindowTokens: Int?,
         configuredInputCeilingTokens: Int = 12_000,
         protectedRecentTurns: Int = 6,
+        modelWindowOnly: Boolean = false,
         compile: (PromptOptionalContextChoices) -> List<RoleplayMessage>
     ): PromptOptionalContextFit {
         var choices = available
@@ -70,7 +71,8 @@ object PromptOptionalContextFitter {
                 messages = compile(choices),
                 modelContextWindowTokens = modelContextWindowTokens,
                 configuredInputCeilingTokens = configuredInputCeilingTokens,
-                protectedRecentTurns = protectedRecentTurns
+                protectedRecentTurns = protectedRecentTurns,
+                modelWindowOnly = modelWindowOnly
             )
             if (trimmed.decision.allowed ||
                 !(choices.includeLegacyMemories ||

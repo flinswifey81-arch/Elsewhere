@@ -23,14 +23,23 @@ object PromptPreflight {
         messages: List<RoleplayMessage>,
         modelContextWindowTokens: Int?,
         configuredInputCeilingTokens: Int = DEFAULT_INPUT_CEILING,
-        outputReserveTokens: Int? = null
+        outputReserveTokens: Int? = null,
+        modelWindowOnly: Boolean = false
     ): PromptPreflightDecision {
         require(configuredInputCeilingTokens in 1_024..200_000)
         val known = modelContextWindowTokens != null && modelContextWindowTokens >= 2_048
         val window = if (known) modelContextWindowTokens!! else UNKNOWN_WINDOW
         val reserve = outputReserveTokens ?: minOf(4_096, maxOf(1_024, window / 4))
         require(reserve > 0)
-        val ceiling = minOf(configuredInputCeilingTokens, (window - reserve).coerceAtLeast(0))
+        // Local chats use the selected model's known window, not a fixed app
+        // cutoff. Without trustworthy cached metadata, the provider decides
+        // whether the request fits. Co-op retains its conservative default.
+        val windowCeiling = (window - reserve).coerceAtLeast(0)
+        val ceiling = when {
+            modelWindowOnly && !known -> Int.MAX_VALUE
+            modelWindowOnly -> windowCeiling
+            else -> minOf(configuredInputCeilingTokens, windowCeiling)
+        }
         val estimate = messages.sumOf { message ->
             val textTokens = (message.content.toByteArray(Charsets.UTF_8).size.toLong() + 1L) / 2L
             textTokens + 48L + message.images.size.toLong() * 1_024L

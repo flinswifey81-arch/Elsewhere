@@ -349,7 +349,7 @@ class ScenarioModeTest {
                 )
             }
         )
-        val provider = RecordingProvider()
+        val provider = RecordingProvider(contextWindow = 16_000)
         val lore = LorebookRepository(db.lorebookDao(), moshi, coordinator)
         val memories = StoryMemoryRepository(db, coordinator)
         val (id, vm) = model(provider, large, lore, memories)
@@ -389,7 +389,7 @@ class ScenarioModeTest {
             assertNull(state.generationError)
         }
         val request = provider.requests.single()
-        val budget = PromptPreflight.inspect(request, null)
+        val budget = PromptPreflight.inspect(request, 16_000, modelWindowOnly = true)
         assertTrue(budget.allowed)
         assertEquals(12_000, budget.inputCeilingTokens)
         val prompt = request.first().content
@@ -440,7 +440,11 @@ class ScenarioModeTest {
         assertEquals("narrator:$id", message.speakerId)
         assertEquals(1, provider.requests.size)
     }
-    private class RecordingProvider(val failFirst: Boolean = false, val waitForStop: Boolean = false): ModelProvider {
+    private class RecordingProvider(
+        val failFirst: Boolean = false, val waitForStop: Boolean = false,
+        val contextWindow: Int? = null
+    ): ModelProvider {
+        override fun cachedContextLength(modelId: String): Int? = contextWindow
         val requests = mutableListOf<List<RoleplayMessage>>()
         val options = mutableListOf<GenerationOptions>()
         override suspend fun getModels(): List<OpenRouterModel> = emptyList()
