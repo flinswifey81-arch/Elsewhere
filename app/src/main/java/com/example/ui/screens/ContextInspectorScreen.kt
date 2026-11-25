@@ -143,7 +143,8 @@ fun ContextInspectorScreen(
                     val baseline = compileWithMemories(emptyList())
                     val allowed = StoryMemoryPromptBudget.select(
                         baseline, selectedStoryMemories,
-                        appContainer.modelProvider.cachedContextLength(settings.selectedModelId ?: "openrouter/auto")
+                        appContainer.modelProvider.cachedContextLength(settings.selectedModelId ?: "openrouter/auto"),
+                        modelWindowOnly = appContainer.coopSessionManager?.state?.value?.room?.chatId != chatId
                     ).selected
                     selectedStoryMemoryCount = allowed.size
                     compiledMessages = if (allowed.isEmpty()) baseline else compileWithMemories(allowed)
@@ -257,7 +258,8 @@ fun ContextInspectorScreen(
                 val baseline = compileWithMemories(emptyList())
                 val allowed = StoryMemoryPromptBudget.select(
                     baseline, selectedStoryMemories,
-                    appContainer.modelProvider.cachedContextLength(settings.selectedModelId ?: "openrouter/auto")
+                    appContainer.modelProvider.cachedContextLength(settings.selectedModelId ?: "openrouter/auto"),
+                    modelWindowOnly = appContainer.coopSessionManager?.state?.value?.room?.chatId != chatId
                 ).selected
                 selectedStoryMemoryCount = allowed.size
                 compiledMessages = if (allowed.isEmpty()) baseline else compileWithMemories(allowed)

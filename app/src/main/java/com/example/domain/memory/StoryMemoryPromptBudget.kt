@@ -1,6 +1,7 @@
 package com.example.domain.memory
 
 import com.example.domain.provider.RoleplayMessage
+import com.example.domain.compiler.PromptPreflight
 
 /**
  * Additive prompt-cost guard for local story memories. It NEVER trims authored
@@ -20,7 +21,6 @@ data class StoryMemoryBudgetDecision(
 )
 
 object StoryMemoryPromptBudget {
-    private const val DEFAULT_MODEL_WINDOW = 16_384
     private const val DEFAULT_INPUT_CEILING = 12_000
     private const val MAX_ADDED_MEMORY_CHARS = 4_000
 
@@ -28,14 +28,15 @@ object StoryMemoryPromptBudget {
         baselineMessages: List<RoleplayMessage>,
         rankedMemories: List<StoryMemoryRecord>,
         modelContextWindowTokens: Int?,
-        configuredInputCeilingTokens: Int = DEFAULT_INPUT_CEILING
+        configuredInputCeilingTokens: Int = DEFAULT_INPUT_CEILING,
+        modelWindowOnly: Boolean = false
     ): StoryMemoryBudgetDecision {
-        require(configuredInputCeilingTokens in 1_024..200_000)
-        val known = modelContextWindowTokens != null && modelContextWindowTokens >= 2_048
-        val window = if (known) modelContextWindowTokens!! else DEFAULT_MODEL_WINDOW
-        val reservedOutput = minOf(4_096, maxOf(1_024, window / 4))
-        val ceiling = minOf(configuredInputCeilingTokens, (window - reservedOutput).coerceAtLeast(0))
-        val base = approximateTokens(baselineMessages)
+        val budget = PromptPreflight.inspect(
+            baselineMessages, modelContextWindowTokens, configuredInputCeilingTokens,
+            modelWindowOnly = modelWindowOnly
+        )
+        val ceiling = budget.inputCeilingTokens
+        val base = budget.estimatedInputTokens
         var remainingTokens = (ceiling - base).coerceAtLeast(0)
         var remainingChars = MAX_ADDED_MEMORY_CHARS
         val selected = mutableListOf<StoryMemoryRecord>()
@@ -56,7 +57,7 @@ object StoryMemoryPromptBudget {
             omittedForBudget = omitted,
             approximateBaselineTokens = base,
             approximateInputCeilingTokens = ceiling,
-            windowKnown = known
+            windowKnown = budget.modelWindowKnown
         )
     }
 

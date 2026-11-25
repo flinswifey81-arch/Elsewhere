@@ -1401,10 +1401,8 @@ class ChatDetailViewModel(
         (history.takeLast(6) + current).joinToString(" ") { it.content }.takeLast(4_000)
 
     /**
-     * One shared, offline preflight for Solo, Group, Scenario and co-op.
-     * Rebuild optional generated continuity sections, NEVER delete substrings
-     * from potentially user-authored system or World content. The final
-     * returned messages are also used in the co-op context fingerprint.
+     * Personal chats fit to the selected model, not an app-wide token cap.
+     * Keep the existing conservative co-op policy and fingerprint unchanged.
      */
     private fun fitPromptBudget(
         modelId: String,
@@ -1413,8 +1411,11 @@ class ChatDetailViewModel(
         compile: (PromptOptionalContextChoices) -> List<RoleplayMessage>
     ): PromptOptionalContextFit? {
         val window = modelProvider.cachedContextLength(modelId)
+        val modelWindowOnly = coopSessionManager?.state?.value?.room?.chatId != chatId
         fun fit(compiler: (PromptOptionalContextChoices) -> List<RoleplayMessage>) =
-            PromptOptionalContextFitter.fit(available, window, compile = compiler)
+            PromptOptionalContextFitter.fit(
+                available, window, modelWindowOnly = modelWindowOnly, compile = compiler
+            )
         var result = fit(compile)
         if (result.decision.allowed) return result
         for (fallback in scenarioFallbacks) {
@@ -1422,11 +1423,12 @@ class ChatDetailViewModel(
             if (result.decision.allowed) return result.copy(scenarioExcerptsUsed = true)
         }
         updateSuccessState {
+            val explanation = if (modelWindowOnly) "for the selected model" else "for this co-op room"
             it.copy(generationError =
-                "Context exceeds the safe input budget (estimated ${result.decision.estimatedInputTokens} tokens; " +
-                "limit ${result.decision.inputCeilingTokens}), even after excluding optional generated " +
-                "memories, summaries and old turns. Reduce authored lore or context before retrying. " +
-                "No API request was sent.")
+                "Context exceeds the safe input budget $explanation " +
+                "(estimated ${result.decision.estimatedInputTokens} tokens; " +
+                "room for ${result.decision.inputCeilingTokens} after reserving output). " +
+                "Choose a model with a larger context window. No API request was sent.")
         }
         return null
     }
@@ -1534,7 +1536,10 @@ class ChatDetailViewModel(
                 val baseline = attachCurrentImages(compileWithMemories(
                     emptyList(), includeLegacy = false, includeSummary = false, detail = detail
                 ))
-                StoryMemoryPromptBudget.select(baseline, selectedStoryMemories, window).selected
+                StoryMemoryPromptBudget.select(
+                    baseline, selectedStoryMemories, window,
+                    modelWindowOnly = coopSessionManager?.state?.value?.room?.chatId != chatId
+                ).selected
             }
         }
         fun compileForBudget(choices: PromptOptionalContextChoices, detail: ScenarioPromptDetail) =
@@ -1822,7 +1827,8 @@ class ChatDetailViewModel(
             emptyList(), includeLegacy = false, includeSummary = false
         )
         val allowedStoryMemories = StoryMemoryPromptBudget.select(
-            baseline, selectedStoryMemories, modelProvider.cachedContextLength(modelId)
+            baseline, selectedStoryMemories, modelProvider.cachedContextLength(modelId),
+            modelWindowOnly = activeCoopRoom == null
         ).selected
         val imageSourceMessage = relevantPersonaMessage?.takeIf { !isContinuation && activeCoopRoom == null }
         val currentImages = imageSourceMessage?.let { source ->

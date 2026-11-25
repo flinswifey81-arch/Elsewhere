@@ -286,6 +286,41 @@ class ChatDetailGenerationTest {
     }
 
     @Test
+    fun largeFirstTurnKeepsAuthoredCardWhenTheSelectedModelFits() = runBlocking {
+        assertLargeFirstTurnKeepsAuthoredCard(contextWindow = 65_536)
+    }
+
+    @Test
+    fun largeFirstTurnIsNotBlockedByAnInventedLimitWhenModelMetadataIsCold() = runBlocking {
+        assertLargeFirstTurnKeepsAuthoredCard(contextWindow = null)
+    }
+
+    private suspend fun assertLargeFirstTurnKeepsAuthoredCard(contextWindow: Int?) {
+        val provider = RecordingStreamingProvider(contextWindow = contextWindow)
+        val authored = "FIRST_CANON_ANCHOR " + "Large World detail. ".repeat(2_350) + " LAST_CANON_ANCHOR"
+        val harness = createHarness(
+            provider, ResponseLengthProfile.NORMAL,
+            characterDefinition = character().copy(backstoryJson = """{"history":"$authored"}""")
+        )
+        val playerText = "This is my opening turn. I cross the threshold."
+        harness.viewModel.onDraftChanged(playerText)
+        harness.viewModel.sendMessage()
+        awaitCompletedTurn(harness.viewModel, 2) { provider.requests.size }
+        val request = provider.requests.single()
+        assertTrue(request.first().content.contains(authored))
+        assertEquals(playerText, request.last().content)
+        val budget = com.example.domain.compiler.PromptPreflight.inspect(
+            request, contextWindow, modelWindowOnly = true
+        )
+        assertTrue(budget.allowed)
+        assertTrue("Match the reported first turn size", budget.estimatedInputTokens > 23_000)
+        assertEquals(1, harness.messageRepository.getMessagesForChatOnce(harness.chatId)
+            .count { it.speakerType == SpeakerType.PERSONA })
+        assertEquals("""{"history":"$authored"}""",
+            database.characterDao().getCharacterById("character-1")?.backstoryJson)
+    }
+
+    @Test
     fun oversizedAuthoredNarratorInstructionsBlockProviderEvenAfterOptionalRecovery() = runBlocking {
         val provider = RecordingStreamingProvider(contextWindow = 2_048)
         val harness = createHarness(
@@ -2926,7 +2961,8 @@ class ChatDetailGenerationTest {
         npcBankEnabledInitially: Boolean = false,
         initialStoredCharacterContent: String? = null,
         storyOutputParserFactory: () -> StoryOutputParser = ::StoryOutputParser,
-        storyMemoryRepository: StoryMemoryRepository? = null
+        storyMemoryRepository: StoryMemoryRepository? = null,
+        characterDefinition: CharacterEntity = character()
     ): Harness {
         val moshi = Moshi.Builder().addLast(KotlinJsonAdapterFactory()).build()
         val characterRepository = CharacterRepository(database.characterDao(), moshi, dataCoordinator = dataCoordinator)
@@ -2938,7 +2974,7 @@ class ChatDetailGenerationTest {
         val npcParser = NpcStructuredOutputParser(moshi)
         val memoryRepository = MemoryRepository(database.memoryDao(), dataCoordinator)
         val lorebookRepository = LorebookRepository(database.lorebookDao(), moshi, dataCoordinator)
-        database.characterDao().insertCharacter(character())
+        database.characterDao().insertCharacter(characterDefinition)
         database.personaDao().insertPersona(persona())
         val chatId = chatRepository.createSoloChat("Cutoff Test", "persona-1", "character-1")
         chatRepository.insertChatSettings(

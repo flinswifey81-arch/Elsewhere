@@ -18,11 +18,15 @@ object PromptHistoryTrimmer {
         messages: List<RoleplayMessage>,
         modelContextWindowTokens: Int?,
         configuredInputCeilingTokens: Int = 12_000,
-        protectedRecentTurns: Int = 6
+        protectedRecentTurns: Int = 6,
+        modelWindowOnly: Boolean = false
     ): PromptHistoryTrimResult {
         require(protectedRecentTurns >= 1)
         val working = messages.toMutableList()
-        var decision = PromptPreflight.inspect(working, modelContextWindowTokens, configuredInputCeilingTokens)
+        fun inspect() = PromptPreflight.inspect(
+            working, modelContextWindowTokens, configuredInputCeilingTokens, modelWindowOnly = modelWindowOnly
+        )
+        var decision = inspect()
         var removed = 0
         while (!decision.allowed) {
             val historyIndices = working.indices.filter { working[it].sourceMessageId != null }
@@ -31,7 +35,7 @@ object PromptHistoryTrimmer {
             } ?: break
             working.removeAt(removable)
             removed++
-            decision = PromptPreflight.inspect(working, modelContextWindowTokens, configuredInputCeilingTokens)
+            decision = inspect()
         }
         return PromptHistoryTrimResult(working.toList(), removed, decision)
     }
