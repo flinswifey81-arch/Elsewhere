@@ -37,10 +37,12 @@ jobs:
             --tests com.example.domain.StoryMemoryTemporalRetrievalTest \
             --tests com.example.AppDatabaseMigrationTest \
             --tests com.example.ChatDetailGenerationTest \
+            --tests com.example.StoryResponseTest \
             --tests com.example.domain.MemoryV2RoomScaleBenchmarkTest \
             --tests com.example.domain.MemoryV2CrowdedSceneAcceptanceTest \
             --tests com.example.CampaignMemoryScopeTest \
             --tests com.example.CampaignRepositoryTest \
+            --tests com.example.ScenarioModeTest.explicitPlayerDialogueFromScenarioNarratorIsNotSaved \
             --tests com.example.ScenarioModeTest.scenarioReplayUsesOnlyStillApprovedStateFromTheOriginalPlayerTurn \
             --tests com.example.ScenarioModeTest.largeAuthoredScenarioFitsWithoutRaisingBudgetOrRewritingCards \
             --tests com.example.WorldDefinitionBundleTransferTest \

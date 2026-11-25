@@ -1410,9 +1410,9 @@ class ChatDetailGenerationTest {
         // Deliberately malformed metadata forces the visible-prose fallback.
         // Split inside the Persona name and before the second quote.
         StreamEvent.Content("<|elsewhere_story_v1|>\n<|segment|>{broken}\n"),
-        StreamEvent.Content("Rowan moved toward the stall.\n“Compromised what?” *Ma"),
-        StreamEvent.Content("ra pointed at the stall.* "),
-        StreamEvent.Content("“My breakfast?”\n"),
+        StreamEvent.Content("Rowan: “The tram is delayed.” Rowan moved toward the platform. “Delayed?” *Ma"),
+        StreamEvent.Content("ra's voice rose.* "),
+        StreamEvent.Content("“But I have a connection.” \nCourier: “Next train in an hour.”"),
         StreamEvent.Done(null)
     )
 
@@ -1424,7 +1424,7 @@ class ChatDetailGenerationTest {
             }
         } as ChatUiState.Success
         assertTrue(state.generationError.orEmpty().contains("not saved"))
-        assertTrue(state.streamingContent.orEmpty().contains("Rowan moved toward the stall."))
+        assertTrue(state.streamingContent.orEmpty().contains("Rowan moved toward the platform."))
         assertFalse(state.streamingContent.orEmpty().contains("<|segment|>"))
         assertTrue(harness.npcRepository.getProjectedDossiers(harness.chatId).isEmpty())
     }
