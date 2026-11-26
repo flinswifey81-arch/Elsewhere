@@ -119,10 +119,10 @@ class ScenarioRepository(
         }
     }
 
-    suspend fun approvedPlaythroughContext(
+    internal suspend fun approvedPlaythroughEntries(
         chatId: String, asOfEpochMillis: Long, historicalReplay: Boolean = false
-    ): String? = CampaignRepository(database, coordinator)
-        .narratorPlaythroughContext(chatId, asOfEpochMillis, historicalReplay)
+    ): List<String> = CampaignRepository(database, coordinator)
+        .narratorPlaythroughEntries(chatId, asOfEpochMillis, historicalReplay)
 
     /** Bounded shared World baseline for Scenario narration. */
     suspend fun worldContextForChat(chatId: String): String? {

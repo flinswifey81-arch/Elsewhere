@@ -24,7 +24,8 @@ data class PromptOptionalContextFit(
     val storyMemoriesOmitted: Boolean,
     val summaryOmitted: Boolean,
     val decision: PromptPreflightDecision,
-    val scenarioExcerptsUsed: Boolean = false
+    val scenarioExcerptsUsed: Boolean = false,
+    val playthroughEntriesOmitted: Int = 0
 ) {
     /** Only flags and counts; never disclose the prompt or excluded memory text. */
     fun countsOnlyNotice(): String? {
@@ -33,6 +34,10 @@ data class PromptOptionalContextFit(
             if (legacyMemoriesOmitted) add("legacy generated memory")
             if (storyMemoriesOmitted) add("optional approved story memories")
             if (summaryOmitted) add("generated conversation summary")
+            if (playthroughEntriesOmitted > 0) {
+                val entries = if (playthroughEntriesOmitted == 1) "entry" else "entries"
+                add("$playthroughEntriesOmitted shared playthrough continuity $entries")
+            }
         }
         if (changes.isEmpty() && !scenarioExcerptsUsed) return null
         return buildString {
@@ -40,6 +45,7 @@ data class PromptOptionalContextFit(
             if (scenarioExcerptsUsed) append("used excerpts of Scenario, World, cast, Persona and active lore as needed. ")
             if (changes.isNotEmpty()) append("Omitted ${changes.joinToString(", ")} for this request only. ")
             append("Saved chat data and memories were not changed.")
+            if (playthroughEntriesOmitted > 0) append(" Use a model with a larger context window to include more continuity.")
         }
     }
 }
