@@ -26,6 +26,7 @@ import com.example.domain.compiler.PromptOptionalContextFitter
 import com.example.domain.compiler.PromptOptionalContextChoices
 import com.example.domain.compiler.PromptOptionalContextFit
 import com.example.domain.compiler.ScenarioPromptDetail
+import com.example.domain.compiler.ScenarioPromptBudget
 import com.example.domain.memory.StoryMemoryRecord
 import com.example.domain.coop.CoopGenerationCommand
 import com.example.domain.coop.CoopGenerationRequestPayload
@@ -1425,21 +1426,21 @@ class ChatDetailViewModel(
     private fun fitPromptBudget(
         modelId: String,
         available: PromptOptionalContextChoices,
-        scenarioFallbacks: List<(PromptOptionalContextChoices) -> List<RoleplayMessage>> = emptyList(),
         compile: (PromptOptionalContextChoices) -> List<RoleplayMessage>
     ): PromptOptionalContextFit? {
         val window = modelProvider.cachedContextLength(modelId)
         val modelWindowOnly = coopSessionManager?.state?.value?.room?.chatId != chatId
-        fun fit(compiler: (PromptOptionalContextChoices) -> List<RoleplayMessage>) =
-            PromptOptionalContextFitter.fit(
-                available, window, modelWindowOnly = modelWindowOnly, compile = compiler
-            )
-        var result = fit(compile)
+        val result = PromptOptionalContextFitter.fit(
+            available, window, modelWindowOnly = modelWindowOnly, compile = compile
+        )
+        return acceptPromptFit(result, modelWindowOnly)
+    }
+
+    private fun mergeGenerationWarnings(existing: String?, next: String?): String? =
+        listOfNotNull(existing, next).distinct().joinToString("\n").ifBlank { null }
+
+    private fun acceptPromptFit(result: PromptOptionalContextFit, modelWindowOnly: Boolean): PromptOptionalContextFit? {
         if (result.decision.allowed) return result
-        for (fallback in scenarioFallbacks) {
-            result = fit(fallback)
-            if (result.decision.allowed) return result.copy(scenarioExcerptsUsed = true)
-        }
         updateSuccessState {
             val explanation = if (modelWindowOnly) "for the selected model" else "for this co-op room"
             it.copy(generationError =
@@ -1499,9 +1500,9 @@ class ChatDetailViewModel(
         // A replay is tied to the preceding player turn, never the later
         // narration/variant timestamp or the current clock. A scripted opening
         // with no eligible player turn has no historical playthrough context.
-        val playthroughContext = if (includePlaythrough) latestPersonaMessage?.let { playerTurn ->
-            scenarioRepository?.approvedPlaythroughContext(chatId, playerTurn.createdAt, historicalReplay)
-        } else null
+        val playthroughEntries = if (includePlaythrough) latestPersonaMessage?.let { playerTurn ->
+            scenarioRepository?.approvedPlaythroughEntries(chatId, playerTurn.createdAt, historicalReplay)
+        }.orEmpty() else emptyList()
         val scenarioDefinition = com.example.data.model.ScenarioCodec.decode(session.definitionJson)
         // The link is a stable authored Character ID, NOT a name match and never a
         // license to pull history or knowledge from that Character's other chats.
@@ -1525,7 +1526,7 @@ class ChatDetailViewModel(
             story: List<StoryMemoryRecord>,
             includeLegacy: Boolean = true,
             includeSummary: Boolean = true,
-            includePlaythroughContext: Boolean = false,
+            playthroughContext: String? = null,
             detail: ScenarioPromptDetail = ScenarioPromptDetail.FULL
         ) = scenarioCompiler.compile(
             scenarioDefinition, persona, settings, history, current,
@@ -1535,7 +1536,7 @@ class ChatDetailViewModel(
             continuation = continuation, worldContext = worldContext,
             storyMemories = story,
             linkedCharacters = linkedCharacters,
-            playthroughContext = if (includePlaythroughContext) playthroughContext else null,
+            playthroughContext = playthroughContext,
             detail = detail
         )
         fun attachCurrentImages(messages: List<RoleplayMessage>) = messages.map {
@@ -1560,25 +1561,25 @@ class ChatDetailViewModel(
                 ).selected
             }
         }
-        fun compileForBudget(choices: PromptOptionalContextChoices, detail: ScenarioPromptDetail) =
+        val modelWindowOnly = coopSessionManager?.state?.value?.room?.chatId != chatId
+        val fitted = acceptPromptFit(ScenarioPromptBudget.fit(
+            available = PromptOptionalContextChoices(
+                includeLegacyMemories = legacyMemories.isNotEmpty(),
+                includeStoryMemories = selectedStoryMemories.isNotEmpty(),
+                includeSummary = !summary.isNullOrBlank()
+            ),
+            entries = playthroughEntries,
+            modelWindow = window,
+            modelWindowOnly = modelWindowOnly
+        ) { choices, continuity, detail ->
             attachCurrentImages(compileWithMemories(
                 if (choices.includeStoryMemories) admittedMemories(detail) else emptyList(),
                 includeLegacy = choices.includeLegacyMemories,
                 includeSummary = choices.includeSummary,
-                includePlaythroughContext = choices.includeStoryMemories,
+                playthroughContext = continuity,
                 detail = detail
             ))
-        val fitted = fitPromptBudget(
-            modelId = modelId,
-            available = PromptOptionalContextChoices(
-                includeLegacyMemories = legacyMemories.isNotEmpty(),
-                includeStoryMemories = selectedStoryMemories.isNotEmpty() || !playthroughContext.isNullOrBlank(),
-                includeSummary = !summary.isNullOrBlank()
-            ),
-            scenarioFallbacks = ScenarioPromptDetail.entries.drop(1).map { detail ->
-                { choices: PromptOptionalContextChoices -> compileForBudget(choices, detail) }
-            }
-        ) { choices -> compileForBudget(choices, ScenarioPromptDetail.FULL) } ?: return null
+        }, modelWindowOnly) ?: return null
         return PreparedGeneration(
             ResponseSpeaker("narrator:$chatId", "Narrator", SpeakerType.NARRATOR),
             fitted.messages,
@@ -2138,7 +2139,7 @@ class ChatDetailViewModel(
                     streamingContent = null,
                     generationCharacterId = null,
                     generationError = syncError?.let { "The approved continuation could not be confirmed by the room: ${it.message}" },
-                    generationWarning = if (syncError == null) npcUpdateWarning else null
+                    generationWarning = mergeGenerationWarnings(it.generationWarning, npcUpdateWarning.takeIf { syncError == null })
                 )
             }
             if (syncError == null && completionError == null && !isCoopGeneration &&
@@ -2296,7 +2297,7 @@ class ChatDetailViewModel(
                 streamingContent = null,
                 generationCharacterId = null,
                 generationError = syncError?.let { "The approved response could not be confirmed by the room: ${it.message}" },
-                generationWarning = if (syncError == null) memoryWarning else null
+                generationWarning = mergeGenerationWarnings(it.generationWarning, memoryWarning.takeIf { syncError == null })
             )
         }
         

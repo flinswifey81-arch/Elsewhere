@@ -128,7 +128,7 @@ internal fun CampaignPlaythroughStateSection(
                             onCheckedChange = { shareWithNarrator = it },
                             enabled = !busy && value.isNotBlank()
                         )
-                        Text("Use in Scenario narration. A copy of this value is sent with new turns; it does not become any character's knowledge.")
+                        Text("Use in Scenario narration. The full entry is used when it fits the selected model. Chat shows a notice if entries do not fit. This does not give characters that knowledge.")
                     }
                 }
             },

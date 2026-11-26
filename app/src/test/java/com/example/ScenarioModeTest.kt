@@ -380,11 +380,69 @@ class ScenarioModeTest {
         expectReplay(withEdits = true)
 
         val unlinked = scenarios.start("s", "player")
-        assertNull(campaigns.narratorPlaythroughContext(unlinked, Long.MAX_VALUE))
+        assertTrue(campaigns.narratorPlaythroughEntries(unlinked, Long.MAX_VALUE).isEmpty())
         db.chatDao().setContextResetBoundary(chatId, 10L, 10L)
-        assertNull(campaigns.narratorPlaythroughContext(chatId, Long.MAX_VALUE))
-        assertNull(campaigns.narratorPlaythroughContext(chatId, playerTurn.createdAt, historicalReplay = true))
-        assertNull(campaigns.narratorPlaythroughContext(siblingChat, 1L))
+        assertTrue(campaigns.narratorPlaythroughEntries(chatId, Long.MAX_VALUE).isEmpty())
+        assertTrue(campaigns.narratorPlaythroughEntries(chatId, playerTurn.createdAt, historicalReplay = true).isEmpty())
+        assertTrue(campaigns.narratorPlaythroughEntries(siblingChat, 1L).isEmpty())
+    }
+
+    @Test fun fullLengthContinuityAndMoreThanEightSharedEntriesReachNextEpisode() = runBlocking {
+        val provider = RecordingProvider(contextWindow = 32_000)
+        val (chatId, vm) = model(provider, definition().copy(openingMessage = ""))
+        val world = WorldRepository(db, coordinator).createWorld("Archive")
+        val campaigns = CampaignRepository(db, coordinator)
+        val campaign = campaigns.createCampaign(world.worldId, "Season one")
+        val pilot = campaigns.addChapter(campaign.campaignId, scenarios.start("s", "player"), "Pilot")
+        campaigns.addChapter(campaign.campaignId, chatId, "Episode two")
+        val end = "EPISODE_ENDS_WITH_THE_KEY_IN_THE_CLOCK"
+        val detail = "EPISODE_OPENS_AT_THE_STATION ".padEnd(12_000 - end.length, 'x') + end
+        campaigns.setPlaythroughState(campaign.campaignId, pilot.chapterId,
+            CampaignPlaythroughField.PROGRESSION, "Past episode", detail, shareWithNarrator = true)
+        val otherFacts = (1..9).map { "SIDE_FACT_${it}_MARKER" }
+        for (fact in otherFacts) {
+            campaigns.setPlaythroughState(campaign.campaignId, pilot.chapterId,
+                CampaignPlaythroughField.INVENTORY, fact, fact, shareWithNarrator = true)
+        }
+        vm.onDraftChanged("I look at the clock.")
+        vm.sendMessage()
+        val state = awaitMessages(vm, 2) as ChatUiState.Success
+        val request = provider.requests.single()
+        assertTrue(request.first().content.contains(detail))
+        otherFacts.forEach { assertTrue(it, request.first().content.contains(it)) }
+        assertTrue(PromptPreflight.inspect(request, 32_000, modelWindowOnly = true).allowed)
+        assertNull(state.generationWarning)
+        assertEquals(detail, campaigns.continuityItems(campaign.campaignId)
+            .single { it.title == "Past episode" }.details)
+    }
+
+    @Test fun continuityThatCannotFitIsReportedWithoutDroppingSmallerFactsOrEditingSavedState() = runBlocking {
+        val provider = RecordingProvider(contextWindow = 6_000)
+        val (chatId, vm) = model(provider, definition().copy(openingMessage = ""))
+        val world = WorldRepository(db, coordinator).createWorld("Archive")
+        val campaigns = CampaignRepository(db, coordinator)
+        val campaign = campaigns.createCampaign(world.worldId, "Season one")
+        val chapter = campaigns.addChapter(campaign.campaignId, chatId, "Episode one")
+        val detail = "DO_NOT_SEND_A_PARTIAL_FACT".padEnd(12_000, 'x')
+        campaigns.setPlaythroughState(campaign.campaignId, chapter.chapterId,
+            CampaignPlaythroughField.LOCATION, "Short fact", "SMALL_APPROVED_FACT", shareWithNarrator = true)
+        campaigns.setPlaythroughState(campaign.campaignId, chapter.chapterId,
+            CampaignPlaythroughField.PROGRESSION, "Long fact", detail, shareWithNarrator = true)
+        campaigns.setPlaythroughState(campaign.campaignId, chapter.chapterId,
+            CampaignPlaythroughField.ABILITY, "Private fact", "DO_NOT_INCLUDE_OR_COUNT_PRIVATE_FACT")
+        vm.onDraftChanged("Where are we?")
+        vm.sendMessage()
+        val state = awaitMessages(vm, 2) as ChatUiState.Success
+        val request = provider.requests.single()
+        assertTrue(request.first().content.contains("SMALL_APPROVED_FACT"))
+        assertFalse(request.first().content.contains("DO_NOT_SEND_A_PARTIAL_FACT"))
+        assertFalse(request.first().content.contains("DO_NOT_INCLUDE_OR_COUNT_PRIVATE_FACT"))
+        assertTrue(PromptPreflight.inspect(request, 6_000, modelWindowOnly = true).allowed)
+        val warning = state.generationWarning.orEmpty()
+        assertTrue(warning.contains("Omitted 1 shared playthrough continuity entry"))
+        assertFalse(warning.contains("used excerpts"))
+        assertEquals(detail, campaigns.continuityItems(campaign.campaignId)
+            .single { it.title == "Long fact" }.details)
     }
 
     @Test fun largeAuthoredScenarioFitsWithoutRaisingBudgetOrRewritingCards() = runBlocking {

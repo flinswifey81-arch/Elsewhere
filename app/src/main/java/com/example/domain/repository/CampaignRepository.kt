@@ -190,37 +190,40 @@ class CampaignRepository(
      * revoked value is omitted, not reconstructed from a superseded version.
      * No Character/NPC knowledge grants are created and nothing is sent here.
      */
-    suspend fun narratorPlaythroughContext(
+    internal suspend fun narratorPlaythroughEntries(
         chatId: String, asOfEpochMillis: Long, historicalReplay: Boolean = false
-    ): String? =
+    ): List<String> =
         database.withTransaction {
-            val chat = database.chatDao().getChatById(chatId) ?: return@withTransaction null
+            val chat = database.chatDao().getChatById(chatId) ?: return@withTransaction emptyList()
             if (chat.chatType != ChatType.SCENARIO || chat.contextResetOrderIndex != null) {
-                return@withTransaction null
+                return@withTransaction emptyList()
             }
-            val chapter = dao.chapterForChat(chatId) ?: return@withTransaction null
-            if (historicalReplay && chapter.createdAt >= asOfEpochMillis) return@withTransaction null
+            val chapter = dao.chapterForChat(chatId) ?: return@withTransaction emptyList()
+            if (historicalReplay && chapter.createdAt >= asOfEpochMillis) return@withTransaction emptyList()
             val chapters = dao.chapters(chapter.campaignId)
             val chapterById = chapters.associateBy { it.chapterId }
             val selected = campaignPlaythroughStateAt(chapter, chapters, dao.continuityItems(chapter.campaignId))
-            val lines = mutableListOf<String>()
-            var remaining = 1_800
-            for (item in selected) {
-                if (item.resolution != PLAYTHROUGH_NARRATOR_APPROVED ||
-                    item.updatedAt > asOfEpochMillis || lines.size >= 8) continue
-                if (historicalReplay && item.updatedAt >= asOfEpochMillis) continue
-                val sourceChapter = item.openedChapterId?.let(chapterById::get) ?: continue
-                if (historicalReplay && sourceChapter.createdAt >= asOfEpochMillis) continue
-                val sourceChat = database.chatDao().getChatById(sourceChapter.chatId) ?: continue
-                if (sourceChat.contextResetOrderIndex != null) continue
-                val field = CampaignPlaythroughField.fromItemType(item.itemType) ?: continue
-                fun singleLine(text: String) = text.lineSequence().joinToString(" ") { it.trim() }
-                val line = "- ${field.label}, ${singleLine(item.title)}: ${singleLine(item.details)}"
-                if (line.length + 1 > remaining) continue
-                lines += line
-                remaining -= line.length + 1
+                .sortedWith(compareByDescending<CampaignContinuityItemEntity> {
+                    it.openedChapterId?.let(chapterById::get)?.ordinal
+                }.thenByDescending { it.updatedAt })
+            val eligibleSourceChats = mutableMapOf<String, Boolean>()
+            buildList {
+                for (item in selected) {
+                    if (item.resolution != PLAYTHROUGH_NARRATOR_APPROVED || item.updatedAt > asOfEpochMillis) continue
+                    if (historicalReplay && item.updatedAt >= asOfEpochMillis) continue
+                    val sourceChapter = item.openedChapterId?.let(chapterById::get) ?: continue
+                    if (historicalReplay && sourceChapter.createdAt >= asOfEpochMillis) continue
+                    val sourceIsEligible = eligibleSourceChats.getOrPut(sourceChapter.chatId) {
+                        val sourceChat = database.chatDao().getChatById(sourceChapter.chatId)
+                        sourceChat != null && sourceChat.contextResetOrderIndex == null
+                    }
+                    if (!sourceIsEligible) continue
+                    val field = CampaignPlaythroughField.fromItemType(item.itemType) ?: continue
+                    val title = item.title.lineSequence().joinToString(" ") { it.trim() }
+                    val details = item.details.lineSequence().joinToString("\n  ")
+                    add("- ${field.label}, $title: $details")
+                }
             }
-            lines.takeIf { it.isNotEmpty() }?.joinToString("\n")
         }
 
     private val continuityTypes = setOf(
