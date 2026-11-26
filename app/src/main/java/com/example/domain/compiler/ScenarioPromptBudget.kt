@@ -43,14 +43,13 @@ internal object ScenarioPromptBudget {
             if (candidate.decision.allowed) partial = candidate
             else selected.removeAt(selected.lastIndex)
         }
-        // If no shared entry fits, do not also shorten the Scenario needlessly.
-        if (selected.isEmpty()) {
-            for (tier in tiers.dropLast(1)) {
-                val fuller = fitAt(tier, emptyList())
-                if (fuller.decision.allowed) {
-                    partial = fuller
-                    break
-                }
+        // Keep the fullest authored tier that still fits the chosen facts.
+        // An individually oversized entry should not force unrelated excerpts.
+        for (tier in tiers.dropLast(1)) {
+            val fuller = fitAt(tier, selected)
+            if (fuller.decision.allowed) {
+                partial = fuller
+                break
             }
         }
         return partial.copy(playthroughEntriesOmitted = entries.size - selected.size)

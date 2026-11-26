@@ -438,7 +438,9 @@ class ScenarioModeTest {
         assertFalse(request.first().content.contains("DO_NOT_SEND_A_PARTIAL_FACT"))
         assertFalse(request.first().content.contains("DO_NOT_INCLUDE_OR_COUNT_PRIVATE_FACT"))
         assertTrue(PromptPreflight.inspect(request, 6_000, modelWindowOnly = true).allowed)
-        assertTrue(state.generationWarning.orEmpty().contains("Omitted 1 shared playthrough continuity entry"))
+        val warning = state.generationWarning.orEmpty()
+        assertTrue(warning.contains("Omitted 1 shared playthrough continuity entry"))
+        assertFalse(warning.contains("used excerpts"))
         assertEquals(detail, campaigns.continuityItems(campaign.campaignId)
             .single { it.title == "Long fact" }.details)
     }
