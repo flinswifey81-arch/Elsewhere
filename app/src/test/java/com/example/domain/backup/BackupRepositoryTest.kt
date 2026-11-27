@@ -724,7 +724,7 @@ class BackupRepositoryTest {
         )
         assertEquals(1, result.restoredChats)
         assertEquals(2, result.restoredMessages)
-        assertEquals(4, result.restoredFiles)
+        assertEquals(5, result.restoredFiles)
         assertTrue(result.safetyBackupAvailable)
 
         val restored = target.readPayload()
@@ -798,6 +798,19 @@ class BackupRepositoryTest {
         )
         assertEquals(ThemeMode.DARK, target.appearance.appearanceSettings.first().themeMode)
         assertEquals(ColorPalette.FOREST_GREEN, target.appearance.appearanceSettings.first().colorPalette)
+
+        // A restored master needs to remain usable when added to a new episode.
+        val newChat = com.example.domain.repository.ChatRepository(target.database.chatDao())
+            .createSoloChat("Next episode", PERSONA_ID, CHARACTER_ID)
+        val npcRepository = com.example.domain.repository.NpcRepository(
+            target.database, moshi, AppDataMaintenanceCoordinator.Global, target.profileImages
+        )
+        assertEquals(1, npcRepository.addLibraryNpcsToChat(
+            newChat, restored.npcLibraryBanks.single().bankId
+        ))
+        val addedNpc = npcRepository.getProjectedDossiers(newChat).single()
+        assertArrayEquals(libraryPortraitBytes,
+            target.profileImages.resolveImage(ProfileImageKind.NPC, addedNpc.npcId)!!.readBytes())
     }
 
     @Test

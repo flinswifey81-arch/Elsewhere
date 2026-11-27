@@ -801,7 +801,7 @@ class ChatDetailGenerationTest {
         val provider = SequentialResponseProvider(listOf(
             """
                 <|elsewhere_story_v1|>
-                <|segment|>{"type":"npc","speaker_id":"npc-character","speaker_name":"Mara"}
+                <|segment|>{"type":"npc","speaker_id":"npc-character","speaker_name":"Monty"}
                 "I'll check the map."
                 <|end_story|>
             """.trimIndent()
@@ -809,7 +809,7 @@ class ChatDetailGenerationTest {
         val harness = createHarness(provider, ResponseLengthProfile.NORMAL)
         database.characterDao().insertCharacter(
             character().copy(
-                characterId = "npc-character", displayName = "Mara", characterName = "Mara",
+                characterId = "npc-character", displayName = "Monty", characterName = "Monty",
                 voiceJson = """{"tone":"precise and teasing"}""",
                 authorNotesJson = """{"private":"NEVER_SEND_ROSTER_NOTE"}"""
             )
@@ -823,7 +823,7 @@ class ChatDetailGenerationTest {
         harness.chatRepository.selectSoloSpotlight(harness.chatId, "npc-character")
         val earlier = MessageEntity(
             chatId = harness.chatId, speakerType = SpeakerType.CHARACTER,
-            speakerId = "npc-character", speakerDisplayNameSnapshot = "Mara",
+            speakerId = "npc-character", speakerDisplayNameSnapshot = "Monty",
             content = "I have the map.", orderIndex = 1L
         )
         harness.messageRepository.insertMessage(earlier)
@@ -836,7 +836,7 @@ class ChatDetailGenerationTest {
                     it.messages.any { message -> message.messageId == earlier.messageId }
             }
         }
-        harness.viewModel.onDraftChanged("Mara, can you check the map?")
+        harness.viewModel.onDraftChanged("Monty, can you check the map?")
         harness.viewModel.sendMessage()
         val messages = withTimeout(15_000) {
             harness.messageRepository.getMessagesForChat(harness.chatId).first { it.size == 3 }
