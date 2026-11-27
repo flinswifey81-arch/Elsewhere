@@ -110,7 +110,8 @@ class RedesignIdentityPickerTest {
         compose.onNodeWithText("No greeting").assertIsSelected()
         compose.onNodeWithText("Create Chat").performClick()
         compose.waitUntil(10_000) {
-            runBlocking { app.chatRepository.getAllChats().first().isNotEmpty() }
+            compose.onAllNodesWithText("Create Chat").fetchSemanticsNodes().isEmpty() &&
+                compose.onAllNodesWithText("Chat with Archivist AU").fetchSemanticsNodes().isNotEmpty()
         }
         runBlocking {
             val chat = app.chatRepository.getAllChats().first().single()

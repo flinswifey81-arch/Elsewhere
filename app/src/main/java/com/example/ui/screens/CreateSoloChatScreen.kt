@@ -32,7 +32,9 @@ import com.example.domain.repository.PersonaRepository
 import com.example.ui.components.elsewhereCardBorder
 import com.example.ui.components.elsewhereTextFieldColors
 import com.example.ui.components.elsewhereTopAppBarColors
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -363,7 +365,7 @@ fun CreateSoloChatScreen(
                                     characterDisplayName = character.displayName,
                                     initialCharacterMessage = selectedOpening
                                 )
-                                onChatCreated(chatId)
+                                withContext(Dispatchers.Main.immediate) { onChatCreated(chatId) }
                             }
                         },
                         enabled = chatName.isNotBlank() && selectedCharacter != null && personas.any { it.personaId == selectedPersonaId },
