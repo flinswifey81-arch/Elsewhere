@@ -50,6 +50,10 @@ jobs:
             --tests com.example.NpcSceneCastResolverTest \
             --tests com.example.StoryResponseTest \
             --tests com.example.ScenarioModeTest \
+            --tests com.example.ManualCharacterTest \
+            --tests com.example.ManualPersonaTest \
+            --tests com.example.UsabilityPassIntegrationTest \
+            --tests com.example.SoloGreetingPickerUiTest \
             --tests com.example.EnsembleNarrationUiTest \
             --tests com.example.ChatDetailGenerationTest.streamedPersonaActionBeatIsHeldForReviewOnSend \
             --tests com.example.ChatDetailGenerationTest.streamedPersonaActionBeatCannotOverwriteContinueTarget \

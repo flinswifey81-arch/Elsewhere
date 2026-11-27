@@ -7,6 +7,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -15,6 +17,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import com.example.domain.repository.CharacterRepository
 import com.example.domain.repository.ChatRepository
@@ -217,9 +220,12 @@ fun CreateSoloChatScreen(
                                     text = character.displayName,
                                     selected = selectedCharacter == character,
                                     onClick = { 
+                                        val changedCharacter = selectedCharacter?.characterId != character.characterId
                                         selectedCharacter = character
-                                        chatName = "Chat with ${character.displayName}"
-                                        selectedOpening = characterRepository.getOpeningMessages(character).firstOrNull()
+                                        if (changedCharacter) {
+                                            chatName = "Chat with ${character.displayName}"
+                                            selectedOpening = characterRepository.getOpeningMessages(character).firstOrNull()
+                                        }
                                     }
                                 )
                             }
@@ -253,19 +259,27 @@ fun CreateSoloChatScreen(
                     if (openings.isNotEmpty()) {
                         Spacer(Modifier.height(16.dp))
                         Text("Opening message", style = MaterialTheme.typography.titleSmall)
-                        Text("Saved as the first Character message without contacting a model.", style = MaterialTheme.typography.bodySmall)
-                        LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            "Choose a saved greeting or start with an empty chat. No model is contacted.",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        LazyColumn(
+                            Modifier.weight(1f).selectableGroup(),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            item {
+                                OpeningMessageOption(
+                                    label = "No greeting",
+                                    selected = selectedOpening == null,
+                                    onSelect = { selectedOpening = null }
+                                )
+                            }
                             items(openings) { opening ->
-                                Card(
-                                    modifier = Modifier.fillMaxWidth().clickable { selectedOpening = opening },
-                                    colors = CardDefaults.cardColors(containerColor = if (selectedOpening == opening) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerLow),
-                                    border = elsewhereCardBorder()
-                                ) {
-                                    Row(Modifier.padding(12.dp), verticalAlignment = Alignment.Top) {
-                                        RadioButton(selected = selectedOpening == opening, onClick = { selectedOpening = opening })
-                                        Text(opening, modifier = Modifier.padding(start = 8.dp), maxLines = 5)
-                                    }
-                                }
+                                OpeningMessageOption(
+                                    label = opening,
+                                    selected = selectedOpening == opening,
+                                    onSelect = { selectedOpening = opening }
+                                )
                             }
                         }
                     } else {
@@ -289,6 +303,27 @@ fun CreateSoloChatScreen(
                     ) { Text("Create Chat") }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun OpeningMessageOption(label: String, selected: Boolean, onSelect: () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth().selectable(
+            selected = selected,
+            onClick = onSelect,
+            role = Role.RadioButton
+        ),
+        colors = CardDefaults.cardColors(
+            containerColor = if (selected) MaterialTheme.colorScheme.primaryContainer
+            else MaterialTheme.colorScheme.surfaceContainerLow
+        ),
+        border = elsewhereCardBorder()
+    ) {
+        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.Top) {
+            RadioButton(selected = selected, onClick = null)
+            Text(label, modifier = Modifier.padding(start = 8.dp), maxLines = 5)
         }
     }
 }
