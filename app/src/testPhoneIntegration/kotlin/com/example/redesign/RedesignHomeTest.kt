@@ -35,24 +35,28 @@ class RedesignHomeTest {
     @Test fun nativeHomeUsesRealStoryRoutesAndKeepsTheBrandAcrossThemes() {
         val app=DefaultAppContainer(RuntimeEnvironment.getApplication())
         runBlocking {
+            app.appearanceRepository.updateColorPalette(ColorPalette.OCEAN_BLUE)
             val lead = app.characterRepository.createManualCharacter(ManualCharacterFields(name="Alex"))
             val persona = app.personaRepository.createManualPersona(ManualPersonaFields(name="Rin"))
             app.chatRepository.createSoloChat("Garage at midnight",persona,lead,"Alex",null)
         }
         var dark by mutableStateOf(true)
         compose.setContent {
-            AppTheme(darkTheme=dark, appearanceSettings=AppearanceSettings(colorPalette=ColorPalette.OCEAN_BLUE)) {
+            val appearance by app.appearanceRepository.appearanceSettings.collectAsState(initial=AppearanceSettings())
+            AppTheme(darkTheme=dark, appearanceSettings=appearance) {
                 ElsewhereApp(container=app)
             }
         }
         compose.waitUntil(10000) { compose.onAllNodesWithTag("home_continue_story").fetchSemanticsNodes().isNotEmpty() }
+        compose.waitUntil(10000) { compose.onAllNodesWithTag("elsewhere_banner_ocean_blue").fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithTag("elsewhere_banner_ocean_blue").assertExists()
         shot("redesign_home_moonlit_dark")
         compose.runOnIdle { dark=false }
         shot("redesign_home_moonlit_light")
         compose.onNodeWithTag("home_continue_story").performClick()
         compose.waitUntil(10000) {
-            compose.onAllNodesWithText("Garage at midnight").fetchSemanticsNodes().isNotEmpty()
+            compose.onAllNodesWithTag("home_screen").fetchSemanticsNodes().isEmpty() &&
+                compose.onAllNodesWithText("Garage at midnight").fetchSemanticsNodes().isNotEmpty()
         }
         compose.onNodeWithTag("bottom_nav_library").performClick()
         compose.onNodeWithTag("library_hub").assertExists()
