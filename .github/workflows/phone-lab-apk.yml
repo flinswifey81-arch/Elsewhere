@@ -24,6 +24,13 @@ jobs:
           packages: platform-tools
       - run: sdkmanager "platforms;android-36.1" "build-tools;36.0.0"
       - uses: gradle/actions/setup-gradle@v4
+      - name: Verify phone scope and SQLite schema
+        run: |
+          set -euo pipefail
+          classes="$(mktemp -d)"
+          javac -d "$classes" phone-lab/src/main/java/com/example/phonelab/systems/PhonePolicy.java phone-lab/qa/PhonePolicySmoke.java
+          java -ea -cp "$classes" com.example.phonelab.systems.PhonePolicySmoke
+          python3 phone-lab/qa/verify_phone_sql.py
       - run: bash ./gradlew :phone-lab:assembleDebug --no-daemon --no-configuration-cache
       - name: Verify isolated debug package and no permissions
         run: |
