@@ -1,0 +1,46 @@
+name: Elsewhere Phone Lab Debug APK
+
+on:
+  push:
+    branches: [work/phone-lab-2026-11-27]
+
+permissions:
+  contents: read
+
+jobs:
+  build-phone-lab:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools
+      - run: sdkmanager "platforms;android-36.1" "build-tools;36.0.0"
+      - uses: gradle/actions/setup-gradle@v4
+      - run: bash ./gradlew :phone-lab:assembleDebug --no-daemon --no-configuration-cache
+      - name: Verify isolated debug package and no permissions
+        run: |
+          set -euo pipefail
+          apk=phone-lab/build/outputs/apk/debug/phone-lab-debug.apk
+          build_tools="$ANDROID_HOME/build-tools/36.0.0"
+          "$build_tools/aapt" dump badging "$apk" | tee "$RUNNER_TEMP/phone-badging"
+          grep -F "package: name='com.aistudio.elsewhere.abwzy.phonelab'" "$RUNNER_TEMP/phone-badging"
+          grep -F 'application-debuggable' "$RUNNER_TEMP/phone-badging"
+          if grep -q '^uses-permission:' "$RUNNER_TEMP/phone-badging"; then
+            echo 'Offline Phone Lab should not request permissions'; exit 1
+          fi
+          "$build_tools/apksigner" verify --print-certs "$apk"
+          cp "$apk" Elsewhere-Phone-Lab-debug.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Elsewhere-Phone-Lab-Debug
+          path: Elsewhere-Phone-Lab-debug.apk
+          if-no-files-found: error
+          retention-days: 14

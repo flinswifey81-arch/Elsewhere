@@ -26,3 +26,5 @@ dependencyResolutionManagement {
 rootProject.name = "Elsewhere"
 
 include(":app")
+
+include(":phone-lab")
