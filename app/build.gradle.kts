@@ -80,6 +80,12 @@ android {
       matchingFallbacks += listOf("debug")
       signingConfigs.findByName("testing")?.let { signingConfig = it }
     }
+    create("phoneIntegration") {
+      initWith(getByName("debug"))
+      applicationIdSuffix = ".test.phoneintegration"
+      versionNameSuffix = "-phone-integration"
+      matchingFallbacks += listOf("debug")
+    }
     create("worldsPreview") {
       initWith(getByName("sandbox"))
       // Preserve the already-separate Worlds Preview package ID.
@@ -119,6 +125,9 @@ androidComponents {
     // Keep production native libraries installable on devices using 16 KB pages.
     variant.packaging.jniLibs.useLegacyPackaging.set(true)
   }
+  beforeVariants(selector().withBuildType("phoneIntegration")) { variantBuilder ->
+    (variantBuilder as com.android.build.api.variant.HasUnitTestBuilder).enableUnitTest = true
+  }
   beforeVariants(selector().withBuildType("sandbox")) { variantBuilder ->
     (variantBuilder as com.android.build.api.variant.HasUnitTestBuilder).enableUnitTest = true
   }
@@ -145,6 +154,7 @@ tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
 // Some unused dependencies are commented out below instead of being removed.
 // This makes it easy to add them back in the future if needed.
 dependencies {
+  add("phoneIntegrationImplementation", project(":phone-core"))
   implementation(platform(libs.androidx.compose.bom))
   // implementation(libs.accompanist.permissions)
   implementation(libs.androidx.activity.compose)

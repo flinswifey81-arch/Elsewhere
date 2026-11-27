@@ -175,7 +175,7 @@ internal fun pulseDigest(text: String): String {
 }
 
 /** Bounded strict JSON reader; duplicates and ambiguous scalar coercion fail closed. */
-internal class PulseJson private constructor(private val source: String) {
+class PulseJson private constructor(private val source: String) {
     private var i = 0
     data class Number(val value: String)
 

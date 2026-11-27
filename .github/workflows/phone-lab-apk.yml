@@ -26,7 +26,9 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
       - name: Verify the SQLite scope and provenance schema
         run: python3 phone-lab/qa/verify_phone_sql.py
-      - run: bash ./gradlew :phone-lab:testDebugUnitTest :phone-lab:assembleDebug --no-daemon --no-configuration-cache
+      - run: bash ./gradlew :phone-core:testDebugUnitTest :phone-lab:testDebugUnitTest :phone-lab:assembleDebug --no-daemon --no-configuration-cache
+      - name: Verify the real-room adapter in the isolated app variant
+        run: bash ./gradlew :app:testPhoneIntegrationUnitTest --tests 'com.example.phone.*' --no-daemon --no-configuration-cache
       - name: Verify isolated debug package and no platform permissions
         run: |
           set -euo pipefail

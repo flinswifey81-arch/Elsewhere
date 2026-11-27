@@ -34,11 +34,27 @@ class PhoneStore(context: Context) :
         append(key, messageId, ordinal, Speaker.CONTACT, text, timestamp)
     }
     /** Lab adapter only: local script output; this does not invoke a provider. */
-    internal fun saveDemoExchange(key: ThreadKey, operationId: String, ordinal: Int, text: String,
+    fun saveDemoExchange(key: ThreadKey, operationId: String, ordinal: Int, text: String,
                                   reply: String, timestamp: Long) {
         writableDatabase.inTransaction {
             savePersonaText(key, "$operationId-user", ordinal, text, timestamp)
             saveContactReply(key, "$operationId-reply", ordinal, reply, timestamp)
+        }
+    }
+
+    /** Commit a provider or fixture reply only while its source is the current outgoing text. */
+    fun commitContactReply(key: ThreadKey, sourceId: String, replyId: String, ordinal: Int, text: String, timestamp: Long) {
+        val row = PhoneMessage(stableId(replyId), chapter(ordinal), Speaker.CONTACT, boundedText(text, 4000), timestamp)
+        writableDatabase.inTransaction {
+            val existing = find(key, replyId)
+            if (existing != null) require(existing == row) { "Reply ID already used" }
+            else {
+                val current = history(key, ordinal, 1).singleOrNull()
+                require(current != null && current.id == stableId(sourceId) && current.speaker == Speaker.PERSONA) {
+                    "This reply belongs to an older outgoing text."
+                }
+                saveContactReply(key, replyId, ordinal, text, timestamp)
+            }
         }
     }
 
