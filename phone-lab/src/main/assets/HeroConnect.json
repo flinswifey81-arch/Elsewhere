@@ -1,0 +1,9 @@
+{
+  "format": "elsewhere.world-pulse.feed-pack", "version": 1, "name": "Hero Society",
+  "platforms":[{"id":"hero_connect","name":"HeroConnect","style":"bulletin","culture":"Agency notices and rescue news."}],
+  "accounts":[{"id":"agency","platformId":"hero_connect","handle":"@DynamightAgency","displayName":"Dynamight Hero Agency","role":"agency"},{"id":"lillypad_files","platformId":"hero_connect","handle":"@LillypadFiles","displayName":"Lillypad Files","role":"fan"}],
+  "starterState":{
+     "publicEvents":[{"id":"announcement","visibility":"public","summary":"The agency publicly announced that Lillypad has joined its rescue division."}],
+     "posts":[{"id":"intro","accountId":"agency","eventId":"announcement","kind":"announcement","text":"Meet Pro Hero Lillypad, the newest member of our rescue division. 🌸","replies":[{"id":"seed_vials","accountId":"lillypad_files","kind":"reaction","text":"The seed vials on that utility belt. We’re already fans."},{"id":"guess_demos","accountId":"lillypad_files","kind":"rumor","text":"Are we getting public rescue demos next? No announcement yet."}]}]
+  }
+}

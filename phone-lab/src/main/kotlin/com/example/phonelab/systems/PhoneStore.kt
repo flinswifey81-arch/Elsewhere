@@ -33,6 +33,15 @@ class PhoneStore(context: Context) :
     fun saveContactReply(key: ThreadKey, messageId: String, ordinal: Int, text: String, timestamp: Long) {
         append(key, messageId, ordinal, Speaker.CONTACT, text, timestamp)
     }
+    /** Lab adapter only: local script output; this does not invoke a provider. */
+    internal fun saveDemoExchange(key: ThreadKey, operationId: String, ordinal: Int, text: String,
+                                  reply: String, timestamp: Long) {
+        writableDatabase.inTransaction {
+            savePersonaText(key, "$operationId-user", ordinal, text, timestamp)
+            saveContactReply(key, "$operationId-reply", ordinal, reply, timestamp)
+        }
+    }
+
     private fun append(key: ThreadKey, messageId: String, ordinal: Int, speaker: Speaker, text: String, stamp: Long) {
         val candidate = PhoneMessage(stableId(messageId), chapter(ordinal), speaker, boundedText(text, 4000), stamp)
         writableDatabase.inTransaction {

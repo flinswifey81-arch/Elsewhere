@@ -1,4 +1,7 @@
-plugins { alias(libs.plugins.android.application) }
+plugins {
+    alias(libs.plugins.android.application)
+    alias(libs.plugins.kotlin.compose)
+}
 
 android {
     namespace = "com.example.phonelab"
@@ -7,6 +10,7 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+    buildFeatures { compose = true }
     testOptions {
         unitTests {
             isIncludeAndroidResources = true
@@ -17,13 +21,17 @@ android {
         applicationId = "com.aistudio.elsewhere.abwzy.phonelab"
         minSdk = 33
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1-lab"
+        versionCode = 2
+        versionName = "0.2-lab"
     }
 }
 
 
 dependencies {
+    implementation(platform(libs.androidx.compose.bom))
+    implementation(libs.androidx.activity.compose)
+    implementation(libs.androidx.compose.material3)
+    implementation(libs.kotlinx.coroutines.android)
     testImplementation(libs.junit)
     testImplementation(libs.androidx.core)
     testImplementation(libs.robolectric)
