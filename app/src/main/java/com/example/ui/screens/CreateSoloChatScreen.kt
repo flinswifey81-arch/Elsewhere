@@ -365,7 +365,11 @@ fun CreateSoloChatScreen(
                                     characterDisplayName = character.displayName,
                                     initialCharacterMessage = selectedOpening
                                 )
-                                withContext(Dispatchers.Main.immediate) { onChatCreated(chatId) }
+                                if (redesignImages != null) {
+                                    withContext(Dispatchers.Main.immediate) { onChatCreated(chatId) }
+                                } else {
+                                    onChatCreated(chatId)
+                                }
                             }
                         },
                         enabled = chatName.isNotBlank() && selectedCharacter != null && personas.any { it.personaId == selectedPersonaId },

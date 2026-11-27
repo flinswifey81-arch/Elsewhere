@@ -165,7 +165,11 @@ fun CreateGroupChatScreen(
                                     personaIds = listOf(requireNotNull(selectedPersonaId)),
                                     characterIds = selectedCharacters.filter { id -> characters.any { it.characterId == id } }
                                 )
-                                withContext(Dispatchers.Main.immediate) { onChatCreated(chatId) }
+                                if (redesignImages != null) {
+                                    withContext(Dispatchers.Main.immediate) { onChatCreated(chatId) }
+                                } else {
+                                    onChatCreated(chatId)
+                                }
                             }
                         },
                         enabled = chatName.isNotBlank() && personas.any { it.personaId == selectedPersonaId } &&
