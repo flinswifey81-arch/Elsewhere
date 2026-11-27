@@ -18,6 +18,11 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.domain.repository.ChatRepository
+import com.example.domain.repository.ProfileImageKind
+import com.example.domain.repository.ProfileImageRepository
+import com.example.ui.components.CoverActions
+import com.example.ui.components.CoverArtwork
+import com.example.ui.components.ProfileImageAvatar
 import com.example.ui.components.ElsewhereEmptyState
 import com.example.ui.components.elsewhereCardBorder
 import com.example.ui.components.elsewhereTopAppBarColors
@@ -33,7 +38,8 @@ fun ChatsScreen(
     onNavigateToChat: (String) -> Unit,
     onNewSoloChat: () -> Unit,
     onNewGroupChat: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    covers: ProfileImageRepository? = null
 ) {
     val chats by chatRepository.getAllChatSummaries().collectAsState(initial = emptyList())
     var showCreateMenu by remember { mutableStateOf(false) }
@@ -98,7 +104,8 @@ fun ChatsScreen(
                 items(chats, key = { it.chat.chatId }) { chatSummary ->
                     ChatCard(
                         chatSummary = chatSummary,
-                        onClick = { onNavigateToChat(chatSummary.chat.chatId) }
+                        onClick = { onNavigateToChat(chatSummary.chat.chatId) },
+                        covers = covers
                     )
                 }
             }
@@ -109,7 +116,8 @@ fun ChatsScreen(
 @Composable
 fun ChatCard(
     chatSummary: ChatSummary,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    covers: ProfileImageRepository? = null
 ) {
     val formatter = remember { SimpleDateFormat("MMM dd", Locale.getDefault()) }
     val timeString = formatter.format(Date(chatSummary.chat.updatedAt))
@@ -123,6 +131,20 @@ fun ChatCard(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)
         , border = elsewhereCardBorder()
     ) {
+        if (covers != null) {
+            Row(Modifier.fillMaxWidth().padding(start = 16.dp, top = 12.dp, end = 8.dp),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                CoverArtwork(covers, ProfileImageKind.CHAT_COVER, chatSummary.chat.chatId,
+                    Modifier.size(72.dp, 60.dp)) {
+                    val lead = chatSummary.characters.firstOrNull()
+                    ProfileImageAvatar(covers, ProfileImageKind.CHARACTER, lead?.characterId,
+                        lead?.displayName ?: chatSummary.chat.displayName, 54.dp)
+                }
+                Spacer(Modifier.weight(1f))
+                CoverActions(covers, ProfileImageKind.CHAT_COVER, chatSummary.chat.chatId,
+                    chatSummary.chat.displayName, compact = true)
+            }
+        }
         Column(modifier = Modifier.padding(20.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),

@@ -119,8 +119,8 @@ class DefaultAppContainer(private val context: Context) : AppContainer {
     }
 
     override val scenarioRepository by lazy { com.example.domain.repository.ScenarioRepository(database, dataCoordinator) }
-    override val worldRepository by lazy { com.example.domain.repository.WorldRepository(database, dataCoordinator) }
-    override val campaignRepository by lazy { com.example.domain.repository.CampaignRepository(database, dataCoordinator) }
+    override val worldRepository by lazy { com.example.domain.repository.WorldRepository(database, dataCoordinator, profileImageRepository) }
+    override val campaignRepository by lazy { com.example.domain.repository.CampaignRepository(database, dataCoordinator, profileImageRepository) }
 
     override val characterRepository: CharacterRepository by lazy {
         CharacterRepository(database.characterDao(), moshi, profileImageRepository, dataCoordinator)
@@ -139,7 +139,7 @@ class DefaultAppContainer(private val context: Context) : AppContainer {
     }
 
     override val chatRepository: ChatRepository by lazy {
-        ChatRepository(database.chatDao(), database.messageDao(), dataCoordinator)
+        ChatRepository(database.chatDao(), database.messageDao(), dataCoordinator, profileImageRepository)
     }
 
     override val modelProvider: com.example.domain.provider.ModelProvider by lazy {

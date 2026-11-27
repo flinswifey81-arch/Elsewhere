@@ -201,6 +201,7 @@ fun ElsewhereApp(
                     }
                 } else {
                     WorldsScreen(
+                        covers = container.profileImageRepository.takeIf { BuildConfig.BUILD_TYPE == "phoneIntegration" },
                         repository = repository,
                         // Full Worlds archive UI belongs in normal Elsewhere, not a preview APK.
                         archiveTransfer = container.worldArchiveTransfer,
@@ -254,6 +255,7 @@ fun ElsewhereApp(
             }
             composable(Screen.Chats.route) { 
                 ChatsScreen(
+                    covers = container.profileImageRepository.takeIf { BuildConfig.BUILD_TYPE == "phoneIntegration" },
                     chatRepository = container.chatRepository,
                     onNavigateToChat = { chatId -> navController.navigate("chat_detail/$chatId") },
                     onNewSoloChat = { navController.navigate("create_solo_chat") },

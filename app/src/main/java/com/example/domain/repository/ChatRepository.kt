@@ -19,7 +19,8 @@ import kotlinx.coroutines.withContext
 class ChatRepository(
     private val chatDao: ChatDao,
     private val messageDao: MessageDao? = null,
-    private val dataCoordinator: AppDataMaintenanceCoordinator = AppDataMaintenanceCoordinator.Global
+    private val dataCoordinator: AppDataMaintenanceCoordinator = AppDataMaintenanceCoordinator.Global,
+    private val coverImages: ProfileImageRepository? = null
 ) {
     fun getAllChats(): Flow<List<ChatEntity>> = chatDao.getAllChats()
     
@@ -181,6 +182,10 @@ class ChatRepository(
         }
 
     suspend fun deleteChat(chatId: String) = dataCoordinator.withMutation {
-        withContext(Dispatchers.IO) { chatDao.deleteChatAndOwnedData(chatId) }
+        withContext(Dispatchers.IO) {
+            chatDao.deleteChatAndOwnedData(chatId)
+            runCatching { coverImages?.removeImage(ProfileImageKind.CHAT_COVER,chatId) }
+            Unit
+        }
     }
 }

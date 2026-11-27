@@ -27,7 +27,10 @@ enum class ProfileImageKind(val directoryName: String) {
     PERSONA("personas"),
     CHARACTER("characters"),
     SCENARIO("scenarios"),
-    NPC("npcs")
+    NPC("npcs"),
+    CHAT_COVER("chat_covers"),
+    WORLD_COVER("world_covers"),
+    CAMPAIGN_COVER("campaign_covers")
 }
 
 data class ProfileImageState(

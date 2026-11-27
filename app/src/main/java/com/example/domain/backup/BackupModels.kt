@@ -32,7 +32,10 @@ enum class BackupFileKind {
     CHARACTER_AVATAR,
     PERSONA_AVATAR,
     SCENARIO_AVATAR,
-    NPC_AVATAR
+    NPC_AVATAR,
+    CHAT_COVER,
+    WORLD_COVER,
+    CAMPAIGN_COVER
 }
 
 @JsonClass(generateAdapter = true)

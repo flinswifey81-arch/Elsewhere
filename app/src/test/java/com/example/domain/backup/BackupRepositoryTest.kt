@@ -80,6 +80,41 @@ class BackupRepositoryTest {
     }
 
     @Test
+    fun encryptedBackupPreservesChatWorldAndCampaignCoversIndependently() = runBlocking {
+        val from=environment()
+        val world=com.example.domain.repository.WorldRepository(from.database).createWorld("Cover test")
+        val campaign=com.example.domain.repository.CampaignRepository(from.database).createCampaign(world.worldId,"Timeline")
+        val chat=ChatEntity(chatId="cover-story",displayName="Cover story",chatType=ChatType.SOLO)
+        from.database.chatDao().insertChat(chat)
+        val png=File(context.cacheDir,"cover-fixture.png")
+        android.graphics.Bitmap.createBitmap(36,24,android.graphics.Bitmap.Config.ARGB_8888).let { bitmap ->
+            bitmap.eraseColor(android.graphics.Color.BLUE)
+            png.outputStream().use { bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG,100,it) }
+            bitmap.recycle()
+        }
+        val owners=listOf(ProfileImageKind.CHAT_COVER to chat.chatId,ProfileImageKind.WORLD_COVER to world.worldId,
+            ProfileImageKind.CAMPAIGN_COVER to campaign.campaignId)
+        try {
+            val expected=owners.associateWith { (kind,id) ->
+                from.profileImages.replaceImage(kind,id,android.net.Uri.fromFile(png)).readBytes()
+            }
+            val encrypted=ByteArrayOutputStream()
+            val preview=from.repository.exportEncrypted(encrypted,PASSPHRASE.toCharArray())
+            assertEquals(3,preview.profileImages)
+            owners.forEach { (kind,id) -> from.profileImages.removeImage(kind,id) }
+            val target=environment()
+            target.repository.restoreEncrypted(ByteArrayInputStream(encrypted.toByteArray()),PASSPHRASE.toCharArray())
+            owners.forEach { (kind,id) ->
+                assertArrayEquals(expected.getValue(kind to id),target.profileImages.resolveImage(kind,id)!!.readBytes())
+            }
+            target.profileImages.removeImage(ProfileImageKind.CHAT_COVER,chat.chatId)
+            assertTrue(target.profileImages.resolveImage(ProfileImageKind.WORLD_COVER,world.worldId)!!.isFile)
+            assertTrue(target.profileImages.resolveImage(ProfileImageKind.CAMPAIGN_COVER,campaign.campaignId)!!.isFile)
+            assertNotNull(target.database.chatDao().getChatById(chat.chatId))
+        } finally { png.delete() }
+    }
+
+    @Test
     fun encryptedBackupRoundTripsStoryMemoryActorKnowledgeAndExplicitWackReturn() = runBlocking {
         val source = environment()
         val chat = ChatEntity(chatId = "story-v16", displayName = "Memory Archive", chatType = ChatType.SOLO)

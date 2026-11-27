@@ -75,11 +75,13 @@ fun ProfileImageAvatar(
     val fallbackContainer = when (kind) {
         ProfileImageKind.PERSONA -> MaterialTheme.colorScheme.secondaryContainer
         ProfileImageKind.SCENARIO, ProfileImageKind.CHARACTER, ProfileImageKind.NPC -> MaterialTheme.colorScheme.primaryContainer
+        ProfileImageKind.CHAT_COVER, ProfileImageKind.WORLD_COVER, ProfileImageKind.CAMPAIGN_COVER,
         null -> MaterialTheme.colorScheme.surfaceContainerHigh
     }
     val fallbackContent = when (kind) {
         ProfileImageKind.PERSONA -> MaterialTheme.colorScheme.onSecondaryContainer
         ProfileImageKind.SCENARIO, ProfileImageKind.CHARACTER, ProfileImageKind.NPC -> MaterialTheme.colorScheme.onPrimaryContainer
+        ProfileImageKind.CHAT_COVER, ProfileImageKind.WORLD_COVER, ProfileImageKind.CAMPAIGN_COVER,
         null -> MaterialTheme.colorScheme.onSurfaceVariant
     }
 
@@ -253,7 +255,7 @@ fun ProfileImageEditor(
 }
 
 @Composable
-private fun File?.rememberDecodedProfileBitmap(revision: Long): androidx.compose.runtime.State<ImageBitmap?> =
+internal fun File?.rememberDecodedProfileBitmap(revision: Long): androidx.compose.runtime.State<ImageBitmap?> =
     produceState<ImageBitmap?>(initialValue = null, this?.absolutePath, revision) {
         val file = this@rememberDecodedProfileBitmap
         value = if (file == null) {

@@ -15,7 +15,8 @@ import java.util.UUID
  */
 class WorldRepository(
     private val database: AppDatabase,
-    private val coordinator: AppDataMaintenanceCoordinator = AppDataMaintenanceCoordinator.Global
+    private val coordinator: AppDataMaintenanceCoordinator = AppDataMaintenanceCoordinator.Global,
+    private val coverImages: ProfileImageRepository? = null
 ) {
     private val dao get() = database.worldDao()
 
@@ -316,7 +317,9 @@ class WorldRepository(
         require(database.campaignDao().forWorld(worldId).isEmpty()) {
             "This World contains Campaigns. Delete or move their chapters explicitly first; chats will not be deleted."
         }
-        dao.deleteWorld(worldId)
+        val removed=dao.deleteWorld(worldId)
+        if (removed>0) runCatching { coverImages?.removeImage(ProfileImageKind.WORLD_COVER,worldId) }
+        removed
     }
 
     private suspend fun requireWorld(worldId: String): WorldEntity =

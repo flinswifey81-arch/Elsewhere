@@ -313,6 +313,17 @@ class BackupRepository internal constructor(
                 result += profileSource(BackupFileKind.NPC_AVATAR, npc.npcId, source, stagingDirectory)
             }
         }
+        mapOf(
+            BackupFileKind.CHAT_COVER to payload.chats.map { it.chatId },
+            BackupFileKind.WORLD_COVER to payload.worlds.map { it.worldId },
+            BackupFileKind.CAMPAIGN_COVER to payload.campaigns.map { it.campaignId }
+        ).forEach { (kind, owners) ->
+            owners.forEach { owner ->
+                profileImageRepository.resolveImage(requireNotNull(kind.profileKind()), owner)?.let { source ->
+                    result += profileSource(kind, owner, source, stagingDirectory)
+                }
+            }
+        }
         return result.sortedBy { it.manifest.entryName }
     }
 
@@ -322,7 +333,7 @@ class BackupRepository internal constructor(
         source: File,
         stagingDirectory: File
     ): BackupBinarySource {
-        val directory = when (kind) { BackupFileKind.SCENARIO_AVATAR -> "scenarios"; BackupFileKind.CHARACTER_AVATAR -> "characters"; BackupFileKind.NPC_AVATAR -> "npcs"; else -> "personas" }
+        val directory = requireNotNull(kind.profileKind()).directoryName
         val staged = File(stagingDirectory, "avatar-${kind.name.lowercase()}-${safeToken(ownerId)}")
         source.copyTo(staged, overwrite = false)
         return BackupBinarySource(
@@ -583,17 +594,21 @@ class BackupRepository internal constructor(
         }
     }
 
+    private fun BackupFileKind.profileKind(): ProfileImageKind? = when (this) {
+        BackupFileKind.MESSAGE_ATTACHMENT -> null
+        BackupFileKind.SCENARIO_AVATAR -> ProfileImageKind.SCENARIO
+        BackupFileKind.CHARACTER_AVATAR -> ProfileImageKind.CHARACTER
+        BackupFileKind.PERSONA_AVATAR -> ProfileImageKind.PERSONA
+        BackupFileKind.NPC_AVATAR -> ProfileImageKind.NPC
+        BackupFileKind.CHAT_COVER -> ProfileImageKind.CHAT_COVER
+        BackupFileKind.WORLD_COVER -> ProfileImageKind.WORLD_COVER
+        BackupFileKind.CAMPAIGN_COVER -> ProfileImageKind.CAMPAIGN_COVER
+    }
+
     private fun prepareProfileImages(validated: ValidatedBackup, stageRoot: File) {
         stageRoot.mkdirs()
-        validated.manifest.files.filter {
-            it.kind in listOf(BackupFileKind.CHARACTER_AVATAR, BackupFileKind.PERSONA_AVATAR, BackupFileKind.SCENARIO_AVATAR, BackupFileKind.NPC_AVATAR)
-        }.forEach { fileManifest ->
-            val kind = when (fileManifest.kind) {
-                BackupFileKind.SCENARIO_AVATAR -> ProfileImageKind.SCENARIO
-                BackupFileKind.CHARACTER_AVATAR -> ProfileImageKind.CHARACTER
-                BackupFileKind.NPC_AVATAR -> ProfileImageKind.NPC
-                else -> ProfileImageKind.PERSONA
-            }
+        validated.manifest.files.forEach { fileManifest ->
+            val kind = fileManifest.kind.profileKind() ?: return@forEach
             val source = requireNotNull(validated.extractedFiles[fileManifest.entryName])
             val directory = File(stageRoot, kind.directoryName).apply { mkdirs() }
             val destination = File(directory, "${ProfileImageRepository.storageKey(kind, fileManifest.ownerId)}.png")
@@ -993,6 +1008,16 @@ class BackupRepository internal constructor(
                 throw BackupValidationException("NPC portrait metadata is invalid.")
             }
         }
+        val coveringOwners = mapOf(BackupFileKind.CHAT_COVER to chatIds, BackupFileKind.WORLD_COVER to worldIds,
+            BackupFileKind.CAMPAIGN_COVER to campaignIds)
+        manifest.files.forEach { file ->
+            coveringOwners[file.kind]?.let { owners ->
+                if (file.ownerId !in owners || file.mimeType != "image/png" ||
+                    file.byteSize !in 1..ProfileImageRepository.MAX_STORED_BYTES) {
+                    throw BackupValidationException("Cover image metadata is invalid.")
+                }
+            }
+        }
         if (payload.appearance.fontSize !in 12f..24f) {
             throw BackupValidationException("Backup font-size setting is invalid.")
         }
@@ -1032,7 +1057,8 @@ class BackupRepository internal constructor(
                 BackupFileKind.SCENARIO_AVATAR,
                 BackupFileKind.CHARACTER_AVATAR,
                 BackupFileKind.PERSONA_AVATAR,
-                BackupFileKind.NPC_AVATAR -> {
+                BackupFileKind.NPC_AVATAR, BackupFileKind.CHAT_COVER,
+                BackupFileKind.WORLD_COVER, BackupFileKind.CAMPAIGN_COVER -> {
                     if (
                         detectedMime != "image/png" ||
                         bounds.outWidth > ProfileImageRepository.MAX_STORED_DIMENSION ||
@@ -1105,7 +1131,7 @@ class BackupRepository internal constructor(
         npcDossiers = payload.npcDossiers.size,
         messageAttachments = payload.messageAttachments.size,
         profileImages = files.count {
-            it.kind in listOf(BackupFileKind.CHARACTER_AVATAR, BackupFileKind.PERSONA_AVATAR, BackupFileKind.SCENARIO_AVATAR, BackupFileKind.NPC_AVATAR)
+            it.kind.profileKind() != null
         },
         includesDrafts = payload.chatSettings.any { !it.draftMessage.isNullOrEmpty() } ||
             payload.messageAttachments.any { it.messageId == null },

@@ -1,5 +1,9 @@
 package com.example.ui.screens
 
+import com.example.domain.repository.ProfileImageKind
+import com.example.domain.repository.ProfileImageRepository
+import com.example.ui.components.CoverActions
+import com.example.ui.components.CoverArtwork
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -53,7 +57,8 @@ fun WorldsScreen(
     onOpenChat: ((String) -> Unit)? = null,
     onCreateSoloEpisode: ((String) -> Unit)? = null,
     onCreateScenarioEpisode: ((String) -> Unit)? = null,
-    onCreateSoloCampaignChapter: ((String, String) -> Unit)? = null
+    onCreateSoloCampaignChapter: ((String, String) -> Unit)? = null,
+    covers: ProfileImageRepository? = null
 ) {
     val worlds by repository.observeWorlds().collectAsState(initial = emptyList())
     val scope = rememberCoroutineScope()
@@ -892,6 +897,8 @@ fun WorldsScreen(
                         onClick = { selectedId = world.worldId },
                         border = elsewhereCardBorder()
                     ) {
+                        if (covers != null) CoverArtwork(covers,ProfileImageKind.WORLD_COVER,world.worldId,
+                            Modifier.fillMaxWidth().height(116.dp)) { Icon(Icons.Default.Public,contentDescription=null) }
                         Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Default.Public, contentDescription = null)
                             Spacer(Modifier.width(12.dp))
@@ -907,6 +914,11 @@ fun WorldsScreen(
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         TextButton(onClick = { selectedId = null }) { Text("← All Worlds") }
                         Text(selected.title, style = MaterialTheme.typography.headlineSmall)
+                        if (covers != null) {
+                            CoverArtwork(covers,ProfileImageKind.WORLD_COVER,selected.worldId,
+                                Modifier.fillMaxWidth().height(140.dp)) { Icon(Icons.Default.Public,contentDescription=null) }
+                            CoverActions(covers,ProfileImageKind.WORLD_COVER,selected.worldId,selected.title)
+                        }
                         if (selected.description.isNotBlank()) Text(selected.description)
                         if (selected.settingSummary.isNotBlank()) {
                             Text("Setting", style = MaterialTheme.typography.titleSmall)
@@ -969,6 +981,11 @@ fun WorldsScreen(
                         Card(modifier = Modifier.fillMaxWidth(), border = elsewhereCardBorder()) {
                             Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                 Text(campaign.title, style = MaterialTheme.typography.titleMedium)
+                                if (covers != null) {
+                                    CoverArtwork(covers,ProfileImageKind.CAMPAIGN_COVER,campaign.campaignId,
+                                        Modifier.fillMaxWidth().height(100.dp))
+                                    CoverActions(covers,ProfileImageKind.CAMPAIGN_COVER,campaign.campaignId,campaign.title)
+                                }
                                 TextButton(onClick = {
                                     chosenCampaignId = if (chosenCampaignId == campaign.campaignId) null else campaign.campaignId
                                 }, modifier = Modifier.testTag("open_campaign_" + campaign.campaignId)) {

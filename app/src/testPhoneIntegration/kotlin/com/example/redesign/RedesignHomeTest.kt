@@ -1,6 +1,11 @@
 package com.example.redesign
 
+import android.graphics.Bitmap
+import android.graphics.Color as AndroidColor
+import android.net.Uri
 import androidx.compose.runtime.*
+import java.io.File
+import com.example.domain.repository.ProfileImageKind
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
 import com.example.di.DefaultAppContainer
@@ -34,11 +39,25 @@ class RedesignHomeTest {
 
     @Test fun nativeHomeUsesRealStoryRoutesAndKeepsTheBrandAcrossThemes() {
         val app=DefaultAppContainer(RuntimeEnvironment.getApplication())
-        runBlocking {
+        val storyId = runBlocking {
             app.appearanceRepository.updateColorPalette(ColorPalette.OCEAN_BLUE)
             val lead = app.characterRepository.createManualCharacter(ManualCharacterFields(name="Alex"))
             val persona = app.personaRepository.createManualPersona(ManualPersonaFields(name="Rin"))
-            app.chatRepository.createSoloChat("Garage at midnight",persona,lead,"Alex",null)
+            val id=app.chatRepository.createSoloChat("Garage at midnight",persona,lead,"Alex",null)
+            val ctx=RuntimeEnvironment.getApplication()
+            val photo=File(ctx.cacheDir,"redesign-test-cover.png")
+            Bitmap.createBitmap(393,222,Bitmap.Config.ARGB_8888).let { bitmap ->
+                val cool=AndroidColor.rgb(45,91,116)
+                val warm=AndroidColor.rgb(230,163,154)
+                for (x in 0 until 393) for (y in 0 until 222) {
+                    bitmap.setPixel(x,y,if ((x-260)*(x-260)+(y-74)*(y-74)<1600) warm else cool)
+                }
+                photo.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG,100,it) }
+                bitmap.recycle()
+            }
+            try { app.profileImageRepository.replaceImage(ProfileImageKind.CHAT_COVER,id,Uri.fromFile(photo)) }
+            finally { photo.delete() }
+            id
         }
         var dark by mutableStateOf(true)
         compose.setContent {
@@ -50,6 +69,9 @@ class RedesignHomeTest {
         compose.waitUntil(10000) { compose.onAllNodesWithTag("home_continue_story").fetchSemanticsNodes().isNotEmpty() }
         compose.waitUntil(10000) { compose.onAllNodesWithTag("elsewhere_banner_ocean_blue").fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithTag("elsewhere_banner_ocean_blue").assertExists()
+        compose.waitUntil(10000) {
+            compose.onAllNodesWithTag("cover_art_CHAT_COVER_$storyId",useUnmergedTree=true).fetchSemanticsNodes().isNotEmpty()
+        }
         shot("redesign_home_moonlit_dark")
         compose.runOnIdle { dark=false }
         shot("redesign_home_moonlit_light")
@@ -62,6 +84,11 @@ class RedesignHomeTest {
         compose.onNodeWithTag("library_hub").assertExists()
         compose.onNodeWithTag("bottom_nav_chats").performClick()
         compose.onNodeWithText("Garage at midnight").assertExists()
+        compose.onNodeWithTag("cover_actions_CHAT_COVER_$storyId",useUnmergedTree=true).performClick()
+        compose.onNodeWithText("Replace cover image").assertExists()
+        compose.onNodeWithText("Remove cover").assertExists()
+        compose.onNodeWithText("Remove cover").performClick()
+        compose.onNodeWithText("Cancel").performClick()
         compose.onNodeWithTag("bottom_nav_worlds").performClick()
         compose.onNodeWithTag("worlds_list").assertExists()
     }

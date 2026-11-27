@@ -28,6 +28,7 @@ import com.example.domain.repository.ChatRepository
 import com.example.domain.repository.ColorPalette
 import com.example.domain.repository.ProfileImageKind
 import com.example.domain.repository.ProfileImageRepository
+import com.example.ui.components.CoverArtwork
 import com.example.ui.components.ElsewhereThemeBanner
 import com.example.ui.components.ProfileImageAvatar
 import com.example.ui.components.elsewhereCardBorder
@@ -77,21 +78,39 @@ internal fun RedesignPreviewHome(
                     }
                     else -> Card(onClick={onChat(latest.chat.chatId)}, modifier=Modifier.fillMaxWidth().testTag("home_continue_story"),
                         shape=RoundedCornerShape(20.dp),border=elsewhereCardBorder()) {
+                        val id = latest.chat.chatId
+                        val customCover = if (images == null) false else {
+                            val current by remember(images,id) { images.observeImage(ProfileImageKind.CHAT_COVER,id) }
+                                .collectAsState(initial = images.currentImage(ProfileImageKind.CHAT_COVER,id))
+                            current.file != null
+                        }
+                        Box(Modifier.fillMaxWidth()) {
+                            if (customCover && images != null) {
+                                CoverArtwork(images, ProfileImageKind.CHAT_COVER, id, Modifier.matchParentSize())
+                                Box(Modifier.matchParentSize().background(Brush.horizontalGradient(
+                                    0f to colors.surface, 0.66f to colors.surface.copy(alpha=0.93f),
+                                    1f to colors.surface.copy(alpha=0.12f))))
+                            }
                         Column(
-                            Modifier.fillMaxWidth().heightIn(min=188.dp)
-                                .background(Brush.verticalGradient(listOf(colors.surfaceContainerHigh,colors.surface)))
-                                .padding(20.dp),
+                            Modifier.fillMaxWidth(if (customCover && LocalDensity.current.fontScale <= 1.3f) 0.67f else 1f)
+                                .heightIn(min=224.dp)
+                                .then(if (!customCover || LocalDensity.current.fontScale > 1.3f)
+                                    Modifier.background(Brush.verticalGradient(listOf(colors.surfaceContainerHigh,colors.surface)))
+                                else Modifier).padding(16.dp),
                             verticalArrangement=Arrangement.spacedBy(8.dp)
                         ) {
                             Text(latest.modeLabel(),color=colors.onSurfaceVariant,style=MaterialTheme.typography.labelMedium)
                             Text(latest.chat.displayName,style=MaterialTheme.typography.headlineMedium.copy(fontFamily=FontFamily.Serif),
                                 maxLines=3,overflow=TextOverflow.Ellipsis)
                             latest.castLabel().takeIf { it.isNotBlank() }?.let { Text(it,color=colors.onSurfaceVariant) }
-                            Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-                                Text("Continue story",color=colors.primary)
-                                Icon(Icons.AutoMirrored.Filled.ArrowForward,contentDescription=null,tint=colors.primary,
-                                    modifier=Modifier.size(18.dp))
+                            Surface(color=colors.primary,contentColor=colors.onPrimary,shape=RoundedCornerShape(10.dp)) {
+                                Row(Modifier.heightIn(min=48.dp).padding(horizontal=12.dp,vertical=8.dp),
+                                    verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                                    Text("Continue story",modifier=Modifier.weight(1f,fill=false))
+                                    Icon(Icons.AutoMirrored.Filled.ArrowForward,contentDescription=null,modifier=Modifier.size(18.dp))
+                                }
                             }
+                        }
                         }
                     }
                 }
@@ -165,12 +184,16 @@ internal fun RedesignPreviewHome(
 private fun RecentStory(chat: ChatSummary, images: ProfileImageRepository?, click: () -> Unit, modifier: Modifier) {
     val lead=chat.characters.firstOrNull()
     Card(onClick=click,modifier=modifier.testTag("home_recent_" + chat.chat.chatId),border=elsewhereCardBorder()) {
-        Row(Modifier.fillMaxWidth().padding(10.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-            ProfileImageAvatar(images,ProfileImageKind.CHARACTER,lead?.characterId,
-                lead?.displayName ?: chat.chat.displayName,44.dp)
-            Column(Modifier.weight(1f)) {
+        Column(Modifier.fillMaxWidth()) {
+            if (images != null) CoverArtwork(images,ProfileImageKind.CHAT_COVER,chat.chat.chatId,
+                Modifier.fillMaxWidth().height(74.dp)) {
+                ProfileImageAvatar(images,ProfileImageKind.CHARACTER,lead?.characterId,
+                    lead?.displayName ?: chat.chat.displayName,46.dp)
+            }
+            Column(Modifier.padding(12.dp),verticalArrangement=Arrangement.spacedBy(3.dp)) {
                 Text(chat.chat.displayName,style=MaterialTheme.typography.titleSmall,maxLines=3,overflow=TextOverflow.Ellipsis)
-                Text(chat.modeLabel(),style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(chat.castLabel().ifBlank { chat.modeLabel() },style=MaterialTheme.typography.labelSmall,
+                    color=MaterialTheme.colorScheme.onSurfaceVariant,maxLines=2,overflow=TextOverflow.Ellipsis)
             }
         }
     }

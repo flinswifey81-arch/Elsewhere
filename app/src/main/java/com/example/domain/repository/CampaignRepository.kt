@@ -23,7 +23,8 @@ import com.example.data.model.WorldResourceType
  */
 class CampaignRepository(
     private val database: AppDatabase,
-    private val coordinator: AppDataMaintenanceCoordinator = AppDataMaintenanceCoordinator.Global
+    private val coordinator: AppDataMaintenanceCoordinator = AppDataMaintenanceCoordinator.Global,
+    private val coverImages: ProfileImageRepository? = null
 ) {
     private val dao get() = database.campaignDao()
 
@@ -620,5 +621,7 @@ class CampaignRepository(
         database.withTransaction {
             require(dao.deleteCampaign(campaignId) == 1) { "Campaign not found." }
         }
+        runCatching { coverImages?.removeImage(ProfileImageKind.CAMPAIGN_COVER,campaignId) }
+        Unit
     }
 }

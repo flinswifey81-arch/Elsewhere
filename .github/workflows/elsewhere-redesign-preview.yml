@@ -27,7 +27,9 @@ jobs:
       - name: Exercise real native preview screens and theme contrast
         run: |
           bash ./gradlew :app:testPhoneIntegrationUnitTest -Proborazzi.test.record=true --no-daemon --no-configuration-cache \
-            --tests 'com.example.redesign.*' --tests 'com.example.phone.*'
+            --tests 'com.example.redesign.*' --tests 'com.example.phone.*' \
+            --tests 'com.example.domain.backup.BackupRepositoryTest.encryptedBackupPreservesChatWorldAndCampaignCoversIndependently' \
+            --tests 'com.example.ProfileImageRepositoryTest'
       - name: Print failing preview cases
         if: failure()
         run: |
