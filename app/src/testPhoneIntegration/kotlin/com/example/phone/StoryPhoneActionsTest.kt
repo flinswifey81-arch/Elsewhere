@@ -21,9 +21,10 @@ import org.robolectric.annotation.SQLiteMode
 @Config(sdk=[34])
 @SQLiteMode(SQLiteMode.Mode.NATIVE)
 class StoryPhoneActionsTest {
-    @Test fun actualWorldCampaignChapterAndIdentityDriveThePhone() = runBlocking {
+    @Test fun actualWorldCampaignChapterAndIdentityDriveThePhone() = runBlocking<Unit> {
         val context=ApplicationProvider.getApplicationContext<Context>()
-        Room.inMemoryDatabaseBuilder(context,AppDatabase::class.java).allowMainThreadQueries().build().use { db ->
+        val db = Room.inMemoryDatabaseBuilder(context,AppDatabase::class.java).allowMainThreadQueries().build()
+        try {
             val worlds=WorldRepository(db)
             val campaigns=CampaignRepository(db)
             val world=worlds.createWorld("Racing AU")
@@ -92,7 +93,7 @@ class StoryPhoneActionsTest {
                 assertFalse(request.toString().contains("Private line"))
                 assertTrue(runCatching { phone.manualFeedPreview(alt,checkNotNull(imported.starterId),"garage",listOf("workshop")) }.isFailure)
             }
-        }
+        } finally { db.close() }
     }
     private companion object {
         val pack="""{"format":"elsewhere.world-pulse.feed-pack","version":1,"name":"Garage","platforms":[{"id":"garage","name":"Garage Board","style":"forum"}],"accounts":[],"starterState":{"publicEvents":[{"id":"workshop","visibility":"public","summary":"A public workshop is on the calendar."}],"posts":[]}}"""
