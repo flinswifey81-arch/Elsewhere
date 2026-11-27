@@ -241,6 +241,8 @@ class WorldArchiveAdditiveRestorer(
                         ProfileImageKind.PERSONA -> WorldArchiveIdKind.PERSONA
                         ProfileImageKind.SCENARIO -> WorldArchiveIdKind.SCENARIO
                         ProfileImageKind.NPC -> WorldArchiveIdKind.NPC_DOSSIER
+                        ProfileImageKind.CHAT_COVER, ProfileImageKind.WORLD_COVER, ProfileImageKind.CAMPAIGN_COVER ->
+                            throw IllegalArgumentException("Cover artwork is not a World archive portrait")
                     }
                     val owner = plan.get(ownerType, requireNotNull(entry.ownerId))
                     val key = ProfileImageRepository.storageKey(kind, owner)
