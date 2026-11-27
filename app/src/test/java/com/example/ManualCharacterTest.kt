@@ -252,6 +252,65 @@ class ManualCharacterTest {
         assertTrue(compiled.first().content.contains("--- CHARACTER SYSTEM INSTRUCTIONS ---\n$exact"))
     }
 
+    @Test
+    fun importedCardFieldsCanBeEditedWithoutStalePromptCopiesOrLosingAlternates() = runBlocking {
+        val id = characterRepository.importCharacterJson("""
+            {"character_id":"card","display_name":"Chosen label","character_name":"Rin",
+             "identity":{"age":31,"pronouns":"they/them"},
+             "personality":{"summary":"Old temperament","likes":["tea","cats"],"extra":"retain sibling"},
+             "appearance":{"hair":"silver","eyes":"brown"},
+             "writing_rules":{"system_prompt":"Old system rule","extra_rule":"retain instruction"},
+             "examples":{"first_mes":"Old primary","alternate_greetings":["Alt 1","Alt 2"],"dialogue_examples":["Example"]},
+             "unknown_data":{"keep":true}}
+        """.trimIndent())
+        val before=characterRepository.getCharacterById(id)!!
+        val manual=characterRepository.getManualFields(before)
+        assertEquals("31",manual.age)
+        assertEquals("tea\ncats",manual.likes)
+        assertEquals("Old system rule",manual.systemInstructions)
+        assertEquals("Old primary",manual.initialMessage)
+        assertTrue(manual.appearance.contains("silver"))
+        assertEquals("Example",manual.conversationalExamples)
+        val changed=manual.copy(initialMessage="  New primary  ",personality="New temperament",systemInstructions="New rule")
+        characterRepository.updateManualCharacter(id,changed)
+        val saved=characterRepository.getCharacterById(id)!!
+        assertEquals(changed,characterRepository.getManualFields(saved))
+        assertEquals("Chosen label",saved.displayName)
+        assertEquals(listOf("  New primary  ","Alt 1","Alt 2"),characterRepository.getOpeningMessages(saved))
+        assertEquals(before.examplesJson,saved.examplesJson)
+        val compiled=ContextCompilerV1().compileSoloContext(character=saved,persona=persona(),
+            chatHistory=emptyList(),currentMessage=MessageEntity(chatId="chat",speakerType=SpeakerType.PERSONA,
+            speakerId="persona",speakerDisplayNameSnapshot="Persona",content="Hello",orderIndex=1L),
+            responseProfile=ResponseLengthProfile.NORMAL,customMin=null,customTargetMax=null,customHardMax=null).first().content
+        assertTrue(compiled.contains("New temperament") && compiled.contains("New rule"))
+        assertTrue(compiled.contains("retain sibling") && compiled.contains("retain instruction"))
+        assertTrue(!compiled.contains("Old temperament") && !compiled.contains("Old system rule"))
+        assertTrue(!compiled.contains("Old primary") && !compiled.contains("Alt 1"))
+        assertTrue(characterRepository.exportCharacterJson(id).contains("unknown_data"))
+
+        val copiedId=characterRepository.importCharacterJson(characterRepository.exportCharacterJson(id), importAsNew=true)
+        assertEquals(changed,characterRepository.getManualFields(characterRepository.getCharacterById(copiedId)!!))
+        characterRepository.updateManualCharacter(id,changed.copy(initialMessage=""))
+        val cleared=characterRepository.getCharacterById(id)!!
+        assertEquals("",characterRepository.getManualFields(cleared).initialMessage)
+        assertEquals(listOf("Alt 1","Alt 2"),characterRepository.getOpeningMessages(cleared))
+    }
+
+    @Test
+    fun nestedCommonCardInputsPopulateExistingManualFields() = runBlocking {
+        val id=characterRepository.importCharacterJson("""
+          {"spec":"chara_card_v2","data":{"name":"Rin","description":"Description","personality":"Calm",
+            "scenario":"Launch day","first_mes":"Hi","system_prompt":"Keep it short","mes_example":"An example"}}
+        """.trimIndent())
+        val profile=characterRepository.getManualFields(characterRepository.getCharacterById(id)!!)
+        assertEquals("Description",profile.shortBackstory)
+        assertEquals("Calm",profile.personality)
+        assertEquals("Launch day",profile.story)
+        assertEquals("Hi",profile.initialMessage)
+        assertEquals("Keep it short",profile.systemInstructions)
+        assertEquals("An example",profile.conversationalExamples)
+    }
+
     private fun persona() = PersonaEntity(
         personaId = "persona",
         displayName = "Persona",

@@ -4,26 +4,34 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
+import androidx.activity.compose.BackHandler
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import com.example.domain.repository.CharacterRepository
 import com.example.domain.repository.ChatRepository
+import com.example.domain.repository.ProfileImageKind
+import com.example.domain.repository.ProfileImageRepository
 import com.example.domain.repository.PersonaRepository
 import com.example.ui.components.elsewhereCardBorder
 import com.example.ui.components.elsewhereTextFieldColors
 import com.example.ui.components.elsewhereTopAppBarColors
-import com.example.data.model.CharacterEntity
-import com.example.data.model.PersonaEntity
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -34,7 +42,8 @@ fun CreateSoloChatScreen(
     characterRepository: CharacterRepository,
     onChatCreated: (String) -> Unit,
     onNavigateBack: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    redesignImages: ProfileImageRepository? = null
 ) {
     val coroutineScope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -42,11 +51,36 @@ fun CreateSoloChatScreen(
     val personas by personaRepository.getAllPersonas().collectAsState(initial = emptyList())
     val characters by characterRepository.getAllCharacters().collectAsState(initial = emptyList())
     
-    var step by remember { mutableStateOf(1) }
-    var selectedPersona by remember { mutableStateOf<PersonaEntity?>(null) }
-    var selectedCharacter by remember { mutableStateOf<CharacterEntity?>(null) }
-    var chatName by remember { mutableStateOf("") }
-    var selectedOpening by remember { mutableStateOf<String?>(null) }
+    var step by rememberSaveable { mutableStateOf(1) }
+    var selectedPersonaId by rememberSaveable { mutableStateOf<String?>(null) }
+    var selectedCharacterId by rememberSaveable { mutableStateOf<String?>(null) }
+    val selectedCharacter = characters.firstOrNull { it.characterId == selectedCharacterId }
+    var chatName by rememberSaveable { mutableStateOf("") }
+    // Legacy greeting records have no IDs. Derive one from the complete, deduplicated
+    // text rather than title or order, and keep large entries out of saved instance state.
+    var openingKey by rememberSaveable { mutableStateOf<String?>(null) }
+    val openings = remember(selectedCharacter) {
+        selectedCharacter?.let(characterRepository::getOpeningMessages).orEmpty().map { greeting ->
+            val key = java.security.MessageDigest.getInstance("SHA-256")
+                .digest(greeting.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
+            key to greeting
+        }
+    }
+    val selectedOpening = if (openingKey == null) openings.firstOrNull()?.second
+        else openings.firstOrNull { it.first == openingKey }?.second
+    var previewKey by rememberSaveable { mutableStateOf<String?>(null) }
+    if (step == 3 && previewKey != null) {
+        val index = openings.indexOfFirst { it.first == previewKey }
+        openings.getOrNull(index)?.let { (key, greeting) ->
+            AlertDialog(
+                onDismissRequest = { previewKey = null },
+                title = { Text("Greeting ${index + 1}") },
+                text = { Text(greeting, Modifier.verticalScroll(rememberScrollState())) },
+                dismissButton = { TextButton(onClick = { previewKey = null }) { Text("Close") } },
+                confirmButton = { TextButton(onClick = { openingKey = key; previewKey = null }) { Text("Use greeting") } }
+            )
+        }
+    }
     
     var showPasteDialogPersona by remember { mutableStateOf(false) }
     var showPasteDialogCharacter by remember { mutableStateOf(false) }
@@ -142,6 +176,8 @@ fun CreateSoloChatScreen(
         )
     }
 
+    val pickerState = rememberSaveableStateHolder()
+    BackHandler(enabled = step > 1) { step-- }
     Scaffold(
         topBar = {
             TopAppBar(
@@ -174,12 +210,25 @@ fun CreateSoloChatScreen(
                             }
                         }
                     } else {
-                        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.weight(1f)) {
+                        if (redesignImages != null) {
+                            pickerState.SaveableStateProvider("personas") { StoryIdentityPicker(
+                                entries = personas.map { it.storyIdentity() },
+                                selectedIds = listOfNotNull(selectedPersonaId),
+                                repository = redesignImages,
+                                kind = ProfileImageKind.PERSONA,
+                                onSelect = { id -> selectedPersonaId = id },
+                                modifier = Modifier.weight(1f)
+                            ) }
+                            Row {
+                                TextButton(onClick = { personaLauncher.launch(arrayOf("application/json", "*/*")) }) { Text("Import Files") }
+                                TextButton(onClick = { showPasteDialogPersona = true }) { Text("Paste JSON") }
+                            }
+                        } else LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.weight(1f)) {
                             items(personas) { persona ->
                                 SelectionCard(
                                     text = persona.displayName,
-                                    selected = selectedPersona == persona,
-                                    onClick = { selectedPersona = persona }
+                                    selected = selectedPersonaId == persona.personaId,
+                                    onClick = { selectedPersonaId = persona.personaId }
                                 )
                             }
                             item {
@@ -192,7 +241,7 @@ fun CreateSoloChatScreen(
                         }
                         Button(
                             onClick = { step = 2 },
-                            enabled = selectedPersona != null,
+                            enabled = personas.any { it.personaId == selectedPersonaId },
                             modifier = Modifier.fillMaxWidth()
                         ) { Text("Next") }
                     }
@@ -211,15 +260,38 @@ fun CreateSoloChatScreen(
                             }
                         }
                     } else {
-                        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.weight(1f)) {
+                        if (redesignImages != null) {
+                            pickerState.SaveableStateProvider("characters") { StoryIdentityPicker(
+                                entries = characters.map { it.storyIdentity() },
+                                selectedIds = listOfNotNull(selectedCharacterId),
+                                repository = redesignImages,
+                                kind = ProfileImageKind.CHARACTER,
+                                onSelect = { id ->
+                                    val character = characters.firstOrNull { it.characterId == id }
+                                    if (character != null && selectedCharacterId != id) {
+                                        selectedCharacterId = character.characterId
+                                        chatName = "Chat with ${character.displayName}"
+                                        openingKey = null
+                                    }
+                                },
+                                modifier = Modifier.weight(1f)
+                            ) }
+                            Row {
+                                TextButton(onClick = { characterLauncher.launch(arrayOf("application/json", "*/*")) }) { Text("Import Files") }
+                                TextButton(onClick = { showPasteDialogCharacter = true }) { Text("Paste JSON") }
+                            }
+                        } else LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.weight(1f)) {
                             items(characters) { character ->
                                 SelectionCard(
                                     text = character.displayName,
-                                    selected = selectedCharacter == character,
+                                    selected = selectedCharacterId == character.characterId,
                                     onClick = { 
-                                        selectedCharacter = character
-                                        chatName = "Chat with ${character.displayName}"
-                                        selectedOpening = characterRepository.getOpeningMessages(character).firstOrNull()
+                                        val changedCharacter = selectedCharacterId != character.characterId
+                                        selectedCharacterId = character.characterId
+                                        if (changedCharacter) {
+                                            chatName = "Chat with ${character.displayName}"
+                                            openingKey = null
+                                        }
                                     }
                                 )
                             }
@@ -249,23 +321,31 @@ fun CreateSoloChatScreen(
                         colors = elsewhereTextFieldColors(),
                         modifier = Modifier.fillMaxWidth()
                     )
-                    val openings = selectedCharacter?.let(characterRepository::getOpeningMessages).orEmpty()
                     if (openings.isNotEmpty()) {
                         Spacer(Modifier.height(16.dp))
                         Text("Opening message", style = MaterialTheme.typography.titleSmall)
-                        Text("Saved as the first Character message without contacting a model.", style = MaterialTheme.typography.bodySmall)
-                        LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            items(openings) { opening ->
-                                Card(
-                                    modifier = Modifier.fillMaxWidth().clickable { selectedOpening = opening },
-                                    colors = CardDefaults.cardColors(containerColor = if (selectedOpening == opening) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerLow),
-                                    border = elsewhereCardBorder()
-                                ) {
-                                    Row(Modifier.padding(12.dp), verticalAlignment = Alignment.Top) {
-                                        RadioButton(selected = selectedOpening == opening, onClick = { selectedOpening = opening })
-                                        Text(opening, modifier = Modifier.padding(start = 8.dp), maxLines = 5)
-                                    }
-                                }
+                        Text(
+                            "Choose a saved greeting or start with an empty chat. No model is contacted.",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        LazyColumn(
+                            Modifier.weight(1f).selectableGroup(),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            item {
+                                OpeningMessageOption(
+                                    label = "No greeting",
+                                    selected = selectedOpening == null,
+                                    onSelect = { openingKey = "" }
+                                )
+                            }
+                            items(openings, key = { it.first }) { (key, opening) ->
+                                OpeningMessageOption(
+                                    label = opening,
+                                    selected = selectedOpening == opening,
+                                    onSelect = { openingKey = key },
+                                    onPreview = if (redesignImages != null) { { previewKey = key } } else null
+                                )
                             }
                         }
                     } else {
@@ -273,22 +353,49 @@ fun CreateSoloChatScreen(
                     }
                     Button(
                         onClick = {
-                            coroutineScope.launch {
+                            val persona = personas.firstOrNull { it.personaId == selectedPersonaId }
+                            val character = selectedCharacter
+                            if (persona != null && character != null) coroutineScope.launch {
                                 val chatId = chatRepository.createSoloChat(
                                     displayName = chatName.takeIf { it.isNotBlank() } ?: "Untitled Chat",
-                                    personaId = selectedPersona!!.personaId,
-                                    characterId = selectedCharacter!!.characterId,
-                                    characterDisplayName = selectedCharacter!!.displayName,
+                                    personaId = persona.personaId,
+                                    characterId = character.characterId,
+                                    characterDisplayName = character.displayName,
                                     initialCharacterMessage = selectedOpening
                                 )
                                 onChatCreated(chatId)
                             }
                         },
-                        enabled = chatName.isNotBlank(),
+                        enabled = chatName.isNotBlank() && selectedCharacter != null && personas.any { it.personaId == selectedPersonaId },
                         modifier = Modifier.fillMaxWidth()
                     ) { Text("Create Chat") }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun OpeningMessageOption(label: String, selected: Boolean, onSelect: () -> Unit, onPreview: (() -> Unit)? = null) {
+    Card(
+        modifier = Modifier.fillMaxWidth().selectable(
+            selected = selected,
+            onClick = onSelect,
+            role = Role.RadioButton
+        ),
+        colors = CardDefaults.cardColors(
+            containerColor = if (selected) MaterialTheme.colorScheme.primaryContainer
+            else MaterialTheme.colorScheme.surfaceContainerLow
+        ),
+        border = elsewhereCardBorder()
+    ) {
+        Column(Modifier.padding(12.dp)) {
+            Row(verticalAlignment = Alignment.Top) {
+                RadioButton(selected = selected, onClick = null)
+                Text(label, modifier = Modifier.padding(start = 8.dp), maxLines = 5,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+            }
+            if (onPreview != null) TextButton(onClick = onPreview) { Text("Read full greeting") }
         }
     }
 }

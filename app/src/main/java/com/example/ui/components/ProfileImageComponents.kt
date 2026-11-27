@@ -19,6 +19,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Face
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -125,13 +127,15 @@ fun ProfileImageEditor(
     kind: ProfileImageKind,
     profileId: String?,
     displayName: String,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    compact: Boolean = false
 ) {
     val coroutineScope = rememberCoroutineScope()
     val highFontScale = LocalDensity.current.fontScale > 1.15f
     // Work is intentionally not saveable: if a configuration change cancels the importing
     // coroutine, the rebuilt editor must not remain stuck behind a stale progress state.
     var isWorking by remember(profileId) { mutableStateOf(false) }
+    var confirmRemoval by rememberSaveable(profileId) { mutableStateOf(false) }
     var error by rememberSaveable(profileId) { mutableStateOf<String?>(null) }
     val imageState = if (repository != null && !profileId.isNullOrBlank()) {
         repository.observeImage(kind, profileId).collectAsState(
@@ -154,6 +158,24 @@ fun ProfileImageEditor(
         }
     }
 
+    fun remove() {
+        if (repository == null || profileId == null) return
+        isWorking = true
+        error = null
+        coroutineScope.launch {
+            runCatching { repository.removeImage(kind, profileId) }
+                .onFailure { failure -> error = failure.message ?: "The profile picture could not be removed." }
+            isWorking = false
+        }
+    }
+    if (confirmRemoval) AlertDialog(
+        onDismissRequest = { confirmRemoval = false },
+        title = { Text("Remove portrait?") },
+        text = { Text("Only the saved picture for $displayName will be removed. The profile and stories will stay.") },
+        dismissButton = { TextButton(onClick = { confirmRemoval = false }) { Text("Cancel") } },
+        confirmButton = { TextButton(onClick = { confirmRemoval = false; remove() }) { Text("Remove portrait") } }
+    )
+
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainer,
         shape = MaterialTheme.shapes.large,
@@ -170,7 +192,7 @@ fun ProfileImageEditor(
                     kind = kind,
                     profileId = profileId,
                     displayName = displayName,
-                    size = 88.dp,
+                    size = if (compact) 62.dp else 88.dp,
                     contentDescription = "Profile picture for $displayName",
                     modifier = Modifier.testTag("profile_image_preview")
                 )
@@ -178,7 +200,7 @@ fun ProfileImageEditor(
                     Surface(
                         color = MaterialTheme.colorScheme.scrim.copy(alpha = 0.58f),
                         shape = RoundedCornerShape(21.dp),
-                        modifier = Modifier.size(88.dp)
+                        modifier = Modifier.size(if (compact) 62.dp else 88.dp)
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             CircularProgressIndicator(modifier = Modifier.size(28.dp))
@@ -195,6 +217,8 @@ fun ProfileImageEditor(
                 Text(
                     if (profileId == null) {
                         "Save this profile first, then reopen it to add a picture."
+                    } else if (compact) {
+                        "Updates this saved profile, not just this story."
                     } else {
                         "Stored only on this device. Display-only; never added to model context or JSON exports."
                     },
@@ -215,19 +239,7 @@ fun ProfileImageEditor(
                 val removeButton: @Composable (Modifier) -> Unit = { buttonModifier ->
                     if (imageState.file != null) {
                         OutlinedButton(
-                            onClick = {
-                                if (repository != null && profileId != null) {
-                                    isWorking = true
-                                    error = null
-                                    coroutineScope.launch {
-                                        runCatching { repository.removeImage(kind, profileId) }
-                                            .onFailure { failure ->
-                                                error = failure.message ?: "The profile picture could not be removed."
-                                            }
-                                        isWorking = false
-                                    }
-                                }
-                            },
+                            onClick = { if (compact) confirmRemoval = true else remove() },
                             enabled = !isWorking,
                             modifier = buttonModifier.testTag("remove_profile_image")
                         ) {
@@ -235,7 +247,7 @@ fun ProfileImageEditor(
                         }
                     }
                 }
-                if (highFontScale) {
+                if (highFontScale || compact) {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         chooseButton(Modifier.fillMaxWidth())
                         removeButton(Modifier.fillMaxWidth())

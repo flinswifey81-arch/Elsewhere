@@ -9,10 +9,15 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
+import androidx.activity.compose.BackHandler
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.example.domain.repository.CharacterRepository
 import com.example.domain.repository.ChatRepository
+import com.example.domain.repository.ProfileImageKind
+import com.example.domain.repository.ProfileImageRepository
 import com.example.domain.repository.PersonaRepository
 import com.example.ui.components.elsewhereTextFieldColors
 import com.example.ui.components.elsewhereTopAppBarColors
@@ -26,17 +31,23 @@ fun CreateGroupChatScreen(
     characterRepository: CharacterRepository,
     onChatCreated: (String) -> Unit,
     onNavigateBack: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    redesignImages: ProfileImageRepository? = null
 ) {
     val coroutineScope = rememberCoroutineScope()
     val personas by personaRepository.getAllPersonas().collectAsState(initial = emptyList())
     val characters by characterRepository.getAllCharacters().collectAsState(initial = emptyList())
 
-    var step by remember { mutableStateOf(1) }
-    var selectedPersonaId by remember { mutableStateOf<String?>(null) }
-    val selectedCharacters = remember { mutableStateListOf<String>() }
-    var chatName by remember { mutableStateOf("") }
+    var step by rememberSaveable { mutableStateOf(1) }
+    var selectedPersonaId by rememberSaveable { mutableStateOf<String?>(null) }
+    var selectedCharacters by rememberSaveable { mutableStateOf(arrayListOf<String>()) }
+    fun toggleCharacter(id: String) {
+        selectedCharacters = ArrayList(if (id in selectedCharacters) selectedCharacters - id else selectedCharacters + id)
+    }
+    var chatName by rememberSaveable { mutableStateOf("") }
 
+    val pickerState = rememberSaveableStateHolder()
+    BackHandler(enabled = step > 1) { step-- }
     Scaffold(
         topBar = {
             TopAppBar(
@@ -61,7 +72,16 @@ fun CreateGroupChatScreen(
                     if (personas.isEmpty()) {
                         Text("No personas found.", color = MaterialTheme.colorScheme.error)
                     } else {
-                        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.weight(1f)) {
+                        if (redesignImages != null) {
+                            pickerState.SaveableStateProvider("personas") { StoryIdentityPicker(
+                                entries = personas.map { it.storyIdentity() },
+                                selectedIds = listOfNotNull(selectedPersonaId),
+                                repository = redesignImages,
+                                kind = ProfileImageKind.PERSONA,
+                                onSelect = { id -> selectedPersonaId = id },
+                                modifier = Modifier.weight(1f)
+                            ) }
+                        } else LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.weight(1f)) {
                             items(personas) { persona ->
                                 val isSelected = selectedPersonaId == persona.personaId
                                 SelectionCard(
@@ -73,7 +93,7 @@ fun CreateGroupChatScreen(
                         }
                         Button(
                             onClick = { step = 2 },
-                            enabled = selectedPersonaId != null,
+                            enabled = personas.any { it.personaId == selectedPersonaId },
                             modifier = Modifier.fillMaxWidth().padding(top = 16.dp)
                         ) { Text("Next") }
                     }
@@ -84,7 +104,19 @@ fun CreateGroupChatScreen(
                     if (characters.size < 2) {
                         Text("Not enough characters found. Need at least 2.", color = MaterialTheme.colorScheme.error)
                     } else {
-                        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.weight(1f)) {
+                        if (redesignImages != null) {
+                            pickerState.SaveableStateProvider("characters") { StoryIdentityPicker(
+                                entries = characters.map { it.storyIdentity() },
+                                selectedIds = selectedCharacters.toList(),
+                                repository = redesignImages,
+                                kind = ProfileImageKind.CHARACTER,
+                                multiple = true,
+                                onSelect = { id ->
+                                    toggleCharacter(id)
+                                },
+                                modifier = Modifier.weight(1f)
+                            ) }
+                        } else LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.weight(1f)) {
                             items(characters) { character ->
                                 val isSelected = selectedCharacters.contains(character.characterId)
                                 val selectedOrder = selectedCharacters.indexOf(character.characterId)
@@ -96,8 +128,7 @@ fun CreateGroupChatScreen(
                                     },
                                     selected = isSelected,
                                     onClick = { 
-                                        if (isSelected) selectedCharacters.remove(character.characterId)
-                                        else selectedCharacters.add(character.characterId)
+                                        toggleCharacter(character.characterId)
                                     }
                                 )
                             }
@@ -107,7 +138,7 @@ fun CreateGroupChatScreen(
                                 chatName = "Group Chat (${selectedCharacters.size} chars)"
                                 step = 3 
                             },
-                            enabled = selectedCharacters.size >= 2,
+                            enabled = selectedCharacters.count { id -> characters.any { it.characterId == id } } >= 2,
                             modifier = Modifier.fillMaxWidth().padding(top = 16.dp)
                         ) { Text("Next") }
                     }
@@ -130,12 +161,13 @@ fun CreateGroupChatScreen(
                                 val chatId = chatRepository.createGroupChat(
                                     displayName = chatName.takeIf { it.isNotBlank() } ?: "Untitled Group",
                                     personaIds = listOf(requireNotNull(selectedPersonaId)),
-                                    characterIds = selectedCharacters.toList()
+                                    characterIds = selectedCharacters.filter { id -> characters.any { it.characterId == id } }
                                 )
                                 onChatCreated(chatId)
                             }
                         },
-                        enabled = chatName.isNotBlank(),
+                        enabled = chatName.isNotBlank() && personas.any { it.personaId == selectedPersonaId } &&
+                            selectedCharacters.count { id -> characters.any { it.characterId == id } } >= 2,
                         modifier = Modifier.fillMaxWidth()
                     ) { Text("Create Chat") }
                 }

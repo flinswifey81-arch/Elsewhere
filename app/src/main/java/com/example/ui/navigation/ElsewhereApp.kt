@@ -274,6 +274,7 @@ fun ElsewhereApp(
             
             composable("create_solo_chat") {
                 CreateSoloChatScreen(
+                    redesignImages = container.profileImageRepository.takeIf { BuildConfig.BUILD_TYPE == "phoneIntegration" },
                     chatRepository = container.chatRepository,
                     personaRepository = container.personaRepository,
                     characterRepository = container.characterRepository,
@@ -302,6 +303,7 @@ fun ElsewhereApp(
                     }
                 }
                 CreateSoloChatScreen(
+                    redesignImages = container.profileImageRepository.takeIf { BuildConfig.BUILD_TYPE == "phoneIntegration" },
                     chatRepository = container.chatRepository,
                     personaRepository = container.personaRepository,
                     characterRepository = container.characterRepository,
@@ -390,6 +392,7 @@ fun ElsewhereApp(
                     campaigns.addChapter(campaignId, chatId, created.chat.displayName)
                 }
                 CreateSoloChatScreen(
+                    redesignImages = container.profileImageRepository.takeIf { BuildConfig.BUILD_TYPE == "phoneIntegration" },
                     chatRepository = container.chatRepository,
                     personaRepository = container.personaRepository,
                     characterRepository = container.characterRepository,
@@ -454,6 +457,7 @@ fun ElsewhereApp(
             }
             composable("create_group_chat") {
                 CreateGroupChatScreen(
+                    redesignImages = container.profileImageRepository.takeIf { BuildConfig.BUILD_TYPE == "phoneIntegration" },
                     chatRepository = container.chatRepository,
                     personaRepository = container.personaRepository,
                     characterRepository = container.characterRepository,

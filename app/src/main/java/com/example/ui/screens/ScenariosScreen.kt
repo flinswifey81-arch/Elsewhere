@@ -31,6 +31,8 @@ fun ScenariosScreen(
     val scope = rememberCoroutineScope()
     var editingId by rememberSaveable { mutableStateOf<String?>(null) }
     var draftJson by rememberSaveable { mutableStateOf(ScenarioCodec.encode(ScenarioDefinition())) }
+    val pickerImages = container.profileImageRepository.takeIf { com.example.BuildConfig.BUILD_TYPE == "phoneIntegration" }
+    var editingPersonaPortrait by rememberSaveable { mutableStateOf<String?>(null) }
     var startingId by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedPersonaId by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedWorldId by rememberSaveable(initialWorldId) { mutableStateOf(initialWorldId) }
@@ -112,7 +114,15 @@ fun ScenariosScreen(
                     style = MaterialTheme.typography.bodySmall)
             }
             LazyColumn(Modifier.heightIn(max = 320.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(personas, key = { it.personaId }) { persona -> SelectionCard(persona.displayName, selectedPersonaId == persona.personaId) { selectedPersonaId = persona.personaId } }
+                items(personas, key = { it.personaId }) { persona ->
+                    if (pickerImages == null) {
+                        SelectionCard(persona.displayName, selectedPersonaId == persona.personaId) { selectedPersonaId = persona.personaId }
+                    } else {
+                        StoryIdentityCard(persona.storyIdentity(), if (selectedPersonaId == persona.personaId) 0 else -1,
+                            multiple = false, repository = pickerImages, kind = ProfileImageKind.PERSONA, grid = false,
+                            onSelect = { selectedPersonaId = persona.personaId }, onEdit = { editingPersonaPortrait = persona.personaId })
+                    }
+                }
             }
             if (personas.isEmpty()) TextButton(onClick = onPersonas) { Text("Create or import a persona") }
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
@@ -125,6 +135,11 @@ fun ScenariosScreen(
                 finally { busy = false }
             }
         }) { Text("Start") } }, dismissButton = { TextButton(enabled = !busy, onClick = { startingId = null }) { Text("Cancel") } })
+    if (pickerImages != null && startingId != null) {
+        personas.firstOrNull { it.personaId == editingPersonaPortrait }?.let { persona ->
+            StoryPortraitDialog(persona.storyIdentity(), ProfileImageKind.PERSONA, pickerImages) { editingPersonaPortrait = null }
+        }
+    }
 }
 
 @Composable

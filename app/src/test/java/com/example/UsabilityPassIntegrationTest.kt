@@ -61,6 +61,7 @@ class UsabilityPassIntegrationTest {
         characters.updateManualCharacter(characterId, editable.copy(initialMessage = "Edited greeting"))
         val editedOpenings = characters.getOpeningMessages(requireNotNull(characters.getCharacterById(characterId)))
         assertEquals("Edited greeting", editedOpenings.first())
+        assertTrue("The prior primary is replaced, not re-added", "Root greeting" !in editedOpenings)
         assertTrue(editedOpenings.containsAll(listOf("Alternate one", "Alternate two", "Nested greeting", "Nested alternate")))
         val duplicateId = characters.duplicateCharacter(characterId)
         assertEquals(editedOpenings, characters.getOpeningMessages(requireNotNull(characters.getCharacterById(duplicateId))))
