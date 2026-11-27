@@ -7,6 +7,12 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+    testOptions {
+        unitTests {
+            isIncludeAndroidResources = true
+            all { it.systemProperty("robolectric.dependency.repo.url", "https://repo.maven.apache.org/maven2") }
+        }
+    }
     defaultConfig {
         applicationId = "com.aistudio.elsewhere.abwzy.phonelab"
         minSdk = 33
@@ -17,4 +23,8 @@ android {
 }
 
 
-dependencies { testImplementation(libs.junit) }
+dependencies {
+    testImplementation(libs.junit)
+    testImplementation(libs.androidx.core)
+    testImplementation(libs.robolectric)
+}
