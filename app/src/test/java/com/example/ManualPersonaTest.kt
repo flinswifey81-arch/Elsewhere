@@ -142,6 +142,28 @@ class ManualPersonaTest {
         assertTrue(compiled.first().content.contains("Backstory / Persona Instructions:\n$instructions"))
     }
 
+    @Test
+    fun importedBackgroundEditsReplaceMappedTextInPromptButKeepOtherData() = runBlocking {
+        val id=personaRepository.importPersonaJson("""
+          {"schema_version":1,"persona_id":"p","display_name":"Picker label","persona_name":"Rin",
+           "background":{"summary":"Old background","kept_field":"Reference point"},"private_notes":{"secret":"Do not show"}}
+        """.trimIndent())
+        val before=personaRepository.getPersonaById(id)!!
+        val fields=personaRepository.getManualFields(before)
+        assertEquals("Old background",fields.backstoryInstructions)
+        personaRepository.updateManualPersona(id,fields.copy(backstoryInstructions="Updated background"))
+        val saved=personaRepository.getPersonaById(id)!!
+        assertEquals("Picker label",saved.displayName)
+        assertEquals("Updated background",personaRepository.getManualFields(saved).backstoryInstructions)
+        assertEquals(before.backgroundJson,saved.backgroundJson)
+        val compiled=ContextCompilerV1().compileSoloContext(character=character(),persona=saved,
+            chatHistory=emptyList(),currentMessage=MessageEntity(chatId="chat",speakerType=SpeakerType.PERSONA,
+            speakerId=id,speakerDisplayNameSnapshot="Rin",content="Hello",orderIndex=1L),
+            responseProfile=ResponseLengthProfile.NORMAL,customMin=null,customTargetMax=null,customHardMax=null).first().content
+        assertTrue(compiled.contains("Updated background") && compiled.contains("Reference point"))
+        assertTrue(!compiled.contains("Old background") && !compiled.contains("Do not show"))
+    }
+
     private fun character() = CharacterEntity(
         characterId = "character",
         displayName = "Character",

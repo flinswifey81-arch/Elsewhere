@@ -137,18 +137,19 @@ class ContextCompilerV1 {
                 append("\n\n")
             }
 
+            val importedCharacter = ManualCharacterFieldsCodec.importedRemainderForPrompt(character)
             // Character details
             append("--- CHARACTER: ${character.displayName} ---\n")
-            if (!character.identityJson.isNullOrBlank()) append("Identity:\n${resolveMacros(character.identityJson)}\n\n")
-            if (!character.appearanceJson.isNullOrBlank()) append("Appearance:\n${resolveMacros(character.appearanceJson)}\n\n")
-            if (!character.personalityJson.isNullOrBlank()) append("Personality:\n${resolveMacros(character.personalityJson)}\n\n")
-            if (!character.voiceJson.isNullOrBlank()) append("Voice:\n${resolveMacros(character.voiceJson)}\n\n")
-            if (!character.behaviorJson.isNullOrBlank()) append("Behavior:\n${resolveMacros(character.behaviorJson)}\n\n")
-            if (!character.backstoryJson.isNullOrBlank()) append("Backstory:\n${resolveMacros(character.backstoryJson)}\n\n")
-            if (!character.knowledgeJson.isNullOrBlank()) append("Knowledge:\n${resolveMacros(character.knowledgeJson)}\n\n")
-            if (!character.worldContextJson.isNullOrBlank()) append("World Context:\n${resolveMacros(character.worldContextJson)}\n\n")
-            if (!character.writingRulesJson.isNullOrBlank()) append("Writing Rules:\n${resolveMacros(character.writingRulesJson)}\n\n")
-            if (!character.examplesJson.isNullOrBlank()) append("Examples:\n${resolveMacros(character.examplesJson)}\n\n")
+            if (!importedCharacter.identityJson.isNullOrBlank()) append("Identity:\n${resolveMacros(importedCharacter.identityJson)}\n\n")
+            if (!importedCharacter.appearanceJson.isNullOrBlank()) append("Appearance:\n${resolveMacros(importedCharacter.appearanceJson)}\n\n")
+            if (!importedCharacter.personalityJson.isNullOrBlank()) append("Personality:\n${resolveMacros(importedCharacter.personalityJson)}\n\n")
+            if (!importedCharacter.voiceJson.isNullOrBlank()) append("Voice:\n${resolveMacros(importedCharacter.voiceJson)}\n\n")
+            if (!importedCharacter.behaviorJson.isNullOrBlank()) append("Behavior:\n${resolveMacros(importedCharacter.behaviorJson)}\n\n")
+            if (!importedCharacter.backstoryJson.isNullOrBlank()) append("Backstory:\n${resolveMacros(importedCharacter.backstoryJson)}\n\n")
+            if (!importedCharacter.knowledgeJson.isNullOrBlank()) append("Knowledge:\n${resolveMacros(importedCharacter.knowledgeJson)}\n\n")
+            if (!importedCharacter.worldContextJson.isNullOrBlank()) append("World Context:\n${resolveMacros(importedCharacter.worldContextJson)}\n\n")
+            if (!importedCharacter.writingRulesJson.isNullOrBlank()) append("Writing Rules:\n${resolveMacros(importedCharacter.writingRulesJson)}\n\n")
+            if (!importedCharacter.examplesJson.isNullOrBlank()) append("Examples:\n${resolveMacros(importedCharacter.examplesJson)}\n\n")
             ManualCharacterFieldsCodec.readStored(character)?.let { manual ->
                 if (manual.systemInstructions.isNotEmpty()) {
                     append("--- CHARACTER SYSTEM INSTRUCTIONS ---\n")
@@ -191,14 +192,16 @@ class ContextCompilerV1 {
                 append("\n\n")
             }
 
+            val importedPersona = ManualPersonaFieldsCodec.importedRemainderForPrompt(persona)
             // Persona details
             append("--- USER PERSONA: ${persona.displayName} ---\n")
-            if (!persona.identityJson.isNullOrBlank()) append("Identity:\n${resolveMacros(persona.identityJson)}\n\n")
-            if (!persona.appearanceJson.isNullOrBlank()) append("Appearance:\n${resolveMacros(persona.appearanceJson)}\n\n")
-            if (!persona.personalityJson.isNullOrBlank()) append("Personality:\n${resolveMacros(persona.personalityJson)}\n\n")
-            if (!persona.backgroundJson.isNullOrBlank()) append("Background:\n${resolveMacros(persona.backgroundJson)}\n\n")
-            ManualPersonaFieldsCodec.readStored(persona)?.backstoryInstructions
-                ?.takeIf { it.isNotEmpty() }
+            if (!importedPersona.identityJson.isNullOrBlank()) append("Identity:\n${resolveMacros(importedPersona.identityJson)}\n\n")
+            if (!importedPersona.appearanceJson.isNullOrBlank()) append("Appearance:\n${resolveMacros(importedPersona.appearanceJson)}\n\n")
+            if (!importedPersona.personalityJson.isNullOrBlank()) append("Personality:\n${resolveMacros(importedPersona.personalityJson)}\n\n")
+            if (!importedPersona.backgroundJson.isNullOrBlank()) append("Background:\n${resolveMacros(importedPersona.backgroundJson)}\n\n")
+            (ManualPersonaFieldsCodec.readStored(persona)?.backstoryInstructions
+                ?: ManualPersonaFieldsCodec.importedRoleplayInstructions(persona))
+                .takeIf { it.isNotEmpty() }
                 ?.let { instructions ->
                     append("Backstory / Persona Instructions:\n")
                     append(resolveMacros(instructions))

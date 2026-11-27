@@ -65,7 +65,7 @@ class PersonaRepository(
             ?: throw IllegalArgumentException("Persona not found")
         personaDao.updatePersona(
             existing.copy(
-                displayName = fields.name,
+                displayName = if (fields.name == existing.personaName) existing.displayName else fields.name,
                 personaName = fields.name,
                 extensionFieldsJson = ManualPersonaFieldsCodec.write(existing.extensionFieldsJson, fields),
                 updatedAt = System.currentTimeMillis()

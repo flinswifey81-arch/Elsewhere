@@ -38,51 +38,107 @@ object ManualCharacterFieldsCodec {
     fun readStored(character: CharacterEntity): ManualCharacterFields? {
         val extensions = parseObject(character.extensionFieldsJson) ?: return null
         val stored = extensions[EXTENSION_KEY] as? Map<*, *> ?: return null
+        val old = if ((stored["mapping_version"] as? Number)?.toInt() == 2) null else importedFields(character)
+        fun value(key: String, fallback: String?) = stored.string(key).ifEmpty { fallback.orEmpty() }
         return ManualCharacterFields(
-            name = stored.string("name"),
-            shortBackstory = stored.string("short_backstory"),
+            name = value("name", old?.name),
+            shortBackstory = value("short_backstory", old?.shortBackstory),
             initialMessage = stored.string("initial_message"),
-            systemInstructions = stored.string("system_instructions"),
-            personality = stored.string("personality"),
-            tone = stored.string("tone"),
-            age = stored.string("age"),
-            birthday = stored.string("birthday"),
-            story = stored.string("story"),
-            likes = stored.string("likes"),
-            dislikes = stored.string("dislikes"),
-            conversationalGoals = stored.string("conversational_goals"),
-            conversationalExamples = stored.string("conversational_examples"),
-            appearance = stored.string("appearance"),
-            knowledgeRelationships = stored.string("knowledge_relationships"),
-            knowledgeGeneral = stored.string("knowledge_general")
+            systemInstructions = value("system_instructions", old?.systemInstructions),
+            personality = value("personality", old?.personality),
+            tone = value("tone", old?.tone),
+            age = value("age", old?.age),
+            birthday = value("birthday", old?.birthday),
+            story = value("story", old?.story),
+            likes = value("likes", old?.likes),
+            dislikes = value("dislikes", old?.dislikes),
+            conversationalGoals = value("conversational_goals", old?.conversationalGoals),
+            conversationalExamples = value("conversational_examples", old?.conversationalExamples),
+            appearance = value("appearance", old?.appearance),
+            knowledgeRelationships = value("knowledge_relationships", old?.knowledgeRelationships),
+            knowledgeGeneral = value("knowledge_general", old?.knowledgeGeneral)
         )
     }
 
     fun toEditableFields(character: CharacterEntity): ManualCharacterFields =
-        readStored(character) ?: ManualCharacterFields(
-            name = character.characterName,
-            shortBackstory = firstText(character.backstoryJson, "short_backstory", "summary", "description"),
-            initialMessage = firstText(character.examplesJson, "initial_message", "first_message", "first_mes", "greeting"),
-            personality = firstText(character.personalityJson, "summary", "description"),
-            tone = firstText(character.voiceJson, "tone", "summary", "style"),
-            age = firstText(character.identityJson, "age"),
-            birthday = firstText(character.identityJson, "birthday", "date_of_birth"),
-            story = firstText(character.backstoryJson, "story", "history"),
-            likes = firstText(character.personalityJson, "likes"),
-            dislikes = firstText(character.personalityJson, "dislikes"),
-            conversationalGoals = firstText(character.writingRulesJson, "conversational_goals", "goals"),
-            conversationalExamples = firstText(character.examplesJson, "conversational_examples", "examples"),
-            appearance = firstText(character.appearanceJson, "summary", "description"),
-            knowledgeRelationships = firstText(character.knowledgeJson, "relationships"),
-            knowledgeGeneral = firstText(character.knowledgeJson, "general")
-        )
+        readStored(character) ?: importedFields(character)
 
-    fun write(existingExtensionFieldsJson: String?, fields: ManualCharacterFields): String {
+    fun importedFields(character: CharacterEntity): ManualCharacterFields {
+        val layers = ProfileEditorJson.rootLayers(character.extensionFieldsJson)
+        fun section(json: String?, key: String) =
+            ProfileEditorJson.decode(json) ?: ProfileEditorJson.nestedSection(layers, key)
+        val backstory=section(character.backstoryJson,"backstory")
+        val identity=section(character.identityJson,"identity")
+        val personality=section(character.personalityJson,"personality")
+        val appearance=section(character.appearanceJson,"appearance")
+        val voice=section(character.voiceJson,"voice")
+        val behavior=section(character.behaviorJson,"behavior")
+        val writing=section(character.writingRulesJson,"writing_rules")
+        val knowledge=section(character.knowledgeJson,"knowledge")
+        val examples=section(character.examplesJson,"examples")
+        fun root(vararg keys: String) = ProfileEditorJson.rootText(layers, *keys)
+        return ManualCharacterFields(
+            name = character.characterName,
+            shortBackstory = ProfileEditorJson.field(backstory,"short_backstory","summary","description",plain=true)
+                .ifEmpty { root("short_backstory","description") },
+            // Greeting precedence comes from CharacterRepository, including alternate greeting metadata.
+            systemInstructions = ProfileEditorJson.field(writing,"system_instructions","system_prompt","instructions")
+                .ifEmpty { ProfileEditorJson.field(behavior,"system_instructions","system_prompt","instructions") }
+                .ifEmpty { root("system_instructions","system_prompt") },
+            personality = ProfileEditorJson.field(personality,"summary","description","personality","traits",plain=true)
+                .ifEmpty { root("personality") },
+            tone = ProfileEditorJson.field(voice,"tone","summary","style",plain=true).ifEmpty { root("tone") },
+            age = ProfileEditorJson.field(identity,"age").ifEmpty { root("age") },
+            birthday = ProfileEditorJson.field(identity,"birthday","date_of_birth").ifEmpty { root("birthday","date_of_birth") },
+            story = ProfileEditorJson.field(backstory,"story","history").ifEmpty { root("story","scenario") },
+            likes = ProfileEditorJson.field(personality,"likes").ifEmpty { root("likes") },
+            dislikes = ProfileEditorJson.field(personality,"dislikes").ifEmpty { root("dislikes") },
+            conversationalGoals = ProfileEditorJson.field(writing,"conversational_goals","goals")
+                .ifEmpty { root("conversational_goals") },
+            conversationalExamples = ProfileEditorJson.field(examples,"conversational_examples","examples","mes_example","dialogue_examples")
+                .ifEmpty { root("conversational_examples","mes_example") },
+            appearance = ProfileEditorJson.field(appearance,"summary","description",plain=true,structured=true),
+            knowledgeRelationships = ProfileEditorJson.field(knowledge,"relationships").ifEmpty { root("knowledge_relationships") },
+            knowledgeGeneral = ProfileEditorJson.field(knowledge,"general",plain=true).ifEmpty { root("knowledge_general") }
+        )
+    }
+
+    /**
+     * Remove mapped copies only from the prompt view. The editor overlay is now the
+     * author source for those slots; structured siblings and the saved JSON remain intact.
+     */
+    fun importedRemainderForPrompt(character: CharacterEntity): CharacterEntity {
+        val hasEdits=readStored(character)!=null
+        fun remaining(json: String?, vararg keys: String, plain: Boolean=false, structured: Boolean=false) =
+            if (hasEdits) ProfileEditorJson.withoutMapped(json,keys.toSet(),plain,structured) else json
+        // Opening choices are metadata, never a hidden greeting in the model context.
+        val effectiveExamples=ProfileEditorJson.examplesWithoutOpeningChoices(character.examplesJson, hasEdits)
+        return character.copy(
+            identityJson=remaining(character.identityJson,"age","birthday","date_of_birth"),
+            appearanceJson=remaining(character.appearanceJson,"summary","description",plain=true,structured=true),
+            personalityJson=remaining(character.personalityJson,"summary","description","personality","traits","likes","dislikes",plain=true),
+            voiceJson=remaining(character.voiceJson,"tone","summary","style",plain=true),
+            behaviorJson=remaining(character.behaviorJson,"system_instructions","system_prompt","instructions"),
+            backstoryJson=remaining(character.backstoryJson,"short_backstory","summary","description","story","history",plain=true),
+            knowledgeJson=remaining(character.knowledgeJson,"relationships","general",plain=true),
+            writingRulesJson=remaining(character.writingRulesJson,"system_instructions","system_prompt","instructions","conversational_goals","goals"),
+            examplesJson=effectiveExamples
+        )
+    }
+
+    fun hasPrimaryGreetingEdit(character: CharacterEntity): Boolean =
+        (parseObject(character.extensionFieldsJson)?.get(EXTENSION_KEY) as? Map<*, *>)
+            ?.get("initial_message_edited") == true
+
+    fun write(existingExtensionFieldsJson: String?, fields: ManualCharacterFields,
+              primaryGreetingEdited: Boolean = false): String {
         val extensions = parseObject(existingExtensionFieldsJson)?.toMutableMap() ?: mutableMapOf()
         extensions[EXTENSION_KEY] = linkedMapOf(
+            "mapping_version" to 2,
             "name" to fields.name,
             "short_backstory" to fields.shortBackstory,
             "initial_message" to fields.initialMessage,
+            "initial_message_edited" to primaryGreetingEdited,
             "system_instructions" to fields.systemInstructions,
             "personality" to fields.personality,
             "tone" to fields.tone,
@@ -103,19 +159,6 @@ object ManualCharacterFieldsCodec {
     private fun parseObject(json: String?): Map<String, Any?>? =
         json?.takeIf { it.isNotBlank() }?.let { runCatching { mapAdapter.fromJson(it) }.getOrNull() }
 
-    private fun firstText(json: String?, vararg keys: String): String {
-        if (json.isNullOrBlank()) return ""
-        val parsed = runCatching { moshi.adapter(Any::class.java).fromJson(json) }.getOrNull()
-        if (parsed is String) return parsed
-        val objectValue = parsed as? Map<*, *> ?: return ""
-        return keys.firstNotNullOfOrNull { key -> objectValue[key].asEditableText() } ?: ""
-    }
-
     private fun Map<*, *>.string(key: String): String = this[key] as? String ?: ""
 
-    private fun Any?.asEditableText(): String? = when (this) {
-        is String -> this
-        is Number, is Boolean -> toString()
-        else -> null
-    }
 }

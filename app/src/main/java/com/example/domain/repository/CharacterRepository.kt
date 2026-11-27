@@ -36,20 +36,30 @@ class CharacterRepository(
         result
     }
 
-    fun getManualFields(character: CharacterEntity): ManualCharacterFields {
-        val fields = ManualCharacterFieldsCodec.toEditableFields(character)
-        return if (fields.initialMessage.isBlank()) {
-            fields.copy(initialMessage = getOpeningMessages(character).firstOrNull().orEmpty())
-        } else fields
-    }
+    fun getManualFields(character: CharacterEntity): ManualCharacterFields =
+        ManualCharacterFieldsCodec.readStored(character)?.let { stored ->
+            // Older app builds treated an empty overlay as “use imported opening.”
+            if (stored.initialMessage.isBlank() && !ManualCharacterFieldsCodec.hasPrimaryGreetingEdit(character)) {
+                stored.copy(initialMessage = importedOpenings(character).firstOrNull().orEmpty())
+            } else stored
+        } ?: ManualCharacterFieldsCodec.importedFields(character).copy(
+            initialMessage = importedOpenings(character).firstOrNull().orEmpty()
+        )
 
     fun getInitialMessage(character: CharacterEntity): String =
         getOpeningMessages(character).firstOrNull().orEmpty()
 
-    /** Ordered, de-duplicated greetings from Elsewhere and common character-card fields. */
+    /** The editor and picker share one primary greeting. The remaining imported choices stay available. */
     fun getOpeningMessages(character: CharacterEntity): List<String> {
+        val imported = importedOpenings(character)
+        val stored = ManualCharacterFieldsCodec.readStored(character) ?: return imported
+        val hasExplicitBlank = ManualCharacterFieldsCodec.hasPrimaryGreetingEdit(character)
+        if (stored.initialMessage.isBlank() && !hasExplicitBlank) return imported
+        return (listOf(stored.initialMessage) + imported.drop(1)).filter(String::isNotBlank).distinct()
+    }
+
+    private fun importedOpenings(character: CharacterEntity): List<String> {
         val values = mutableListOf<String>()
-        ManualCharacterFieldsCodec.readStored(character)?.initialMessage?.let(values::add)
         fun collect(map: Map<*, *>) {
             listOf("initial_message", "first_message", "first_mes", "greeting", "opening_message").forEach { key ->
                 (map[key] as? String)?.let(values::add)
@@ -68,7 +78,9 @@ class CharacterRepository(
                 is Map<*, *> -> collect(parsed)
             }
         }
-        character.extensionFieldsJson?.let { json -> mapAdapter.fromJson(json)?.let(::collect) }
+        character.extensionFieldsJson?.let { json ->
+            runCatching { mapAdapter.fromJson(json) }.getOrNull()?.let(::collect)
+        }
         return values.filter(String::isNotBlank).distinct()
     }
 
@@ -102,9 +114,11 @@ class CharacterRepository(
             ?: throw IllegalArgumentException("Character not found")
         characterDao.updateCharacter(
             existing.copy(
-                displayName = fields.name,
+                displayName = if (fields.name == existing.characterName) existing.displayName else fields.name,
                 characterName = fields.name,
-                extensionFieldsJson = ManualCharacterFieldsCodec.write(existing.extensionFieldsJson, fields),
+                extensionFieldsJson = ManualCharacterFieldsCodec.write(existing.extensionFieldsJson, fields,
+                    primaryGreetingEdited = fields.initialMessage != getManualFields(existing).initialMessage ||
+                        ManualCharacterFieldsCodec.hasPrimaryGreetingEdit(existing)),
                 updatedAt = System.currentTimeMillis()
             )
         )
