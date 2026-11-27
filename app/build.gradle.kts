@@ -155,6 +155,7 @@ tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
 // This makes it easy to add them back in the future if needed.
 dependencies {
   add("phoneIntegrationImplementation", project(":phone-core"))
+  add("phoneIntegrationImplementation", libs.androidx.compose.ui.test.manifest)
   implementation(platform(libs.androidx.compose.bom))
   // implementation(libs.accompanist.permissions)
   implementation(libs.androidx.activity.compose)

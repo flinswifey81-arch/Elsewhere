@@ -28,6 +28,17 @@ jobs:
         run: |
           bash ./gradlew :app:testPhoneIntegrationUnitTest -Proborazzi.test.record=true --no-daemon --no-configuration-cache \
             --tests 'com.example.redesign.*' --tests 'com.example.phone.*'
+      - name: Print failing preview cases
+        if: failure()
+        run: |
+          python3 - <<'PYTEST'
+          from pathlib import Path
+          from xml.etree import ElementTree as ET
+          for file in Path("app/build/test-results/testPhoneIntegrationUnitTest").glob("TEST-*.xml"):
+              for test in ET.parse(file).getroot().iter("testcase"):
+                  for f in test.findall("failure") + test.findall("error"):
+                      print(test.get("name"), f.get("message"), (f.text or "")[:2400])
+          PYTEST
       - name: Build and verify isolated APK identity
         run: |
           set -euo pipefail
