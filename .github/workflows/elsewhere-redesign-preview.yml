@@ -1,0 +1,55 @@
+name: Elsewhere Native Redesign Preview
+
+on:
+  push:
+    branches: [work/elsewhere-redesign-2026-11-27]
+
+permissions:
+  contents: read
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools
+      - run: sdkmanager 'platforms;android-36.1' 'build-tools;36.0.0'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Exercise real native preview screens and theme contrast
+        run: |
+          bash ./gradlew :app:testPhoneIntegrationUnitTest -Proborazzi.test.record=true --no-daemon --no-configuration-cache \
+            --tests 'com.example.redesign.*' --tests 'com.example.phone.*'
+      - name: Build and verify isolated APK identity
+        run: |
+          set -euo pipefail
+          bash ./gradlew :app:assemblePhoneIntegration --no-daemon --no-configuration-cache
+          apk="$(find app/build/outputs/apk/phoneIntegration -maxdepth 1 -name '*.apk' | head -1)"
+          test -s "$apk"
+          bt="$ANDROID_HOME/build-tools/36.0.0"
+          "$bt/aapt" dump badging "$apk" > "$RUNNER_TEMP/redesign-badging"
+          grep -F "package: name='com.aistudio.elsewhere.abwzy.test.phoneintegration'" "$RUNNER_TEMP/redesign-badging"
+          grep -F 'application-debuggable' "$RUNNER_TEMP/redesign-badging"
+          "$bt/apksigner" verify --print-certs "$apk"
+          cp "$apk" Elsewhere-Redesign-Lab-debug.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Elsewhere-Redesign-Lab-Preview
+          path: Elsewhere-Redesign-Lab-debug.apk
+          if-no-files-found: error
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Elsewhere-Native-Redesign-Screens
+          path: app/build/outputs/roborazzi/ui-review/redesign_*.png
+          if-no-files-found: warn
+          retention-days: 14

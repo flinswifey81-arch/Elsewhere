@@ -27,6 +27,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
+import com.example.BuildConfig
 import com.example.R
 import com.example.domain.repository.ChatRepository
 import com.example.domain.repository.ColorPalette
@@ -47,8 +48,14 @@ fun HomeScreen(
     onNewGroupChat: () -> Unit,
     modifier: Modifier = Modifier,
     onScenarios: (() -> Unit)? = null,
-    palette: ColorPalette = ColorPalette.PURPLE
+    palette: ColorPalette = ColorPalette.PURPLE,
+    profileImages: com.example.domain.repository.ProfileImageRepository? = null
 ) {
+    if (BuildConfig.BUILD_TYPE == "phoneIntegration") {
+        RedesignPreviewHome(chatRepository, palette, profileImages, onNavigateToChat, onNavigateToChats,
+            onNavigateToLibrary, onNavigateToSettings, onNewSoloChat, onNewGroupChat, onScenarios, modifier)
+        return
+    }
     var recentChats by remember(chatRepository) {
         mutableStateOf<List<com.example.data.model.ChatSummary>?>(null)
     }

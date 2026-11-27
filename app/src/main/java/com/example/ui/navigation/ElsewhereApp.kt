@@ -1,5 +1,6 @@
 package com.example.ui.navigation
 
+import com.example.BuildConfig
 import android.net.Uri
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
@@ -121,7 +122,10 @@ fun ElsewhereApp(
                         ))
                     NavigationBarItem(
                         icon = { Icon(screen.icon, contentDescription = screen.title) },
-                        label = { Text(screen.title, maxLines = 1, softWrap = false) },
+                        label = {
+                            val redesign = BuildConfig.BUILD_TYPE == "phoneIntegration"
+                            Text(screen.title, maxLines = if (redesign) 2 else 1, softWrap = redesign)
+                        },
                         selected = selected,
                         colors = itemColors,
                         onClick = { navigateTo(screen) },
@@ -144,6 +148,7 @@ fun ElsewhereApp(
                     onNavigateToChat = { chatId -> navController.navigate("chat_detail/$chatId") },
                     onNavigateToLibrary = { navController.navigate(Screen.Library.route) },
                     palette = appearanceSettings.colorPalette,
+                    profileImages = container.profileImageRepository,
                     onNavigateToLorebooks = { navController.navigate(Screen.Lorebooks.route) },
                     onNavigateToSettings = { navController.navigate(Screen.Settings.route) },
                     onNavigateToChats = { navController.navigate(Screen.Chats.route) },

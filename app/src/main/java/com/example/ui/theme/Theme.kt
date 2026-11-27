@@ -14,6 +14,7 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
+import com.example.BuildConfig
 import com.example.domain.repository.AppearanceSettings
 import com.example.domain.repository.ColorPalette
 
@@ -224,18 +225,24 @@ fun AppTheme(
     appearanceSettings: AppearanceSettings = AppearanceSettings(),
     content: @Composable () -> Unit
 ) {
-    val scheme = if (darkTheme) {
+    val baseScheme = if (darkTheme) {
         getDarkColorScheme(appearanceSettings.colorPalette, appearanceSettings.legacyAccentOverride)
     } else {
         getLightColorScheme(appearanceSettings.colorPalette, appearanceSettings.legacyAccentOverride)
     }
+    val preview = BuildConfig.BUILD_TYPE == "phoneIntegration"
+    val scheme = if (preview) RedesignPreviewTokens.apply(baseScheme, appearanceSettings.colorPalette, darkTheme) else baseScheme
     androidx.compose.runtime.CompositionLocalProvider(
         LocalElsewhereSemanticColors provides semanticColors(scheme, darkTheme)
     ) {
         MaterialTheme(
             colorScheme = scheme,
             typography = scaledTypography(appearanceSettings.fontSize / 16f),
-            shapes = ElsewhereShapes,
+            shapes = if (preview) Shapes(
+                extraSmall = RoundedCornerShape(8.dp), small = RoundedCornerShape(10.dp),
+                medium = RoundedCornerShape(12.dp), large = RoundedCornerShape(20.dp),
+                extraLarge = RoundedCornerShape(22.dp)
+            ) else ElsewhereShapes,
             content = content
         )
     }
