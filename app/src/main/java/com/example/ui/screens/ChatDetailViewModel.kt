@@ -13,6 +13,7 @@ import com.example.data.model.MessageAttachmentEntity
 import com.example.data.model.PersonaEntity
 import com.example.data.model.ResponseLengthProfile
 import com.example.data.model.SpeakerType
+import com.example.domain.compiler.NaturalSoloCast
 import com.example.domain.compiler.ContextCompilerV1
 import com.example.domain.generation.GenerationLifecycleReporter
 import com.example.domain.memory.AutomaticMemoryManager
@@ -109,6 +110,7 @@ private data class PreparedGeneration(
     val npcBankEnabled: Boolean = false,
     val activePersonaId: String? = null,
     val ensembleNarrationEnabled: Boolean = false,
+    val naturalSoloCast: Boolean = false,
     val knownNpcSpeakers: List<StorySpeakerIdentity> = emptyList(),
     val coLeadRebalanceActive: Boolean = false,
     val contextReductionNotice: String? = null
@@ -892,7 +894,7 @@ class ChatDetailViewModel(
     fun selectSoloSpotlight(characterId: String) {
         val state = _uiState.value as? ChatUiState.Success ?: return
         if (state.chatSummary.chat.chatType != ChatType.SOLO ||
-            state.isGenerating || generationStartInProgress ||
+            state.chatSettings.naturalSoloCast || state.isGenerating || generationStartInProgress ||
             sendInProgress || inChatToolInProgress
         ) return
         if (state.soloSpotlightCharacters.none {
@@ -1308,13 +1310,14 @@ class ChatDetailViewModel(
                     }
                     val personaNames = listOfNotNull(activePersona?.displayName, activePersona?.personaName) +
                         activePersona?.aliases.orEmpty()
-                    val scenarioPersonaSegment = prepared.character.type == SpeakerType.NARRATOR &&
+                    val structuredPersonaSegment = (prepared.character.type == SpeakerType.NARRATOR ||
+                        prepared.naturalSoloCast) &&
                         storyParsed?.response?.segments.orEmpty().any { segment ->
                             segment.type == StorySegmentType.NPC &&
                                 (segment.speakerId == prepared.activePersonaId ||
                                     personaNames.any { it.trim().equals(segment.speakerName, ignoreCase = true) })
                         }
-                    if (scenarioPersonaSegment || ((prepared.character.type == SpeakerType.CHARACTER ||
+                    if (structuredPersonaSegment || ((prepared.character.type == SpeakerType.CHARACTER ||
                             prepared.character.type == SpeakerType.NARRATOR) &&
                         PersonaTurnBoundary.hasExplicitAuthoredPersonaTurn(parsed.storyText, personaNames))
                     ) {
@@ -1609,16 +1612,17 @@ class ChatDetailViewModel(
         if (summary.chat.chatType == ChatType.SCENARIO) return prepareScenario(
             currentMessage, history, isContinuation, includeScenarioPlaythrough, replayScenarioPlaythrough
         )
-        // A SOLO spotlight uses the persisted participant ordering. The
-        // original transcript, Wack and Story Memory ownership never move.
-        // Explicit regeneration speaker IDs still take precedence.
+        val activeCoopRoom = coopSessionManager?.state?.value?.room?.takeIf { it.chatId == chatId }
+        val naturalSoloCast = NaturalSoloCast.enabled(
+            summary.chat.chatType, settings.naturalSoloCast, activeCoopRoom != null
+        )
+        val participants = if (characterId == null || naturalSoloCast) {
+            chatRepository.getParticipantsForChatOnce(chatId)
+        } else emptyList()
+        // Explicit continuation/variant owners stay in place. Natural does not
+        // change database owners or the saved manual Spotlight order.
         val resolvedCharacterId = characterId
-            ?: chatRepository.getParticipantsForChatOnce(chatId)
-                .filter { it.isActive }
-                .minWithOrNull(compareBy<com.example.data.model.ChatParticipantEntity> {
-                    it.sortPosition
-                }.thenBy { it.joinedAt })
-                ?.characterId
+            ?: NaturalSoloCast.anchor(participants, naturalSoloCast)
             ?: summary.characters.firstOrNull()?.characterId
             ?: return null
         val fullCharacter = characterRepository.getCharacterById(resolvedCharacterId) ?: return null
@@ -1671,7 +1675,6 @@ class ChatDetailViewModel(
             currentMessage = currentMessage,
             recentMessageLimit = AutomaticMemoryManager.DEFAULT_RECENT_MESSAGE_LIMIT
         ).orEmpty()
-        val activeCoopRoom = coopSessionManager?.state?.value?.room?.takeIf { it.chatId == chatId }
         // Co-op remains on its previous shared-context contract until both
         // devices agree on memory source and recipient eligibility.
         val selectedStoryMemories = if (activeCoopRoom == null) {
@@ -1714,13 +1717,25 @@ class ChatDetailViewModel(
         // reply; waiting for a *previous* mention collapses that first reply into one bubble.
         // Co-lead priority itself still requires physical presence, as before.
         val ensembleNarrationEnabled = summary.chat.chatType == ChatType.SOLO &&
-            (settings.narratorEnabled ||
+            (naturalSoloCast || settings.narratorEnabled ||
                 (npcBankEnabled && (presentNpcs.isNotEmpty() || settings.coLeadEnsembleEnabled))) &&
             activeCoopRoom == null
-        // Known identities are for attribution, not a license to summon absent NPCs.
-        val knownNpcSpeakers = (if (npcBankEnabled) projectedNpcDossiers else emptyList()).map { dossier ->
-            StorySpeakerIdentity(dossier.npcId, dossier.displayName)
-        }
+        // A linked NPC stays on its dossier identity for portraits and continuity.
+        // Active cards not covered by the enabled Bank are advertised without private notes.
+        val coveredCharacterIds = projectedNpcDossiers.mapNotNull { it.linkedCharacterId }.toSet() +
+            projectedNpcDossiers.map { it.npcId }
+        val naturalRoster = if (naturalSoloCast) {
+            NaturalSoloCast.roster(participants, fullCharacter.characterId, coveredCharacterIds)
+                .mapNotNull { characterRepository.getCharacterById(it)?.takeUnless { card -> card.isArchived } }
+        } else emptyList()
+        val knownNpcSpeakers = projectedNpcDossiers
+            .filterNot { naturalSoloCast && (it.npcId == fullCharacter.characterId || it.linkedCharacterId == fullCharacter.characterId) }
+            .map { StorySpeakerIdentity(it.npcId, it.displayName) } + naturalRoster.map(NaturalSoloCast::identity)
+        val linkedHistorySpeakers = if (naturalSoloCast) {
+            projectedNpcDossiers.mapNotNull {
+                it.linkedCharacterId?.let { id -> id to StorySpeakerIdentity(it.npcId, it.displayName) }
+            }.toMap()
+        } else emptyMap()
         val coLeadNpcNames = if (ensembleNarrationEnabled && settings.coLeadEnsembleEnabled) {
             presentNpcs.filter { it.keepInScene }
                 .take(NpcRepository.SOLO_ENSEMBLE_NPC_CONTEXT_LIMIT)
@@ -1773,7 +1788,8 @@ class ChatDetailViewModel(
             )
         } else null
         val supportingCast = listOfNotNull(
-            sceneInstructions, activeNpcDossiers, promotedSpeakerRelationship
+            sceneInstructions, activeNpcDossiers, promotedSpeakerRelationship,
+            NaturalSoloCast.rosterContext(naturalRoster)
         ).joinToString("\n\n").takeIf(String::isNotBlank)
 
         // Solo and Group episodes share their World's approved setting and continuity
@@ -1835,7 +1851,9 @@ class ChatDetailViewModel(
                 ensembleNarrationEnabled = ensembleNarrationEnabled,
                 knownNpcSpeakers = knownNpcSpeakers,
                 coLeadNpcNames = coLeadNpcNames,
-                coLeadRebalanceActive = coLeadRebalanceActive
+                coLeadRebalanceActive = coLeadRebalanceActive,
+                naturalSoloCast = naturalSoloCast,
+                linkedHistorySpeakers = linkedHistorySpeakers
             )
         }
 
@@ -1911,6 +1929,7 @@ class ChatDetailViewModel(
             npcBankEnabled = npcBankEnabled,
             activePersonaId = fullPersona.personaId,
             ensembleNarrationEnabled = ensembleNarrationEnabled,
+            naturalSoloCast = naturalSoloCast,
             knownNpcSpeakers = knownNpcSpeakers,
             coLeadRebalanceActive = coLeadRebalanceActive,
             contextReductionNotice = fitted.countsOnlyNotice()

@@ -636,6 +636,7 @@ fun ChatDetailScreen(
 
                         if (
                             state.chatSummary.chat.chatType == ChatType.SOLO &&
+                            !state.chatSettings.naturalSoloCast &&
                             state.soloSpotlightCharacters.count { it.isActive } > 1 &&
                             !state.partialStopped
                         ) {

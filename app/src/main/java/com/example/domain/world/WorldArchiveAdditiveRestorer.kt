@@ -228,12 +228,14 @@ class WorldArchiveAdditiveRestorer(
                 WorldArchiveEntryKind.CHARACTER_AVATAR,
                 WorldArchiveEntryKind.PERSONA_AVATAR,
                 WorldArchiveEntryKind.SCENARIO_AVATAR,
-                WorldArchiveEntryKind.NPC_PORTRAIT -> {
+                WorldArchiveEntryKind.NPC_PORTRAIT,
+                WorldArchiveEntryKind.NPC_LIBRARY_PORTRAIT -> {
                     val kind = when (entry.kind) {
                         WorldArchiveEntryKind.CHARACTER_AVATAR -> ProfileImageKind.CHARACTER
                         WorldArchiveEntryKind.PERSONA_AVATAR -> ProfileImageKind.PERSONA
                         WorldArchiveEntryKind.SCENARIO_AVATAR -> ProfileImageKind.SCENARIO
                         WorldArchiveEntryKind.NPC_PORTRAIT -> ProfileImageKind.NPC
+                        WorldArchiveEntryKind.NPC_LIBRARY_PORTRAIT -> ProfileImageKind.NPC_LIBRARY
                         else -> throw IllegalArgumentException("Unsupported portrait kind")
                     }
                     val ownerType = when (kind) {
@@ -241,6 +243,7 @@ class WorldArchiveAdditiveRestorer(
                         ProfileImageKind.PERSONA -> WorldArchiveIdKind.PERSONA
                         ProfileImageKind.SCENARIO -> WorldArchiveIdKind.SCENARIO
                         ProfileImageKind.NPC -> WorldArchiveIdKind.NPC_DOSSIER
+                        ProfileImageKind.NPC_LIBRARY -> WorldArchiveIdKind.NPC_LIBRARY_ENTRY
                     }
                     val owner = plan.get(ownerType, requireNotNull(entry.ownerId))
                     val key = ProfileImageRepository.storageKey(kind, owner)
@@ -386,7 +389,7 @@ class WorldArchiveAdditiveRestorer(
             "message_attachments/world-import-[a-f0-9-]{36}\\.(png|jpg|webp)"
         )
         private val PROFILE_PATH = Regex(
-            "profile_images/(characters|personas|scenarios|npcs)/[a-f0-9]{64}\\.png"
+            "profile_images/(characters|personas|scenarios|npcs|npc_library)/[a-f0-9]{64}\\.png"
         )
     }
 }

@@ -7,7 +7,7 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.example.data.model.*
 
-const val APP_DATABASE_VERSION = 26
+const val APP_DATABASE_VERSION = 27
 
 @Database(
     entities = [
@@ -77,6 +77,13 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun campaignDao(): CampaignDao
 
     companion object {
+        /** Add the Solo cast preference without changing existing chats or their Spotlight. */
+        val MIGRATION_26_27 = object : Migration(26, 27) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE chat_settings ADD COLUMN naturalSoloCast INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         /**
          * Stage 2 local historical search index. Additive only: the existing
          * messages/variants stay untouched. Existing messages are indexed once

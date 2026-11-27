@@ -92,6 +92,14 @@ fun ChatSettingsScreen(
                     }
                 }
 
+                if (soloMode) {
+                    Text("Cast replies", style = MaterialTheme.typography.titleMedium)
+                    SoloCastModeControls(
+                        natural = uiState.settings?.naturalSoloCast == true,
+                        onChange = viewModel::onNaturalSoloCastChanged
+                    )
+                }
+
                 if (!scenarioMode) {
                     Text("Narrator", style = MaterialTheme.typography.titleMedium)
                     Row(
@@ -465,3 +473,27 @@ internal fun selectedEndpointDisplayName(
 ): String = selectedIdentifier
     ?.let { identifier -> endpoints.firstOrNull { it.identifier == identifier }?.name ?: identifier }
     ?: "Select Endpoint"
+
+/** Existing Solo chats opt in without losing their separately saved Spotlight selection. */
+@Composable
+internal fun SoloCastModeControls(natural: Boolean, onChange: (Boolean) -> Unit) {
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FilterChip(
+            selected = !natural,
+            onClick = { onChange(false) },
+            label = { Text("Spotlight") },
+            modifier = Modifier.testTag("solo_cast_spotlight")
+        )
+        FilterChip(
+            selected = natural,
+            onClick = { onChange(true) },
+            label = { Text("Natural") },
+            modifier = Modifier.testTag("solo_cast_natural")
+        )
+    }
+    Text(
+        if (natural) "Let the scene decide who responds. The whole cast does not need to speak, and your Persona stays yours."
+        else "Choose the lead responder in the chat. Supporting cast can still join as the scene warrants.",
+        style = MaterialTheme.typography.bodySmall
+    )
+}

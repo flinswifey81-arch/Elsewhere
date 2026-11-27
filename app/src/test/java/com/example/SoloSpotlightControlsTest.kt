@@ -7,6 +7,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import com.example.data.model.CharacterEntity
 import com.example.ui.screens.GroupCharacterState
 import com.example.ui.screens.SoloSpotlightControls
+import com.example.ui.screens.SoloCastModeControls
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -48,6 +49,18 @@ class SoloSpotlightControlsTest {
         compose.onNodeWithText("Character spotlight: Mara").assertExists()
         compose.onNodeWithTag("solo_spotlight_select_original").performClick()
         assertEquals("original", selected)
+    }
+
+    @Test fun naturalAndSpotlightCanBeToggled() {
+        compose.setContent {
+            var natural by remember { mutableStateOf(false) }
+            MaterialTheme { SoloCastModeControls(natural) { natural = it } }
+        }
+        compose.onNodeWithTag("solo_cast_spotlight").assertIsSelected()
+        compose.onNodeWithTag("solo_cast_natural").performClick()
+        compose.onNodeWithTag("solo_cast_natural").assertIsSelected()
+        compose.onNodeWithTag("solo_cast_spotlight").performClick()
+        compose.onNodeWithTag("solo_cast_spotlight").assertIsSelected()
     }
 
     @Test fun spotlightChangesAreDisabledDuringGeneration() {

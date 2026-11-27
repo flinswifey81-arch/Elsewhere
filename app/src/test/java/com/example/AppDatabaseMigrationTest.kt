@@ -32,6 +32,32 @@ class AppDatabaseMigrationTest {
     }
 
     @Test
+    fun migrationFrom26To27KeepsExistingSettingsAndDefaultsToSpotlight() {
+        val helper = FrameworkSQLiteOpenHelperFactory().create(
+            SupportSQLiteOpenHelper.Configuration.builder(context).name(databaseName)
+                .callback(object : SupportSQLiteOpenHelper.Callback(26) {
+                    override fun onCreate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                        db.execSQL("CREATE TABLE chat_settings (chatId TEXT NOT NULL PRIMARY KEY, draftMessage TEXT, narratorEnabled INTEGER NOT NULL)")
+                        db.execSQL("INSERT INTO chat_settings VALUES ('old', 'my draft', 1)")
+                    }
+                    override fun onUpgrade(
+                        db: androidx.sqlite.db.SupportSQLiteDatabase, oldVersion: Int, newVersion: Int
+                    ) = Unit
+                }).build()
+        )
+        try {
+            val db = helper.writableDatabase
+            AppDatabase.MIGRATION_26_27.migrate(db)
+            db.query("SELECT draftMessage, narratorEnabled, naturalSoloCast FROM chat_settings WHERE chatId='old'").use {
+                assertTrue(it.moveToFirst())
+                assertEquals("my draft", it.getString(0))
+                assertEquals(1, it.getInt(1))
+                assertEquals(0, it.getInt(2))
+            }
+        } finally { helper.close() }
+    }
+
+    @Test
     fun migrationFrom25To26BuildsReadOnlyFullTextIndexWithoutChangingTranscript() {
         val helper = FrameworkSQLiteOpenHelperFactory().create(
             SupportSQLiteOpenHelper.Configuration.builder(context).name(databaseName)
@@ -470,7 +496,8 @@ class AppDatabaseMigrationTest {
                 AppDatabase.MIGRATION_22_23,
                 AppDatabase.MIGRATION_23_24,
                 AppDatabase.MIGRATION_24_25,
-                AppDatabase.MIGRATION_25_26
+                AppDatabase.MIGRATION_25_26,
+                AppDatabase.MIGRATION_26_27
             )
             .allowMainThreadQueries()
             .build()

@@ -6,6 +6,7 @@ import androidx.test.core.app.ApplicationProvider
 import com.example.data.AppDatabase
 import com.example.data.model.*
 import com.example.domain.repository.AppDataMaintenanceCoordinator
+import com.example.domain.repository.NPC_LIBRARY_PORTRAIT_LINK
 import com.example.domain.repository.ProfileImageKind
 import com.example.domain.repository.ProfileImageRepository
 import com.example.domain.world.*
@@ -325,11 +326,20 @@ class WorldArchiveAdditiveRestorerTest {
 
     @Test fun npcPortraitSurvivesAsNewDossierImageWithoutTouchingOtherArt() = runBlocking {
         existingRecords()
+        val bank = NpcLibraryBankEntity(bankId = "bank", name = "The Court")
+        val entry = NpcLibraryEntryEntity(
+            libraryNpcId = "bank-porter", bankId = bank.bankId, displayName = "The Porter"
+        )
         val npc = NpcDossierEntity(
             npcId = "npc-portrait-source", chatId = importedChat.chatId,
-            displayName = "The Porter"
+            displayName = "The Porter",
+            extensionFieldsJson = """{"$NPC_LIBRARY_PORTRAIT_LINK":"${entry.libraryNpcId}"}"""
         )
-        val state = history().copy(npcDossiers = listOf(npc))
+        val state = history().copy(
+            npcDossiers = listOf(npc),
+            npcLibraryBanks = listOf(bank),
+            npcLibraryEntries = listOf(entry)
+        )
         val originalFile = temp.newFile().apply { writeBytes(fileBytes) }
         val output = ByteArrayOutputStream()
         io.exportSelectedEncrypted(
@@ -337,6 +347,9 @@ class WorldArchiveAdditiveRestorerTest {
             listOf(WorldArchiveEncryptedIO.AssetSource(
                 "assets/avatars/npc/porter.png",
                 WorldArchiveEntryKind.NPC_PORTRAIT, npc.npcId, originalFile
+            ), WorldArchiveEncryptedIO.AssetSource(
+                "assets/avatars/npc_library/porter.png",
+                WorldArchiveEntryKind.NPC_LIBRARY_PORTRAIT, entry.libraryNpcId, originalFile
             )),
             output, "sufficiently-long-password".toCharArray(), 1L
         )
@@ -347,16 +360,23 @@ class WorldArchiveAdditiveRestorerTest {
             val namespace = "world-npc-artwork-import-12345"
             val remappedNpcId = verified.planNewWorldImport(namespace)
                 .get(WorldArchiveIdKind.NPC_DOSSIER, npc.npcId)
-            assertEquals(1, verified.preview().otherImageFiles)
+            val remappedLibraryId = verified.planNewWorldImport(namespace)
+                .get(WorldArchiveIdKind.NPC_LIBRARY_ENTRY, entry.libraryNpcId)
+            assertEquals(2, verified.preview().otherImageFiles)
             val result = importer.importAsNewWorld(verified, namespace)
-            assertEquals(1, result.imageFiles)
+            assertEquals(2, result.imageFiles)
             val importedNpcPicture = File(
                 appFiles,
                 "profile_images/npcs/" +
                     ProfileImageRepository.storageKey(ProfileImageKind.NPC, remappedNpcId) + ".png"
             )
             assertArrayEquals(fileBytes, importedNpcPicture.readBytes())
-            assertEquals(remappedNpcId, db.backupDao().getNpcDossiers().single().npcId)
+            val libraryFile = File(appFiles, "profile_images/npc_library/" +
+                ProfileImageRepository.storageKey(ProfileImageKind.NPC_LIBRARY, remappedLibraryId) + ".png")
+            assertArrayEquals(fileBytes, libraryFile.readBytes())
+            val importedNpc = db.backupDao().getNpcDossiers().single()
+            assertEquals(remappedNpcId, importedNpc.npcId)
+            assertEquals("""{"$NPC_LIBRARY_PORTRAIT_LINK":"$remappedLibraryId"}""", importedNpc.extensionFieldsJson)
             assertArrayEquals(fileBytes, originalFile.readBytes())
             assertNotNull(db.worldDao().getWorld("existing-world"))
         }
