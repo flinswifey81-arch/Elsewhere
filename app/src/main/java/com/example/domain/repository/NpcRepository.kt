@@ -1,5 +1,6 @@
 package com.example.domain.repository
 
+import android.net.Uri
 import androidx.room.withTransaction
 import com.example.data.AppDatabase
 import com.example.data.model.MessageEntity
@@ -28,6 +29,7 @@ import com.squareup.moshi.Moshi
 import com.squareup.moshi.Types
 import java.util.Locale
 import java.util.UUID
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
@@ -73,6 +75,9 @@ data class NpcContextSelection(
     val dossier: NpcDossier,
     val score: Int
 )
+
+internal const val NPC_LIBRARY_PORTRAIT_LINK = "_elsewhere_npc_library_portrait_id"
+private val NPC_INTERNAL_LINK_FIELDS = setOf("_elsewhere_linked_character_id", NPC_LIBRARY_PORTRAIT_LINK)
 
 data class NpcLibraryBank(val bank: NpcLibraryBankEntity, val entries: List<NpcLibraryEntryEntity>)
 
@@ -321,19 +326,30 @@ class NpcRepository(
             require(name.isNotBlank()) { "Library bank name is required." }
             val projected = getProjectedDossiers(chatId)
             require(projected.isNotEmpty()) { "This chat has no NPCs to save." }
-            val baseExtensions = dao.getDossiers(chatId).associate { it.npcId to it.extensionFieldsJson }
+            val bases = dao.getDossiers(chatId).associateBy { it.npcId }
             val bank = NpcLibraryBankEntity(name = name.trim())
+            val pairs = projected.mapIndexed { index, npc ->
+                val base = bases.getValue(npc.npcId)
+                base to npc.toLibrary(bank.bankId, index).copy(
+                    extensionFieldsJson = npcExtensions(base).filterKeys { it !in NPC_INTERNAL_LINK_FIELDS }
+                        .takeIf { it.isNotEmpty() }?.let(mapAdapter::toJson)
+                )
+            }
             database.withTransaction {
                 dao.insertLibraryBank(bank)
-                dao.insertLibraryEntries(projected.mapIndexed { index, npc ->
-                    npc.toLibrary(bank.bankId, index).copy(
-                        extensionFieldsJson = baseExtensions[npc.npcId]
-                            ?.let { raw -> runCatching { mapAdapter.fromJson(raw) }.getOrNull() }
-                            ?.filterKeys { it != "_elsewhere_linked_character_id" }
-                            ?.takeIf { it.isNotEmpty() }
-                            ?.let(mapAdapter::toJson)
+                dao.insertLibraryEntries(pairs.map { it.second })
+                pairs.forEach { (base, entry) ->
+                    profileImageRepository?.copyImageToKind(
+                        ProfileImageKind.NPC, base.npcId, ProfileImageKind.NPC_LIBRARY, entry.libraryNpcId
                     )
-                })
+                    // A prior Library source remains authoritative; a new snapshot does not
+                    // silently retarget an NPC already imported from another bank.
+                    if (linkedLibraryEntry(base) == null) {
+                        dao.updateDossier(base.copy(extensionFieldsJson = mapAdapter.toJson(
+                            npcExtensions(base) + (NPC_LIBRARY_PORTRAIT_LINK to entry.libraryNpcId)
+                        )))
+                    }
+                }
             }
             bank.bankId
         }
@@ -345,18 +361,63 @@ class NpcRepository(
                 val entries = dao.getLibraryEntries(bankId).filter { selectedIds == null || it.libraryNpcId in selectedIds }
                 require(entries.isNotEmpty()) { "Select at least one NPC." }
                 database.withTransaction {
-                    entries.forEach { entry -> dao.insertDossier(entry.toDossier(chatId)) }
+                    entries.forEach { entry ->
+                        val dossier = entry.toDossier(chatId)
+                        dao.insertDossier(dossier)
+                        profileImageRepository?.copyImageToKind(
+                            ProfileImageKind.NPC_LIBRARY, entry.libraryNpcId, ProfileImageKind.NPC, dossier.npcId
+                        )
+                    }
                 }
                 entries.size
             }
         }
 
+    private fun npcExtensions(dossier: NpcDossierEntity): Map<String, Any?> =
+        dossier.extensionFieldsJson?.let { runCatching { mapAdapter.fromJson(it) }.getOrNull() }.orEmpty()
+
+    private suspend fun linkedLibraryEntry(dossier: NpcDossierEntity): NpcLibraryEntryEntity? =
+        (npcExtensions(dossier)[NPC_LIBRARY_PORTRAIT_LINK] as? String)?.let { dao.getLibraryEntry(it) }
+
+    suspend fun hasLibraryPortraitLink(npcId: String): Boolean = withContext(Dispatchers.IO) {
+        dao.getDossier(npcId)?.let { linkedLibraryEntry(it) } != null
+    }
+
+    /**
+     * A portrait chosen in a chat also becomes the Library default when this NPC
+     * has a known source entry. Chat copies stay independently editable; no name matching.
+     */
+    suspend fun replaceNpcPortrait(chatId: String, npcId: String, uri: Uri) = dataCoordinator.withMutation {
+        withContext(Dispatchers.IO) {
+            val dossier = requireNotNull(dao.getDossier(npcId)?.takeIf { it.chatId == chatId }) {
+                "The NPC no longer exists in this chat."
+            }
+            val images = requireNotNull(profileImageRepository) { "Profile picture storage is unavailable." }
+            images.replaceImage(ProfileImageKind.NPC, npcId, uri)
+            linkedLibraryEntry(dossier)?.let { entry ->
+                try {
+                    check(images.copyImageToKind(
+                        ProfileImageKind.NPC, npcId, ProfileImageKind.NPC_LIBRARY, entry.libraryNpcId
+                    ))
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Exception) {
+                    throw IllegalStateException(
+                        "The chat picture was saved, but the Library picture could not be updated.", error
+                    )
+                }
+            }
+        }
+    }
+
     suspend fun deleteLibraryBank(bankId: String) = dataCoordinator.withMutation {
         withContext(Dispatchers.IO) {
+            val entries = dao.getLibraryEntries(bankId)
             database.withTransaction {
                 dao.deleteLibraryEntries(bankId)
                 dao.deleteLibraryBank(bankId)
             }
+            entries.forEach { profileImageRepository?.removeImage(ProfileImageKind.NPC_LIBRARY, it.libraryNpcId) }
         }
     }
 
@@ -1060,7 +1121,7 @@ class NpcRepository(
                 extensionFields = if (includePrivateFields) {
                     bases[dossier.npcId]?.extensionFieldsJson
                         ?.let { runCatching { mapAdapter.fromJson(it) }.getOrNull() }
-                        ?.filterKeys { it != "_elsewhere_linked_character_id" }.orEmpty()
+                        ?.filterKeys { it !in NPC_INTERNAL_LINK_FIELDS }.orEmpty()
                 } else emptyMap()
             )
         }
@@ -1106,8 +1167,8 @@ class NpcRepository(
                     keepInScene = card.keepInScene,
                     sceneMode = replacing?.sceneMode ?: "AUTO",
                     isManualBase = true,
-                    extensionFieldsJson = card.extensionFields
-                        .filterKeys { it != "_elsewhere_linked_character_id" }
+                    extensionFieldsJson = (card.extensionFields.filterKeys { it !in NPC_INTERNAL_LINK_FIELDS } +
+                        (replacing?.let(::npcExtensions)?.filterKeys { it == NPC_LIBRARY_PORTRAIT_LINK }.orEmpty()))
                         .takeIf { it.isNotEmpty() }?.let(mapAdapter::toJson),
                     createdAt = replacing?.createdAt ?: System.currentTimeMillis(),
                     updatedAt = System.currentTimeMillis()
@@ -1152,7 +1213,7 @@ class NpcRepository(
         personaRelationshipsJson = stringMapAdapter.toJson(personaRelationships.cleanMap()), characterKnowledgeJson = stringMapAdapter.toJson(characterKnowledge.cleanMap()),
         goals = goals.trim(), secrets = secrets.trim(), authorNotes = authorNotes.trim(), keepInScene = keepInScene,
         extensionFieldsJson = extensionFields
-            .filterKeys { it != "_elsewhere_linked_character_id" }
+            .filterKeys { it !in NPC_INTERNAL_LINK_FIELDS }
             .takeIf { it.isNotEmpty() }?.let(mapAdapter::toJson),
         sortPosition = position
     )
@@ -1169,11 +1230,11 @@ class NpcRepository(
         appearance = appearance, personality = personality, relationshipToPersona = relationshipToPersona,
         personaRelationshipsJson = personaRelationshipsJson, characterKnowledgeJson = characterKnowledgeJson, goals = goals, secrets = secrets,
         authorNotes = authorNotes, keepInScene = keepInScene, isManualBase = true,
-        extensionFieldsJson = extensionFieldsJson?.let { raw ->
-            runCatching { mapAdapter.fromJson(raw) }.getOrNull()
-                ?.filterKeys { it != "_elsewhere_linked_character_id" }
-                ?.takeIf { it.isNotEmpty() }?.let(mapAdapter::toJson)
-        }
+        extensionFieldsJson = mapAdapter.toJson(
+            extensionFieldsJson?.let { raw -> runCatching { mapAdapter.fromJson(raw) }.getOrNull() }
+                .orEmpty().filterKeys { it !in NPC_INTERNAL_LINK_FIELDS } +
+                (NPC_LIBRARY_PORTRAIT_LINK to libraryNpcId)
+        )
     )
 
     private fun project(

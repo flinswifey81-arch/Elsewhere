@@ -23,6 +23,9 @@ interface NpcDao {
     @Query("SELECT * FROM npc_library_entries WHERE bankId = :bankId ORDER BY sortPosition, displayName COLLATE NOCASE")
     suspend fun getLibraryEntries(bankId: String): List<NpcLibraryEntryEntity>
 
+    @Query("SELECT * FROM npc_library_entries WHERE libraryNpcId = :libraryNpcId LIMIT 1")
+    suspend fun getLibraryEntry(libraryNpcId: String): NpcLibraryEntryEntity?
+
     @Query("SELECT * FROM npc_library_entries ORDER BY bankId, sortPosition, displayName COLLATE NOCASE")
     suspend fun getAllLibraryEntries(): List<NpcLibraryEntryEntity>
 

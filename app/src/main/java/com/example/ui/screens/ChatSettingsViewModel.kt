@@ -128,6 +128,10 @@ class ChatSettingsViewModel(
         updateEngineSettings { it.copy(responseLengthProfile = profile) }
     }
 
+    fun onNaturalSoloCastChanged(enabled: Boolean) {
+        updateSettings { it.copy(naturalSoloCast = enabled) }
+    }
+
     fun onNarratorEnabledChanged(enabled: Boolean) {
         updateSettings { it.copy(narratorEnabled = enabled) }
     }

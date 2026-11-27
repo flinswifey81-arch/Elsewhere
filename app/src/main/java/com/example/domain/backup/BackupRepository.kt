@@ -313,6 +313,11 @@ class BackupRepository internal constructor(
                 result += profileSource(BackupFileKind.NPC_AVATAR, npc.npcId, source, stagingDirectory)
             }
         }
+        payload.npcLibraryEntries.forEach { npc ->
+            profileImageRepository.resolveImage(ProfileImageKind.NPC_LIBRARY, npc.libraryNpcId)?.let { source ->
+                result += profileSource(BackupFileKind.NPC_LIBRARY_AVATAR, npc.libraryNpcId, source, stagingDirectory)
+            }
+        }
         return result.sortedBy { it.manifest.entryName }
     }
 
@@ -322,7 +327,7 @@ class BackupRepository internal constructor(
         source: File,
         stagingDirectory: File
     ): BackupBinarySource {
-        val directory = when (kind) { BackupFileKind.SCENARIO_AVATAR -> "scenarios"; BackupFileKind.CHARACTER_AVATAR -> "characters"; BackupFileKind.NPC_AVATAR -> "npcs"; else -> "personas" }
+        val directory = when (kind) { BackupFileKind.SCENARIO_AVATAR -> "scenarios"; BackupFileKind.CHARACTER_AVATAR -> "characters"; BackupFileKind.NPC_AVATAR -> "npcs"; BackupFileKind.NPC_LIBRARY_AVATAR -> "npc_library"; else -> "personas" }
         val staged = File(stagingDirectory, "avatar-${kind.name.lowercase()}-${safeToken(ownerId)}")
         source.copyTo(staged, overwrite = false)
         return BackupBinarySource(
@@ -586,12 +591,13 @@ class BackupRepository internal constructor(
     private fun prepareProfileImages(validated: ValidatedBackup, stageRoot: File) {
         stageRoot.mkdirs()
         validated.manifest.files.filter {
-            it.kind in listOf(BackupFileKind.CHARACTER_AVATAR, BackupFileKind.PERSONA_AVATAR, BackupFileKind.SCENARIO_AVATAR, BackupFileKind.NPC_AVATAR)
+            it.kind in listOf(BackupFileKind.CHARACTER_AVATAR, BackupFileKind.PERSONA_AVATAR, BackupFileKind.SCENARIO_AVATAR, BackupFileKind.NPC_AVATAR, BackupFileKind.NPC_LIBRARY_AVATAR)
         }.forEach { fileManifest ->
             val kind = when (fileManifest.kind) {
                 BackupFileKind.SCENARIO_AVATAR -> ProfileImageKind.SCENARIO
                 BackupFileKind.CHARACTER_AVATAR -> ProfileImageKind.CHARACTER
                 BackupFileKind.NPC_AVATAR -> ProfileImageKind.NPC
+                BackupFileKind.NPC_LIBRARY_AVATAR -> ProfileImageKind.NPC_LIBRARY
                 else -> ProfileImageKind.PERSONA
             }
             val source = requireNotNull(validated.extractedFiles[fileManifest.entryName])
@@ -709,7 +715,7 @@ class BackupRepository internal constructor(
         val attachmentIds = unique("attachment", payload.messageAttachments.map { it.attachmentId })
         val npcIds = unique("NPC", payload.npcDossiers.map { it.npcId })
         val npcLibraryBankIds = unique("NPC library bank", payload.npcLibraryBanks.map { it.bankId })
-        unique("NPC library entry", payload.npcLibraryEntries.map { it.libraryNpcId })
+        val npcLibraryIds = unique("NPC library entry", payload.npcLibraryEntries.map { it.libraryNpcId })
         unique("engine defaults", payload.engineDefaults.map { it.defaultsId })
         if (payload.engineDefaults.size > 1 || payload.engineDefaults.any { it.defaultsId != EngineDefaultsEntity.GLOBAL_ID }) {
             throw BackupValidationException("Backup contains invalid engine defaults.")
@@ -993,6 +999,14 @@ class BackupRepository internal constructor(
                 throw BackupValidationException("NPC portrait metadata is invalid.")
             }
         }
+        manifest.files.filter { it.kind == BackupFileKind.NPC_LIBRARY_AVATAR }.forEach {
+            if (
+                it.ownerId !in npcLibraryIds || it.mimeType != "image/png" ||
+                it.byteSize !in 1..ProfileImageRepository.MAX_STORED_BYTES
+            ) {
+                throw BackupValidationException("NPC Library portrait metadata is invalid.")
+            }
+        }
         if (payload.appearance.fontSize !in 12f..24f) {
             throw BackupValidationException("Backup font-size setting is invalid.")
         }
@@ -1032,7 +1046,8 @@ class BackupRepository internal constructor(
                 BackupFileKind.SCENARIO_AVATAR,
                 BackupFileKind.CHARACTER_AVATAR,
                 BackupFileKind.PERSONA_AVATAR,
-                BackupFileKind.NPC_AVATAR -> {
+                BackupFileKind.NPC_AVATAR,
+                BackupFileKind.NPC_LIBRARY_AVATAR -> {
                     if (
                         detectedMime != "image/png" ||
                         bounds.outWidth > ProfileImageRepository.MAX_STORED_DIMENSION ||
@@ -1105,7 +1120,7 @@ class BackupRepository internal constructor(
         npcDossiers = payload.npcDossiers.size,
         messageAttachments = payload.messageAttachments.size,
         profileImages = files.count {
-            it.kind in listOf(BackupFileKind.CHARACTER_AVATAR, BackupFileKind.PERSONA_AVATAR, BackupFileKind.SCENARIO_AVATAR, BackupFileKind.NPC_AVATAR)
+            it.kind in listOf(BackupFileKind.CHARACTER_AVATAR, BackupFileKind.PERSONA_AVATAR, BackupFileKind.SCENARIO_AVATAR, BackupFileKind.NPC_AVATAR, BackupFileKind.NPC_LIBRARY_AVATAR)
         },
         includesDrafts = payload.chatSettings.any { !it.draftMessage.isNullOrEmpty() } ||
             payload.messageAttachments.any { it.messageId == null },

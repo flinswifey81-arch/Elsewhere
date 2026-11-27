@@ -1,6 +1,7 @@
 package com.example.ui.components
 
 import android.graphics.BitmapFactory
+import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -74,12 +75,12 @@ fun ProfileImageAvatar(
     val shape = RoundedCornerShape((size.value * 0.24f).dp.coerceAtLeast(8.dp))
     val fallbackContainer = when (kind) {
         ProfileImageKind.PERSONA -> MaterialTheme.colorScheme.secondaryContainer
-        ProfileImageKind.SCENARIO, ProfileImageKind.CHARACTER, ProfileImageKind.NPC -> MaterialTheme.colorScheme.primaryContainer
+        ProfileImageKind.SCENARIO, ProfileImageKind.CHARACTER, ProfileImageKind.NPC, ProfileImageKind.NPC_LIBRARY -> MaterialTheme.colorScheme.primaryContainer
         null -> MaterialTheme.colorScheme.surfaceContainerHigh
     }
     val fallbackContent = when (kind) {
         ProfileImageKind.PERSONA -> MaterialTheme.colorScheme.onSecondaryContainer
-        ProfileImageKind.SCENARIO, ProfileImageKind.CHARACTER, ProfileImageKind.NPC -> MaterialTheme.colorScheme.onPrimaryContainer
+        ProfileImageKind.SCENARIO, ProfileImageKind.CHARACTER, ProfileImageKind.NPC, ProfileImageKind.NPC_LIBRARY -> MaterialTheme.colorScheme.onPrimaryContainer
         null -> MaterialTheme.colorScheme.onSurfaceVariant
     }
 
@@ -123,7 +124,9 @@ fun ProfileImageEditor(
     kind: ProfileImageKind,
     profileId: String?,
     displayName: String,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    savedImageHint: String? = null,
+    onReplaceImage: (suspend (Uri) -> Unit)? = null
 ) {
     val coroutineScope = rememberCoroutineScope()
     val highFontScale = LocalDensity.current.fontScale > 1.15f
@@ -143,7 +146,10 @@ fun ProfileImageEditor(
             isWorking = true
             error = null
             coroutineScope.launch {
-                runCatching { repository.replaceImage(kind, profileId, uri) }
+                runCatching {
+                    if (onReplaceImage != null) onReplaceImage(uri)
+                    else repository.replaceImage(kind, profileId, uri)
+                }
                     .onFailure { failure ->
                         error = failure.message ?: "The profile picture could not be saved."
                     }
@@ -194,7 +200,7 @@ fun ProfileImageEditor(
                     if (profileId == null) {
                         "Save this profile first, then reopen it to add a picture."
                     } else {
-                        "Stored only on this device. Display-only; never added to model context or JSON exports."
+                        savedImageHint ?: "Stored only on this device. Display-only; never added to model context or JSON exports."
                     },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant

@@ -63,7 +63,8 @@ data class WorldArchiveImportPreview(
                         WorldArchiveEntryKind.CHARACTER_AVATAR,
                         WorldArchiveEntryKind.PERSONA_AVATAR,
                         WorldArchiveEntryKind.SCENARIO_AVATAR,
-                        WorldArchiveEntryKind.NPC_PORTRAIT
+                        WorldArchiveEntryKind.NPC_PORTRAIT,
+                        WorldArchiveEntryKind.NPC_LIBRARY_PORTRAIT
                     )
                 },
                 uncompressedArchiveBytes = manifest.entries.sumOf { it.byteSize },

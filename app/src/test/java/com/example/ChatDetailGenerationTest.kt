@@ -797,6 +797,70 @@ class ChatDetailGenerationTest {
     }
 
     @Test
+    fun naturalSoloCastAcceptsNpcOnlyReplyWithoutReassigningPriorSpotlightHistory() = runBlocking {
+        val provider = SequentialResponseProvider(listOf(
+            """
+                <|elsewhere_story_v1|>
+                <|segment|>{"type":"npc","speaker_id":"npc-character","speaker_name":"Mara"}
+                "I'll check the map."
+                <|end_story|>
+            """.trimIndent()
+        ))
+        val harness = createHarness(provider, ResponseLengthProfile.NORMAL)
+        database.characterDao().insertCharacter(
+            character().copy(
+                characterId = "npc-character", displayName = "Mara", characterName = "Mara",
+                voiceJson = """{"tone":"precise and teasing"}""",
+                authorNotesJson = """{"private":"NEVER_SEND_ROSTER_NOTE"}"""
+            )
+        )
+        database.chatDao().insertChatParticipant(
+            com.example.data.model.ChatParticipantEntity(
+                chatId = harness.chatId, characterId = "npc-character", joinedAt = Long.MAX_VALUE,
+                sortPosition = 1
+            )
+        )
+        harness.chatRepository.selectSoloSpotlight(harness.chatId, "npc-character")
+        val earlier = MessageEntity(
+            chatId = harness.chatId, speakerType = SpeakerType.CHARACTER,
+            speakerId = "npc-character", speakerDisplayNameSnapshot = "Mara",
+            content = "I have the map.", orderIndex = 1L
+        )
+        harness.messageRepository.insertMessage(earlier)
+        harness.chatRepository.insertChatSettings(
+            requireNotNull(harness.chatRepository.getChatSettings(harness.chatId)).copy(naturalSoloCast = true)
+        )
+        withTimeout(15_000) {
+            harness.viewModel.uiState.first {
+                it is ChatUiState.Success && it.chatSettings.naturalSoloCast &&
+                    it.messages.any { message -> message.messageId == earlier.messageId }
+            }
+        }
+        harness.viewModel.onDraftChanged("Mara, can you check the map?")
+        harness.viewModel.sendMessage()
+        val messages = withTimeout(15_000) {
+            harness.messageRepository.getMessagesForChat(harness.chatId).first { it.size == 3 }
+        }
+
+        val request = provider.requests.single()
+        val prompt = request.first { it.role == Role.SYSTEM }.content
+        assertTrue(prompt.contains("An NPC-only reply is valid"))
+        assertTrue(prompt.contains("precise and teasing"))
+        assertFalse(prompt.contains("NEVER_SEND_ROSTER_NOTE"))
+        val history = request.single { it.role == Role.ASSISTANT }.content
+        assertTrue(history.contains("I have the map."))
+        assertTrue(history.contains("\"speaker_id\":\"npc-character\""))
+        val segment = requireNotNull(StoryResponseCodec.decode(messages.last().content)).segments.single()
+        assertEquals(StorySegmentType.NPC, segment.type)
+        assertEquals("npc-character", segment.speakerId)
+        assertEquals(earlier, messages.first())
+        assertEquals("npc-character", harness.chatRepository.getParticipantsForChatOnce(harness.chatId)
+            .minByOrNull { it.sortPosition }?.characterId)
+        assertEquals("character-1", messages.last().speakerId)
+        assertFalse(harness.npcRepository.getSettings(harness.chatId).isEnabled)
+    }
+
+    @Test
     fun previouslyKnownNpcCanBeRecalledWithoutPlayerNamingThemInThePrompt() = runBlocking {
         val provider = SequentialResponseProvider(listOf(
             """

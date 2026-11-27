@@ -132,14 +132,17 @@ object StoryResponseCodec {
     fun promptStructuredHistory(
         content: String,
         primaryCharacter: StorySpeakerIdentity,
-        knownNpcs: List<StorySpeakerIdentity> = emptyList()
+        knownNpcs: List<StorySpeakerIdentity> = emptyList(),
+        historicalCharacter: StorySpeakerIdentity? = null,
+        linkedHistorySpeakers: Map<String, StorySpeakerIdentity> = emptyMap()
     ): String {
+        val sourceCharacter = historicalCharacter ?: primaryCharacter
         val stored = decode(content)
         val normalized = when {
-            stored == null -> StoryOutputParser().parse(content, primaryCharacter, knownNpcs).response
+            stored == null -> StoryOutputParser().parse(content, sourceCharacter, knownNpcs).response
             stored.segments.size == 1 && stored.segments.single().type == StorySegmentType.CHARACTER -> {
                 val original = stored.segments.single()
-                val recovered = StoryOutputParser().parse(original.content, primaryCharacter, knownNpcs).response
+                val recovered = StoryOutputParser().parse(original.content, sourceCharacter, knownNpcs).response
                 if (
                     recovered.segments.size != 1 ||
                     recovered.segments.single().type != StorySegmentType.CHARACTER ||
@@ -153,7 +156,17 @@ object StoryResponseCodec {
             normalized.segments.filter { it.content.isNotBlank() }.forEach { segment ->
                 val header = when (segment.type) {
                     StorySegmentType.NARRATION -> mapOf("type" to "narration")
-                    StorySegmentType.CHARACTER -> mapOf("type" to "character")
+                    StorySegmentType.CHARACTER -> {
+                        val id = segment.speakerId ?: sourceCharacter.id
+                        if (historicalCharacter != null && id != primaryCharacter.id) {
+                            val known = linkedHistorySpeakers[id] ?: knownNpcs.singleOrNull { it.id == id }
+                            mapOf(
+                                "type" to "npc",
+                                "speaker_id" to (known?.id ?: id),
+                                "speaker_name" to (known?.name ?: segment.speakerName ?: sourceCharacter.name)
+                            )
+                        } else mapOf("type" to "character")
+                    }
                     StorySegmentType.NPC -> mapOf(
                         "type" to "npc",
                         "speaker_id" to segment.speakerId,

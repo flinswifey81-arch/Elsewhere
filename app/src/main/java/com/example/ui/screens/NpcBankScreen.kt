@@ -446,6 +446,7 @@ fun NpcBankScreen(
         NpcEditorDialog(
             initial = dossier,
             chatSummary = chatSummary,
+            npcRepository = repository,
             profileImageRepository = profileImageRepository,
             onDismiss = { editing = null },
             onSave = { viewModel.save(it); editing = null }
@@ -505,6 +506,7 @@ fun NpcBankScreen(
         NpcLibraryDialog(
             banks = state.libraryBanks,
             repository = repository,
+            profileImageRepository = profileImageRepository,
             initialJson = libraryImportJson,
             onPickFile = { libraryImportLauncher.launch(arrayOf("application/json", "text/json", "text/plain")) },
             onDismiss = { showLibrary = false },
@@ -609,6 +611,7 @@ fun NpcBankScreen(
 private fun NpcLibraryDialog(
     banks: List<NpcLibraryBankEntity>,
     repository: NpcRepository,
+    profileImageRepository: ProfileImageRepository?,
     initialJson: String,
     onPickFile: () -> Unit,
     onDismiss: () -> Unit,
@@ -620,6 +623,7 @@ private fun NpcLibraryDialog(
     var json by remember { mutableStateOf("") }
     var selectedBank by remember { mutableStateOf<String?>(null) }
     var entries by remember { mutableStateOf<List<NpcLibraryEntryEntity>>(emptyList()) }
+    var editingPortrait by remember { mutableStateOf<NpcLibraryEntryEntity?>(null) }
     var selectedEntries by remember { mutableStateOf<Set<String>>(emptySet()) }
     LaunchedEffect(selectedBank) {
         entries = selectedBank?.let { repository.getLibraryBank(it)?.entries }.orEmpty()
@@ -652,7 +656,20 @@ private fun NpcLibraryDialog(
                             Checkbox(checked = npc.libraryNpcId in selectedEntries, onCheckedChange = { checked ->
                                 selectedEntries = if (checked) selectedEntries + npc.libraryNpcId else selectedEntries - npc.libraryNpcId
                             })
-                            Text(npc.displayName)
+                            ProfileImageAvatar(
+                                repository = profileImageRepository,
+                                kind = ProfileImageKind.NPC_LIBRARY,
+                                profileId = npc.libraryNpcId,
+                                displayName = npc.displayName,
+                                size = 36.dp,
+                                contentDescription = "Library profile picture for " + npc.displayName
+                            )
+                            Text(npc.displayName, modifier = Modifier.padding(start = 8.dp).weight(1f))
+                            if (profileImageRepository != null) {
+                                IconButton(onClick = { editingPortrait = npc }) {
+                                    Icon(Icons.Filled.Edit, contentDescription = "Edit Library picture for " + npc.displayName)
+                                }
+                            }
                         }
                     }
                     item {
@@ -666,6 +683,22 @@ private fun NpcLibraryDialog(
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } }
     )
+    editingPortrait?.let { npc ->
+        AlertDialog(
+            onDismissRequest = { editingPortrait = null },
+            title = { Text(npc.displayName) },
+            text = {
+                ProfileImageEditor(
+                    repository = profileImageRepository,
+                    kind = ProfileImageKind.NPC_LIBRARY,
+                    profileId = npc.libraryNpcId,
+                    displayName = npc.displayName,
+                    savedImageHint = "New chats that add this NPC start with this picture. Existing chats keep their own copies."
+                )
+            },
+            confirmButton = { TextButton(onClick = { editingPortrait = null }) { Text("Done") } }
+        )
+    }
 }
 
 internal fun readNpcJsonBounded(input: InputStream, maxBytes: Int = 1_000_000): String {
@@ -692,6 +725,7 @@ private suspend fun readNpcDocument(context: android.content.Context, uri: andro
 private fun NpcEditorDialog(
     initial: NpcDossier,
     chatSummary: ChatSummary?,
+    npcRepository: NpcRepository,
     profileImageRepository: ProfileImageRepository?,
     onDismiss: () -> Unit,
     onSave: (NpcDossier) -> Unit
@@ -707,6 +741,8 @@ private fun NpcEditorDialog(
     var goals by remember(initial.npcId) { mutableStateOf(initial.goals) }
     var secrets by remember(initial.npcId) { mutableStateOf(initial.secrets) }
     var authorNotes by remember(initial.npcId) { mutableStateOf(initial.authorNotes) }
+    var hasLibraryLink by remember(initial.npcId) { mutableStateOf<Boolean?>(null) }
+    LaunchedEffect(initial.npcId) { hasLibraryLink = npcRepository.hasLibraryPortraitLink(initial.npcId) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -718,7 +754,13 @@ private fun NpcEditorDialog(
                         repository = profileImageRepository,
                         kind = ProfileImageKind.NPC,
                         profileId = initial.npcId.takeIf { initial.displayName.isNotBlank() },
-                        displayName = name
+                        displayName = name,
+                        savedImageHint = when (hasLibraryLink) {
+                            true -> "Choosing a picture also updates this NPC's Library picture for new chats. Remove only affects this chat."
+                            false -> "This NPC has no Library link. Save chat NPCs from the Library to reuse their pictures, or edit an existing Library entry there."
+                            null -> null
+                        },
+                        onReplaceImage = { uri -> npcRepository.replaceNpcPortrait(initial.chatId, initial.npcId, uri) }
                     )
                 }
                 item { NpcField("Display name", name) { name = it.take(120) } }

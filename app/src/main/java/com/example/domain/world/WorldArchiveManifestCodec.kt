@@ -33,7 +33,8 @@ enum class WorldArchiveEntryKind {
     CHARACTER_AVATAR,
     PERSONA_AVATAR,
     SCENARIO_AVATAR,
-    NPC_PORTRAIT
+    NPC_PORTRAIT,
+    NPC_LIBRARY_PORTRAIT
 }
 
 @JsonClass(generateAdapter = true)

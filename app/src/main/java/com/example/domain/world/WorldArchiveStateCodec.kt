@@ -480,7 +480,8 @@ object WorldArchiveStateCodec {
             WorldArchiveEntryKind.CHARACTER_AVATAR to state.characters.map { it.characterId }.toSet(),
             WorldArchiveEntryKind.PERSONA_AVATAR to state.personas.map { it.personaId }.toSet(),
             WorldArchiveEntryKind.SCENARIO_AVATAR to state.scenarios.map { it.scenarioId }.toSet(),
-            WorldArchiveEntryKind.NPC_PORTRAIT to state.npcDossiers.map { it.npcId }.toSet()
+            WorldArchiveEntryKind.NPC_PORTRAIT to state.npcDossiers.map { it.npcId }.toSet(),
+            WorldArchiveEntryKind.NPC_LIBRARY_PORTRAIT to state.npcLibraryEntries.map { it.libraryNpcId }.toSet()
         )
         require(manifest.entries.all { entry ->
             owners[entry.kind]?.let { owned -> entry.ownerId in owned } ?: true

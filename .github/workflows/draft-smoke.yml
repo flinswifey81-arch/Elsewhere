@@ -47,6 +47,12 @@ jobs:
         run: |
           bash ./gradlew :app:testSandboxUnitTest --no-daemon \
             --tests com.example.NpcProseDiscoveryTest \
+            --tests com.example.NpcLibraryPortraitTest \
+            --tests com.example.WorldArchiveAdditiveRestorerTest.npcPortraitSurvivesAsNewDossierImageWithoutTouchingOtherArt \
+            --tests com.example.domain.backup.BackupRepositoryTest.encryptedRoundTripPreservesEveryDurableCategoryAndSanitizesDeviceSecrets \
+            --tests com.example.SoloSpotlightControlsTest \
+            --tests com.example.AppDatabaseMigrationTest.migrationFrom26To27KeepsExistingSettingsAndDefaultsToSpotlight \
+            --tests com.example.ChatDetailGenerationTest.naturalSoloCastAcceptsNpcOnlyReplyWithoutReassigningPriorSpotlightHistory \
             --tests com.example.NpcSceneCastResolverTest \
             --tests com.example.StoryResponseTest \
             --tests com.example.ScenarioModeTest \
@@ -57,6 +63,15 @@ jobs:
             --tests com.example.ChatDetailGenerationTest.previouslyKnownNpcCanBeRecalledWithoutPlayerNamingThemInThePrompt \
             --tests com.example.ChatDetailGenerationTest.modelAttributedNaturalNpcDialogueCreatesBankEntryWithoutMetadata \
             --tests com.example.domain.memory.StoryMemoryLocalRetrieverTest
+      - name: Print test totals
+        if: always()
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          from xml.etree import ElementTree as ET
+          suites = [ET.parse(p).getroot() for p in Path('app/build/test-results/testSandboxUnitTest').glob('TEST-*.xml')]
+          print({key: sum(int(s.get(key, 0)) for s in suites) for key in ('tests', 'failures', 'errors', 'skipped')})
+          PY
       - name: Print actual failing cases
         if: failure()
         run: |
