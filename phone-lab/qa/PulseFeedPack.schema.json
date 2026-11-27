@@ -1,0 +1,271 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Elsewhere World Pulse Feed Pack (draft v1)",
+  "description": "An authoring format; not an existing Elsewhere import format. Import preview selects the destination World and optionally one campaign for the starter state. IDs are package-local. Validate unique IDs and same-platform references before writing. Only intentionally public in-world data is allowed; no private messages, transcripts or notes.",
+  "type": "object",
+  "properties": {
+    "format": {
+      "const": "elsewhere.world-pulse.feed-pack"
+    },
+    "version": {
+      "const": 1
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "platforms": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/platform"
+      },
+      "maxItems": 12,
+      "minItems": 1
+    },
+    "accounts": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/account"
+      },
+      "maxItems": 200,
+      "minItems": 0
+    },
+    "starterState": {
+      "$ref": "#/$defs/starterState"
+    }
+  },
+  "required": [
+    "format",
+    "version",
+    "name",
+    "platforms",
+    "accounts"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "platform": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "style": {
+          "enum": [
+            "timeline",
+            "photo_feed",
+            "bulletin",
+            "forum"
+          ]
+        },
+        "culture": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1600
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "style"
+      ],
+      "additionalProperties": false
+    },
+    "account": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+        },
+        "platformId": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+        },
+        "handle": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "role": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "publicBio": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "voice": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 400
+        }
+      },
+      "required": [
+        "id",
+        "platformId",
+        "handle",
+        "displayName",
+        "role"
+      ],
+      "additionalProperties": false
+    },
+    "starterState": {
+      "type": "object",
+      "properties": {
+        "publicEvents": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/event"
+          },
+          "maxItems": 100,
+          "minItems": 0
+        },
+        "posts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/post"
+          },
+          "maxItems": 200,
+          "minItems": 0
+        }
+      },
+      "required": [
+        "publicEvents",
+        "posts"
+      ],
+      "additionalProperties": false
+    },
+    "event": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+        },
+        "visibility": {
+          "const": "public"
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1600
+        }
+      },
+      "required": [
+        "id",
+        "visibility",
+        "summary"
+      ],
+      "additionalProperties": false
+    },
+    "post": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+        },
+        "accountId": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+        },
+        "eventId": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2400
+        },
+        "kind": {
+          "enum": [
+            "announcement",
+            "reaction",
+            "rumor",
+            "ambient"
+          ]
+        },
+        "replies": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/reply"
+          },
+          "maxItems": 40,
+          "minItems": 0
+        }
+      },
+      "required": [
+        "id",
+        "accountId",
+        "text",
+        "kind"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "announcement"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "required": [
+              "eventId"
+            ]
+          }
+        }
+      ]
+    },
+    "reply": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+        },
+        "accountId": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "kind": {
+          "enum": [
+            "reaction",
+            "rumor"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "accountId",
+        "text",
+        "kind"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

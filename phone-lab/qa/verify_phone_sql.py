@@ -2,9 +2,9 @@ from pathlib import Path
 import re
 import sqlite3
 
-java = Path(__file__).resolve().parents[1] / 'src/main/java/com/example/phonelab/systems/PhoneStore.java'
+java = Path(__file__).resolve().parents[1] / 'src/main/kotlin/com/example/phonelab/systems/PhoneStore.kt'
 source = java.read_text()
-schema = re.findall(r'private static final String SCHEMA_[A-Z]+ = "([^"]+)";', source)
+schema = re.findall(r'const val SCHEMA_[A-Z]+ = "([^"]+)"', source)
 assert len(schema) == 6
 db = sqlite3.connect(':memory:')
 db.execute('PRAGMA foreign_keys = ON')

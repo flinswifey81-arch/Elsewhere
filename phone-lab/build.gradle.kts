@@ -15,3 +15,6 @@ android {
         versionName = "0.1-lab"
     }
 }
+
+
+dependencies { testImplementation(libs.junit) }

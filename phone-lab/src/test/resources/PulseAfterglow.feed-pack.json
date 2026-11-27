@@ -1,0 +1,71 @@
+{
+  "format": "elsewhere.world-pulse.feed-pack",
+  "version": 1,
+  "name": "Afterglow Idol AU",
+  "platforms": [
+    {
+      "id": "encore",
+      "name": "Encore",
+      "style": "timeline",
+      "culture": "Agency posts are polished. Fan translators add context, and recurring fans talk to each other about music and performances."
+    }
+  ],
+  "accounts": [
+    {
+      "id": "meridian",
+      "platformId": "encore",
+      "handle": "@MeridianMusic",
+      "displayName": "Meridian Music",
+      "role": "record label",
+      "voice": "Polished, short official announcements."
+    },
+    {
+      "id": "glow_subs",
+      "platformId": "encore",
+      "handle": "@GlowSubs",
+      "displayName": "Glow Subs",
+      "role": "fan translator",
+      "voice": "Precise, helpful, avoids repeating unsourced claims."
+    },
+    {
+      "id": "bridge_club",
+      "platformId": "encore",
+      "handle": "@BridgeClub",
+      "displayName": "Bridge Club",
+      "role": "recurring fan",
+      "voice": "Enthusiastic about vocal arrangements."
+    }
+  ],
+  "starterState": {
+    "publicEvents": [
+      {
+        "id": "teaser",
+        "visibility": "public",
+        "summary": "Meridian Music released a public teaser for Afterglow’s comeback single, ‘Blue Hour.’ The lead singer on the bridge has not been announced."
+      }
+    ],
+    "posts": [
+      {
+        "id": "official_teaser",
+        "accountId": "meridian",
+        "eventId": "teaser",
+        "kind": "announcement",
+        "text": "AFTERGLOW ✦ BLUE HOUR. The first teaser is here.",
+        "replies": [
+          {
+            "id": "translator_reply",
+            "accountId": "glow_subs",
+            "kind": "reaction",
+            "text": "The title card confirms ‘Blue Hour’ is the single name, not the album title."
+          },
+          {
+            "id": "bridge_guess",
+            "accountId": "bridge_club",
+            "kind": "rumor",
+            "text": "Purely a guess: that might be Jina on the bridge. The label hasn’t said."
+          }
+        ]
+      }
+    ]
+  }
+}
