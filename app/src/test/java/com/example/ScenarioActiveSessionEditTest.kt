@@ -128,6 +128,6 @@ class ScenarioActiveSessionEditTest {
             requireNotNull(repository.session(first)).definitionJson)
         // Editing a Scenario session does not itself require a schema migration.
         // The current FTS-only database bump is version 26.
-        assertEquals(26, com.example.data.APP_DATABASE_VERSION)
+        assertEquals(27, com.example.data.APP_DATABASE_VERSION)
     }
 }

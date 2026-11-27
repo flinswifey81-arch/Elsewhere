@@ -33,6 +33,7 @@ enum class BackupFileKind {
     PERSONA_AVATAR,
     SCENARIO_AVATAR,
     NPC_AVATAR,
+    NPC_LIBRARY_AVATAR,
     CHAT_COVER,
     WORLD_COVER,
     CAMPAIGN_COVER

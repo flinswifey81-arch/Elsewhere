@@ -13,6 +13,7 @@ import androidx.compose.ui.unit.dp
 import com.example.di.AppContainer
 import com.example.data.model.ChatType
 import com.example.domain.compiler.ContextCompilerV1
+import com.example.domain.compiler.NaturalSoloCast
 import com.example.domain.repository.NpcRepository
 import com.example.domain.memory.ContextResetPolicy
 import com.example.domain.memory.StoryMemoryPromptBudget
@@ -57,10 +58,21 @@ fun ContextInspectorScreen(
             val summary = appContainer.chatRepository.getChatSummaryById(chatId)
             val settings = appContainer.chatRepository.getEffectiveChatSettings(chatId)
                 ?: com.example.data.model.ChatSettingsEntity(chatId = chatId)
-            val selectedCharacter = summary?.characters
-                ?.firstOrNull { it.characterId == characterId }
-                ?: summary?.characters?.firstOrNull()
-            val character = selectedCharacter?.let { appContainer.characterRepository.getCharacterById(it.characterId) }
+            val natural = summary?.chat?.chatType?.let { chatType ->
+                NaturalSoloCast.enabled(
+                    chatType, settings.naturalSoloCast,
+                    appContainer.coopSessionManager?.state?.value?.room?.chatId == chatId
+                )
+            } == true
+            val naturalParticipants = if (natural) {
+                appContainer.chatRepository.getParticipantsForChatOnce(chatId)
+            } else emptyList()
+            val anchorId = NaturalSoloCast.anchor(naturalParticipants, natural)
+            val character = (characterId?.takeIf { id ->
+                summary?.characters?.any { it.characterId == id } == true
+            } ?: anchorId ?: summary?.characters?.firstOrNull()?.characterId)?.let {
+                appContainer.characterRepository.getCharacterById(it)
+            }
             val persona = summary?.personas?.firstOrNull()?.let { appContainer.personaRepository.getPersonaById(it.personaId) }
             val npcBankEnabled = appContainer.npcRepository?.getSettings(chatId)?.isEnabled == true
             val archivedHistory = appContainer.messageRepository.getMessagesForChatOnce(chatId)
@@ -158,31 +170,56 @@ fun ContextInspectorScreen(
                         chatId, afterOrderIndex = resetBoundary
                     ).orEmpty()
                 } else emptyList()
-                val knownNpcSpeakers = projectedNpcDossiers.map { dossier ->
-                    com.example.domain.story.StorySpeakerIdentity(dossier.npcId, dossier.displayName)
-                }
-                val ensembleNarrationEnabled = summary.chat.chatType == ChatType.SOLO && settings.narratorEnabled
+                val coveredCharacterIds = projectedNpcDossiers.mapNotNull { it.linkedCharacterId }.toSet() +
+                    projectedNpcDossiers.map { it.npcId }
+                val naturalRoster = if (natural) {
+                    NaturalSoloCast.roster(naturalParticipants, character.characterId, coveredCharacterIds)
+                        .mapNotNull {
+                            appContainer.characterRepository.getCharacterById(it)?.takeUnless { card -> card.isArchived }
+                        }
+                } else emptyList()
+                val knownNpcSpeakers = projectedNpcDossiers
+                    .filterNot { natural && (it.npcId == character.characterId || it.linkedCharacterId == character.characterId) }
+                    .map { com.example.domain.story.StorySpeakerIdentity(it.npcId, it.displayName) } +
+                    naturalRoster.map(NaturalSoloCast::identity)
+                val linkedHistorySpeakers = if (natural) projectedNpcDossiers.mapNotNull {
+                    it.linkedCharacterId?.let { id ->
+                        id to com.example.domain.story.StorySpeakerIdentity(it.npcId, it.displayName)
+                    }
+                }.toMap() else emptyMap()
+                val sceneCast = com.example.domain.npc.NpcSceneCastResolver.resolve(
+                    projectedNpcDossiers.filterNot {
+                        it.npcId == character.characterId || it.linkedCharacterId == character.characterId
+                    }, history.takeLast(24)
+                )
+                val present = sceneCast.filter { it.presence == com.example.domain.npc.NpcScenePresence.PRESENT }
+                val ensembleNarrationEnabled = summary.chat.chatType == ChatType.SOLO &&
+                    (natural || settings.narratorEnabled ||
+                        (npcBankEnabled && (present.isNotEmpty() || settings.coLeadEnsembleEnabled)))
                 val coLeadNpcNames = if (ensembleNarrationEnabled && settings.coLeadEnsembleEnabled) {
-                    projectedNpcDossiers.filter { it.keepInScene }
+                    present.map { it.dossier }.filter { it.keepInScene }
                         .take(NpcRepository.SOLO_ENSEMBLE_NPC_CONTEXT_LIMIT)
                         .map { it.displayName }
                 } else emptyList()
-                val supportingCast = if (npcBankEnabled) {
-                    appContainer.npcRepository?.relevantContext(
-                        chatId = chatId,
-                        recentMessages = history,
-                        observerCharacterId = character.characterId,
-                        activePersonaId = persona.personaId,
-                        isGroup = summary.chat.chatType == ChatType.GROUP,
-                        asOfOrderIndex = history.maxOfOrNull { it.orderIndex },
-                        afterOrderIndex = resetBoundary,
-                        limit = if (ensembleNarrationEnabled) {
-                            NpcRepository.SOLO_ENSEMBLE_NPC_CONTEXT_LIMIT
-                        } else {
-                            NpcRepository.DEFAULT_NPC_CONTEXT_LIMIT
-                        }
-                    )
-                } else null
+                val supportingCast = listOfNotNull(
+                    if (npcBankEnabled) {
+                        appContainer.npcRepository?.relevantContext(
+                            chatId = chatId,
+                            recentMessages = history,
+                            observerCharacterId = character.characterId,
+                            activePersonaId = persona.personaId,
+                            isGroup = summary.chat.chatType == ChatType.GROUP,
+                            asOfOrderIndex = history.maxOfOrNull { it.orderIndex },
+                            afterOrderIndex = resetBoundary,
+                            limit = if (ensembleNarrationEnabled) {
+                                NpcRepository.SOLO_ENSEMBLE_NPC_CONTEXT_LIMIT
+                            } else {
+                                NpcRepository.DEFAULT_NPC_CONTEXT_LIMIT
+                            }
+                        )
+                    } else null,
+                    NaturalSoloCast.rosterContext(naturalRoster)
+                ).joinToString("\n\n").takeIf(String::isNotBlank)
                 val activeLore = appContainer.lorebookRepository?.resolveActiveLore(
                     chatId = chatId,
                     chatHistory = priorHistory,
@@ -251,8 +288,11 @@ fun ContextInspectorScreen(
                         npcBankEnabled = npcBankEnabled,
                         narratorEnabled = settings.narratorEnabled,
                         narratorInstructions = settings.narratorInstructions,
+                        ensembleNarrationEnabled = ensembleNarrationEnabled,
                         knownNpcSpeakers = knownNpcSpeakers,
-                        coLeadNpcNames = coLeadNpcNames
+                        coLeadNpcNames = coLeadNpcNames,
+                        naturalSoloCast = natural,
+                        linkedHistorySpeakers = linkedHistorySpeakers
                     )
                 }
                 val baseline = compileWithMemories(emptyList())

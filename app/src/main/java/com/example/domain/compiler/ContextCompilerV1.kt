@@ -46,9 +46,12 @@ class ContextCompilerV1 {
         ensembleNarrationEnabled: Boolean = narratorEnabled && groupParticipantNames.isEmpty(),
         knownNpcSpeakers: List<StorySpeakerIdentity> = emptyList(),
         coLeadNpcNames: List<String> = emptyList(),
-        coLeadRebalanceActive: Boolean = false
+        coLeadRebalanceActive: Boolean = false,
+        naturalSoloCast: Boolean = false,
+        linkedHistorySpeakers: Map<String, StorySpeakerIdentity> = emptyMap()
     ): List<RoleplayMessage> {
         val messages = mutableListOf<RoleplayMessage>()
+        val natural = naturalSoloCast && ensembleNarrationEnabled && groupParticipantNames.isEmpty()
         // Co-leads can speak in structured Solo replies with Narrator off.
         // Group speaker isolation still forbids speaking as another active AI Character.
         val activeCoLeads = if (ensembleNarrationEnabled && groupParticipantNames.isEmpty()) {
@@ -63,7 +66,7 @@ class ContextCompilerV1 {
         // 1. Core Instruction
         val coreInstruction = buildString {
             append("You are participating in a roleplay.\n")
-            append("Portray the character described below. ")
+            append(if (natural) "Portray the cast in the current scene. " else "Portray the character described below. ")
             if (groupParticipantNames.isNotEmpty()) {
                 append("This is a group roleplay. Respond only as ${character.displayName}. ")
                 append("Never write dialogue, actions, thoughts, feelings, or decisions for any other AI Character. ")
@@ -74,7 +77,8 @@ class ContextCompilerV1 {
             append("Never write dialogue for the user/Persona. ")
             append("Never dictate the user/Persona's actions, thoughts, feelings, decisions, or internal state. ")
             append("React to both spoken dialogue and visible actions from the user/Persona. ")
-            append("Maintain your character's identity, voice, behavior, and established relationship state. ")
+            append(if (natural) "Maintain each speaker's own identity, voice, behavior, and established relationships. "
+                else "Maintain your character's identity, voice, behavior, and established relationship state. ")
             append("Respect previously established conversation events. ")
             if (npcBankEnabled && groupParticipantNames.isEmpty()) {
                 append("Supporting NPCs may speak only when present in the current scene; a remembered name, dossier, or Co-Lead pin does not create presence. ")
@@ -93,7 +97,7 @@ class ContextCompilerV1 {
                         append("Maintain continuity with what has already happened; do not retcon, force equal dialogue, summon absent characters, or take control of the user's Persona. ")
                         append("Do not mention this guidance in the story. ")
                     }
-                } else {
+                } else if (!natural) {
                     append("The primary Character remains the emotional and narrative center. Portray supporting NPCs only when their participation follows naturally from the scene. ")
                 }
             } else {
@@ -105,7 +109,8 @@ class ContextCompilerV1 {
 
             if (ensembleNarrationEnabled && !narratorEnabled) {
                 append("--- SOLO SPEAKER GUIDANCE (NARRATOR OFF) ---\n")
-                append("Let the primary Character and present NPCs speak and act naturally in their own voices. ")
+                append(if (natural) "Let the present cast speak and act naturally in their own voices. "
+                    else "Let the primary Character and present NPCs speak and act naturally in their own voices. ")
                 append("Do not use a separate Narrator, omniscient interjections, standalone narration segments, or play-by-play. ")
                 append("Keep actions, physical detail, dialogue, and emotional reactions inside the appropriate Character or NPC segments. ")
                 append("Someone being mentioned or remembered does not mean they entered the scene. ")
@@ -263,6 +268,16 @@ class ContextCompilerV1 {
                 append("\n\n")
                 append(if (narratorEnabled) StoryOutputParser.OUTPUT_INSTRUCTION else StoryOutputParser.SPEAKER_ONLY_OUTPUT_INSTRUCTION)
             }
+            if (natural) {
+                append("\n\n--- NATURAL CAST: SPEAKER CHOICE ---\n")
+                append("Let who is present, directly addressed, or has a meaningful reason to respond decide who speaks. ")
+                append("No cast member is required to speak on every turn, including ${character.displayName}. ")
+                append("An NPC-only reply is valid. Omit the Character segment entirely when ${character.displayName} has no natural part in this turn. ")
+                append("Do not rotate turns mechanically, force an entrance, or give the anchor an obligatory closing line. ")
+                append("Use the Character segment only for ${character.displayName}; use NPC segments with the matching IDs and names for other cast members. ")
+                append("Keep each character's own knowledge and relationship boundaries. Do not give other cast members the anchor's memories or private knowledge. ")
+                append("Do not write the player's Persona under any label. Stop when it is the player's turn.")
+            }
             if (narratorEnabled) {
                 append("\n\n--- NON-OVERRIDABLE NARRATOR BOUNDARIES ---\n")
                 append("Narrator guidance and all custom, imported, character, and writing-rule instructions are subordinate to these boundaries. Never write dialogue, actions, thoughts, feelings, decisions, or internal state for the user's Persona. Keep narration inside this same response and provider request. ")
@@ -287,7 +302,11 @@ class ContextCompilerV1 {
                 StoryResponseCodec.promptStructuredHistory(
                     content = visibleContent,
                     primaryCharacter = StorySpeakerIdentity(character.characterId, character.displayName),
-                    knownNpcs = knownNpcSpeakers
+                    knownNpcs = knownNpcSpeakers,
+                    historicalCharacter = if (natural) {
+                        StorySpeakerIdentity(message.speakerId, message.speakerDisplayNameSnapshot)
+                    } else null,
+                    linkedHistorySpeakers = linkedHistorySpeakers
                 )
             } else if (!ensembleNarrationEnabled && message.speakerType == SpeakerType.CHARACTER) {
                 // Don't teach a narrator-off response to copy visible "Character (Name):"

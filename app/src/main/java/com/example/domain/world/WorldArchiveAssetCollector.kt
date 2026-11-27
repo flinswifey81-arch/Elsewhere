@@ -110,6 +110,8 @@ class WorldArchiveAssetCollector(
             // deceptively successful World import with missing supporting-cast artwork.
             profileImages(ProfileImageKind.NPC, state.npcDossiers.map { it.npcId },
                 WorldArchiveEntryKind.NPC_PORTRAIT)
+            profileImages(ProfileImageKind.NPC_LIBRARY, state.npcLibraryEntries.map { it.libraryNpcId },
+                WorldArchiveEntryKind.NPC_LIBRARY_PORTRAIT)
             return StagedAssets(sources, stage)
         } catch (error: Exception) {
             stage.deleteRecursively()

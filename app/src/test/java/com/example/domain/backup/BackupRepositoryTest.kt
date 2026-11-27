@@ -115,6 +115,36 @@ class BackupRepositoryTest {
     }
 
     @Test
+    fun encryptedBackupKeepsReusableNpcAndChatCoverWithTheSameRawIdSeparate() = runBlocking {
+        val source = environment()
+        val id = "shared-image-owner-id"
+        source.database.chatDao().insertChat(ChatEntity(chatId = id, displayName = "Night city", chatType = ChatType.SOLO))
+        val bank = NpcLibraryBankEntity(bankId = "fixture-bank", name = "Night city cast")
+        source.database.npcDao().insertLibraryBank(bank)
+        source.database.npcDao().insertLibraryEntries(
+            listOf(NpcLibraryEntryEntity(libraryNpcId = id, bankId = bank.bankId, displayName = "Archivist"))
+        )
+        val originals = mapOf(ProfileImageKind.CHAT_COVER to Color.BLUE, ProfileImageKind.NPC_LIBRARY to Color.YELLOW)
+            .mapValues { (kind, color) ->
+                val file = File(context.cacheDir, "distinct-${kind.name}.png")
+                try {
+                    file.writeBytes(pngBytes(color))
+                    source.profileImages.replaceImage(kind, id, android.net.Uri.fromFile(file)).readBytes()
+                } finally {
+                    file.delete()
+                }
+            }
+        val encrypted = ByteArrayOutputStream()
+        assertEquals(2, source.repository.exportEncrypted(encrypted, PASSPHRASE.toCharArray()).profileImages)
+        originals.keys.forEach { source.profileImages.removeImage(it, id) }
+        val target = environment()
+        target.repository.restoreEncrypted(ByteArrayInputStream(encrypted.toByteArray()), PASSPHRASE.toCharArray())
+        originals.forEach { (kind, bytes) ->
+            assertArrayEquals(bytes, target.profileImages.resolveImage(kind, id)!!.readBytes())
+        }
+    }
+
+    @Test
     fun encryptedBackupRoundTripsStoryMemoryActorKnowledgeAndExplicitWackReturn() = runBlocking {
         val source = environment()
         val chat = ChatEntity(chatId = "story-v16", displayName = "Memory Archive", chatType = ChatType.SOLO)
@@ -729,6 +759,9 @@ class BackupRepositoryTest {
         writeAvatar(ProfileImageKind.CHARACTER, CHARACTER_ID, characterAvatarBytes)
         writeAvatar(ProfileImageKind.PERSONA, PERSONA_ID, personaAvatarBytes)
         writeAvatar(ProfileImageKind.NPC, "npc", npcPortraitBytes)
+        val libraryNpcId = originalPayload.npcLibraryEntries.single().libraryNpcId
+        val libraryPortraitBytes = pngBytes(Color.YELLOW)
+        writeAvatar(ProfileImageKind.NPC_LIBRARY, libraryNpcId, libraryPortraitBytes)
 
         val encrypted = ByteArrayOutputStream()
         val preview = source.repository.exportEncrypted(encrypted, PASSPHRASE.toCharArray())
@@ -737,7 +770,7 @@ class BackupRepositoryTest {
         assertEquals(1, preview.chats)
         assertEquals(2, preview.messages)
         assertEquals(1, preview.messageAttachments)
-        assertEquals(3, preview.profileImages)
+        assertEquals(4, preview.profileImages)
         assertTrue(preview.includesDrafts)
         assertTrue(preview.includesCoopHistory)
 
@@ -756,7 +789,7 @@ class BackupRepositoryTest {
         )
         assertEquals(1, result.restoredChats)
         assertEquals(2, result.restoredMessages)
-        assertEquals(4, result.restoredFiles)
+        assertEquals(5, result.restoredFiles)
         assertTrue(result.safetyBackupAvailable)
 
         val restored = target.readPayload()
@@ -818,6 +851,8 @@ class BackupRepositoryTest {
         assertArrayEquals(attachmentBytes, target.attachments.resolveFile(restoredAttachment)!!.readBytes())
         assertArrayEquals(npcPortraitBytes,
             target.profileImages.resolveImage(ProfileImageKind.NPC, "npc")!!.readBytes())
+        assertArrayEquals(libraryPortraitBytes,
+            target.profileImages.resolveImage(ProfileImageKind.NPC_LIBRARY, libraryNpcId)!!.readBytes())
         assertArrayEquals(
             characterAvatarBytes,
             target.profileImages.resolveImage(ProfileImageKind.CHARACTER, CHARACTER_ID)!!.readBytes()
@@ -828,6 +863,19 @@ class BackupRepositoryTest {
         )
         assertEquals(ThemeMode.DARK, target.appearance.appearanceSettings.first().themeMode)
         assertEquals(ColorPalette.FOREST_GREEN, target.appearance.appearanceSettings.first().colorPalette)
+
+        // A restored master needs to remain usable when added to a new episode.
+        val newChat = com.example.domain.repository.ChatRepository(target.database.chatDao())
+            .createSoloChat("Next episode", PERSONA_ID, CHARACTER_ID)
+        val npcRepository = com.example.domain.repository.NpcRepository(
+            target.database, moshi, AppDataMaintenanceCoordinator.Global, target.profileImages
+        )
+        assertEquals(1, npcRepository.addLibraryNpcsToChat(
+            newChat, restored.npcLibraryBanks.single().bankId
+        ))
+        val addedNpc = npcRepository.getProjectedDossiers(newChat).single()
+        assertArrayEquals(libraryPortraitBytes,
+            target.profileImages.resolveImage(ProfileImageKind.NPC, addedNpc.npcId)!!.readBytes())
     }
 
     @Test

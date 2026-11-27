@@ -24,7 +24,8 @@ data class ChatSettingsEntity(
     @ColumnInfo(defaultValue = "0") val narratorEnabled: Boolean = false,
     @ColumnInfo(defaultValue = "0") val coLeadEnsembleEnabled: Boolean = false,
     @ColumnInfo(defaultValue = "0") val coLeadRebalanceTurnsRemaining: Int = 0,
-    @ColumnInfo(defaultValue = "''") val narratorInstructions: String = ""
+    @ColumnInfo(defaultValue = "''") val narratorInstructions: String = "",
+    @ColumnInfo(defaultValue = "0") val naturalSoloCast: Boolean = false
 )
 
 /** The single application-wide template inherited by newly created chats. */

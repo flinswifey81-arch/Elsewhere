@@ -313,6 +313,11 @@ class BackupRepository internal constructor(
                 result += profileSource(BackupFileKind.NPC_AVATAR, npc.npcId, source, stagingDirectory)
             }
         }
+        payload.npcLibraryEntries.forEach { npc ->
+            profileImageRepository.resolveImage(ProfileImageKind.NPC_LIBRARY, npc.libraryNpcId)?.let { source ->
+                result += profileSource(BackupFileKind.NPC_LIBRARY_AVATAR, npc.libraryNpcId, source, stagingDirectory)
+            }
+        }
         mapOf(
             BackupFileKind.CHAT_COVER to payload.chats.map { it.chatId },
             BackupFileKind.WORLD_COVER to payload.worlds.map { it.worldId },
@@ -600,6 +605,7 @@ class BackupRepository internal constructor(
         BackupFileKind.CHARACTER_AVATAR -> ProfileImageKind.CHARACTER
         BackupFileKind.PERSONA_AVATAR -> ProfileImageKind.PERSONA
         BackupFileKind.NPC_AVATAR -> ProfileImageKind.NPC
+        BackupFileKind.NPC_LIBRARY_AVATAR -> ProfileImageKind.NPC_LIBRARY
         BackupFileKind.CHAT_COVER -> ProfileImageKind.CHAT_COVER
         BackupFileKind.WORLD_COVER -> ProfileImageKind.WORLD_COVER
         BackupFileKind.CAMPAIGN_COVER -> ProfileImageKind.CAMPAIGN_COVER
@@ -724,7 +730,7 @@ class BackupRepository internal constructor(
         val attachmentIds = unique("attachment", payload.messageAttachments.map { it.attachmentId })
         val npcIds = unique("NPC", payload.npcDossiers.map { it.npcId })
         val npcLibraryBankIds = unique("NPC library bank", payload.npcLibraryBanks.map { it.bankId })
-        unique("NPC library entry", payload.npcLibraryEntries.map { it.libraryNpcId })
+        val npcLibraryIds = unique("NPC library entry", payload.npcLibraryEntries.map { it.libraryNpcId })
         unique("engine defaults", payload.engineDefaults.map { it.defaultsId })
         if (payload.engineDefaults.size > 1 || payload.engineDefaults.any { it.defaultsId != EngineDefaultsEntity.GLOBAL_ID }) {
             throw BackupValidationException("Backup contains invalid engine defaults.")
@@ -1008,6 +1014,14 @@ class BackupRepository internal constructor(
                 throw BackupValidationException("NPC portrait metadata is invalid.")
             }
         }
+        manifest.files.filter { it.kind == BackupFileKind.NPC_LIBRARY_AVATAR }.forEach {
+            if (
+                it.ownerId !in npcLibraryIds || it.mimeType != "image/png" ||
+                it.byteSize !in 1..ProfileImageRepository.MAX_STORED_BYTES
+            ) {
+                throw BackupValidationException("NPC Library portrait metadata is invalid.")
+            }
+        }
         val coveringOwners = mapOf(BackupFileKind.CHAT_COVER to chatIds, BackupFileKind.WORLD_COVER to worldIds,
             BackupFileKind.CAMPAIGN_COVER to campaignIds)
         manifest.files.forEach { file ->
@@ -1057,7 +1071,7 @@ class BackupRepository internal constructor(
                 BackupFileKind.SCENARIO_AVATAR,
                 BackupFileKind.CHARACTER_AVATAR,
                 BackupFileKind.PERSONA_AVATAR,
-                BackupFileKind.NPC_AVATAR, BackupFileKind.CHAT_COVER,
+                BackupFileKind.NPC_AVATAR, BackupFileKind.NPC_LIBRARY_AVATAR, BackupFileKind.CHAT_COVER,
                 BackupFileKind.WORLD_COVER, BackupFileKind.CAMPAIGN_COVER -> {
                     if (
                         detectedMime != "image/png" ||

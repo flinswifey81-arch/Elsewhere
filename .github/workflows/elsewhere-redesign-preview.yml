@@ -30,7 +30,12 @@ jobs:
             --tests 'com.example.redesign.*' --tests 'com.example.phone.*' \
             --tests 'com.example.domain.backup.BackupRepositoryTest.encryptedBackupPreservesChatWorldAndCampaignCoversIndependently' \
             --tests 'com.example.ProfileImageRepositoryTest' --tests 'com.example.SoloGreetingPickerUiTest' \
-            --tests 'com.example.ManualCharacterTest' --tests 'com.example.ManualPersonaTest'
+            --tests 'com.example.ManualCharacterTest' --tests 'com.example.ManualPersonaTest' \
+            --tests 'com.example.NpcLibraryPortraitTest' --tests 'com.example.SoloSpotlightControlsTest' \
+            --tests 'com.example.AppDatabaseMigrationTest.migrationFrom26To27KeepsExistingSettingsAndDefaultsToSpotlight' \
+            --tests 'com.example.ChatDetailGenerationTest.naturalSoloCastAcceptsNpcOnlyReplyWithoutReassigningPriorSpotlightHistory' \
+            --tests 'com.example.WorldArchiveAdditiveRestorerTest.npcPortraitSurvivesAsNewDossierImageWithoutTouchingOtherArt' \
+            --tests 'com.example.domain.backup.BackupRepositoryTest'
       - name: Print failing preview cases
         if: failure()
         run: |

@@ -1,5 +1,7 @@
 package com.example.domain.world
 
+import com.example.domain.repository.NPC_LIBRARY_PORTRAIT_LINK
+
 import com.example.data.model.*
 import com.example.domain.memory.StoryActorKind
 import com.example.domain.memory.StoryMemoryEligibilityPolicy
@@ -71,7 +73,7 @@ object WorldArchiveSemanticRemapper {
         }
         source.npcDossiers.forEach {
             checked(it.extensionFieldsJson, "NPC extension",
-                setOf("_elsewhere_linked_character_id"))
+                setOf("_elsewhere_linked_character_id", NPC_LIBRARY_PORTRAIT_LINK))
         }
         source.npcLibraryEntries.forEach {
             checked(it.extensionFieldsJson, "NPC Library extension", emptySet())
@@ -108,7 +110,16 @@ object WorldArchiveSemanticRemapper {
         }
         fun npcExtension(row: NpcDossierEntity): String? {
             val fields = checked(row.extensionFieldsJson, "NPC extension",
-                setOf("_elsewhere_linked_character_id")).toMutableMap()
+                setOf("_elsewhere_linked_character_id", NPC_LIBRARY_PORTRAIT_LINK)).toMutableMap()
+            val libraryPortrait = fields.remove(NPC_LIBRARY_PORTRAIT_LINK)
+            if (libraryPortrait != null) {
+                require(libraryPortrait is String) { "Linked NPC Library portrait must be a stable ID string." }
+                // A selected World need not include the original Library bank. Detached
+                // chat copies retain their own portrait without binding to another World.
+                if (source.npcLibraryEntries.any { it.libraryNpcId == libraryPortrait }) {
+                    fields[NPC_LIBRARY_PORTRAIT_LINK] = id(WorldArchiveIdKind.NPC_LIBRARY_ENTRY, libraryPortrait)
+                }
+            }
             if ("_elsewhere_linked_character_id" in fields) {
                 val linked = fields["_elsewhere_linked_character_id"] as? String
                     ?: throw IllegalArgumentException(
