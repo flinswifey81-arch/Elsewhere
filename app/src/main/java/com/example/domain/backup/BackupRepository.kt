@@ -55,6 +55,7 @@ class BackupRepository internal constructor(
         }
     )
     private val coopCodec = CoopCodec(moshi)
+    private val collectionDao = database.identityCollectionDao()
     private val backupDao = database.backupDao()
     private val operationMutex = Mutex()
     private val safetyDirectory = File(context.filesDir, SAFETY_DIRECTORY)
@@ -178,6 +179,9 @@ class BackupRepository internal constructor(
                 scenarios = database.scenarioDao().getAll(),
                 scenarioSessions = database.scenarioDao().sessions(),
                 personas = backupDao.getPersonas(),
+                identityCollections = collectionDao.collections(),
+                collectionCharacters = collectionDao.characters(),
+                collectionPersonas = collectionDao.personas(),
                 chats = backupDao.getChats(),
                 chatParticipants = backupDao.getChatParticipants(),
                 chatPersonaParticipants = backupDao.getChatPersonaParticipants(),
@@ -529,11 +533,15 @@ class BackupRepository internal constructor(
         backupDao.deleteChatParticipants()
         backupDao.deleteChatPersonaParticipants()
         backupDao.deleteChats()
+        collectionDao.clear()
         backupDao.deleteCharacters()
         backupDao.deletePersonas()
 
         if (payload.characters.isNotEmpty()) backupDao.insertCharacters(payload.characters)
         if (payload.personas.isNotEmpty()) backupDao.insertPersonas(payload.personas)
+        if (payload.identityCollections.isNotEmpty()) collectionDao.saveCollections(payload.identityCollections)
+        if (payload.collectionCharacters.isNotEmpty()) collectionDao.addCharacters(payload.collectionCharacters)
+        if (payload.collectionPersonas.isNotEmpty()) collectionDao.addPersonas(payload.collectionPersonas)
         if (payload.chats.isNotEmpty()) backupDao.insertChats(payload.chats)
         payload.scenarios.forEach { database.scenarioDao().save(it) }
         payload.scenarioSessions.forEach { database.scenarioDao().insertSession(it) }
@@ -647,6 +655,9 @@ class BackupRepository internal constructor(
             payload.scenarioSessions.size,
             payload.characters.size,
             payload.personas.size,
+            payload.identityCollections.size,
+            payload.collectionCharacters.size,
+            payload.collectionPersonas.size,
             payload.chats.size,
             payload.chatParticipants.size,
             payload.chatPersonaParticipants.size,
@@ -721,6 +732,17 @@ class BackupRepository internal constructor(
         }
         val characterIds = unique("Character", payload.characters.map { it.characterId })
         val personaIds = unique("Persona", payload.personas.map { it.personaId })
+        val collectionIds = unique("collection", payload.identityCollections.map { it.collectionId })
+        val labels = payload.identityCollections.map { it.label }
+        if (labels.any { it != it.trim() || it.length !in 1..80 }) {
+            throw BackupValidationException("Backup contains invalid collection names.")
+        }
+        if (payload.collectionCharacters.distinct().size != payload.collectionCharacters.size ||
+            payload.collectionPersonas.distinct().size != payload.collectionPersonas.size ||
+            payload.collectionCharacters.any { it.collectionId !in collectionIds || it.characterId !in characterIds } ||
+            payload.collectionPersonas.any { it.collectionId !in collectionIds || it.personaId !in personaIds }) {
+            throw BackupValidationException("Backup contains invalid collection memberships.")
+        }
         val chatIds = unique("chat", payload.chats.map { it.chatId })
         val messageIds = unique("message", payload.messages.map { it.messageId })
         val lorebookIds = unique("Lorebook", payload.lorebooks.map { it.lorebookId })

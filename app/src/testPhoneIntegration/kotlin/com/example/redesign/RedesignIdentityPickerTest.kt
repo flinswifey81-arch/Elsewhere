@@ -122,6 +122,41 @@ class RedesignIdentityPickerTest {
         image.delete()
     }
 
+    @Test fun filtersSameNameCharactersUsingTheLibraryCollection() {
+        val app = DefaultAppContainer(RuntimeEnvironment.getApplication())
+        val persona = runBlocking {
+            fun json(id: String, label: String) = """
+                {"schema_version":1,"character_id":"$id","display_name":"$label","character_name":"Alex"}
+            """.trimIndent()
+            app.characterRepository.importCharacterJson(json("alex-stage", "Alex on Stage"))
+            app.characterRepository.importCharacterJson(json("alex-garage", "Alex in Garage"))
+            app.personaRepository.createManualPersona(ManualPersonaFields(name = "Rin"))
+        }
+        compose.setContent { AppTheme { ElsewhereApp(container = app) } }
+        compose.onNodeWithTag("bottom_nav_library").performClick()
+        awaitTag("character_item_alex-garage")
+        compose.onNodeWithText("New collection").performClick()
+        compose.onNodeWithText("Collection name").performTextInput("After Hours")
+        compose.onNodeWithTag("collection_member_alex-garage").performClick()
+        compose.onNodeWithText("Save collection").performClick()
+        awaitTag("collection_filter")
+        compose.onNodeWithTag("bottom_nav_create").performClick()
+        compose.onNodeWithTag("create_solo_hub").performClick()
+        awaitTag("picker_identity_$persona")
+        compose.onNodeWithTag("picker_identity_$persona").performClick()
+        compose.onNodeWithText("Next").performClick()
+        awaitTag("picker_identity_alex-stage")
+        awaitTag("collection_filter")
+        compose.onNodeWithTag("collection_filter").performClick()
+        compose.onNodeWithTag("collection_option_After Hours").performClick()
+        compose.onNodeWithTag("picker_identity_alex-stage").assertDoesNotExist()
+        compose.onNodeWithTag("picker_identity_alex-garage").performClick().assertIsSelected()
+        compose.onNodeWithTag("collection_filter").performClick()
+        compose.onNodeWithText("All collections").performClick()
+        compose.onNodeWithTag("picker_identity_alex-stage").assertExists()
+        compose.onNodeWithTag("picker_identity_alex-garage").assertIsSelected()
+    }
+
     private fun awaitTag(tag: String) {
         compose.waitUntil(10_000) { compose.onAllNodesWithTag(tag).fetchSemanticsNodes().isNotEmpty() }
     }

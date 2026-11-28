@@ -32,6 +32,33 @@ class AppDatabaseMigrationTest {
     }
 
     @Test
+    fun migrationFrom27To28OpensExistingRoomDatabaseAndKeepsStory() = runBlocking {
+        // v28 differs from v27 only by three empty tables. Recreate the v27 layout,
+        // then reopen through Room so its generated schema validator runs.
+        val room = Room.databaseBuilder(context, AppDatabase::class.java, databaseName).build()
+        val chat = com.example.data.model.ChatEntity(
+            chatId = "keep", displayName = "Existing story", chatType = com.example.data.model.ChatType.SOLO
+        )
+        try {
+            room.chatDao().insertChat(chat)
+            val db = room.openHelper.writableDatabase
+            db.execSQL("DROP TABLE identity_collection_characters")
+            db.execSQL("DROP TABLE identity_collection_personas")
+            db.execSQL("DROP TABLE identity_collections")
+            db.version = 27
+        } finally { room.close() }
+        val upgraded = Room.databaseBuilder(context, AppDatabase::class.java, databaseName)
+            .addMigrations(AppDatabase.MIGRATION_27_28).build()
+        try {
+            assertEquals(28, upgraded.openHelper.writableDatabase.version)
+            assertEquals(chat, upgraded.chatDao().getChatById(chat.chatId))
+            assertTrue(upgraded.identityCollectionDao().collections().isEmpty())
+            assertTrue(upgraded.identityCollectionDao().characters().isEmpty())
+            assertTrue(upgraded.identityCollectionDao().personas().isEmpty())
+        } finally { upgraded.close() }
+    }
+
+    @Test
     fun migrationFrom26To27KeepsExistingSettingsAndDefaultsToSpotlight() {
         val helper = FrameworkSQLiteOpenHelperFactory().create(
             SupportSQLiteOpenHelper.Configuration.builder(context).name(databaseName)
@@ -497,7 +524,8 @@ class AppDatabaseMigrationTest {
                 AppDatabase.MIGRATION_23_24,
                 AppDatabase.MIGRATION_24_25,
                 AppDatabase.MIGRATION_25_26,
-                AppDatabase.MIGRATION_26_27
+                AppDatabase.MIGRATION_26_27,
+                AppDatabase.MIGRATION_27_28
             )
             .allowMainThreadQueries()
             .build()

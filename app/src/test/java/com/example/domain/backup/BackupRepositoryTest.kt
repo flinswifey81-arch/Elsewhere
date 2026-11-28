@@ -80,6 +80,42 @@ class BackupRepositoryTest {
     }
 
     @Test
+    fun encryptedBackupRestoresTypedCollectionMembershipsWithoutChangingProfileIdentity() = runBlocking {
+        val source = environment()
+        val shared = "same-profile-id"
+        source.database.characterDao().insertCharacter(character(shared, "Alex"))
+        source.database.characterDao().insertCharacter(character("other", "Alex"))
+        source.database.personaDao().insertPersona(PersonaEntity(
+            personaId = shared, displayName = "Alex · Player", personaName = "Alex", aliases = emptyList(),
+            importSchemaVersion = 1, identityJson = null, appearanceJson = null, personalityJson = null,
+            roleplayProfileJson = null, backgroundJson = null, worldContextJson = null, privateNotesJson = null,
+            extensionFieldsJson = null
+        ))
+        val repository = com.example.domain.repository.IdentityCollectionRepository(source.database)
+        repository.save(null, "After Hours", CollectionIdentityKind.CHARACTER, setOf(shared), emptySet())
+        val id = repository.observe().first().single().collection.collectionId
+        repository.save(id, "After Hours", CollectionIdentityKind.PERSONA, setOf(shared), emptySet())
+        repository.save(null, "Studio", CollectionIdentityKind.CHARACTER, setOf(shared, "other"), emptySet())
+        source.database.characterDao().insertCharacter(character(shared, "Alex · Garage"))
+        val expected = repository.observe().first()
+        assertEquals(2, expected.count { it.contains(CollectionIdentityKind.CHARACTER, shared) })
+        assertEquals(1, expected.count { it.contains(CollectionIdentityKind.PERSONA, shared) })
+
+        val encrypted = ByteArrayOutputStream()
+        source.repository.exportEncrypted(encrypted, PASSPHRASE.toCharArray())
+        val target = environment()
+        target.repository.restoreEncrypted(ByteArrayInputStream(encrypted.toByteArray()), PASSPHRASE.toCharArray())
+        val restored = com.example.domain.repository.IdentityCollectionRepository(target.database)
+        assertEquals(expected, restored.observe().first())
+        restored.delete(id)
+        assertEquals("Alex · Garage", target.database.characterDao().getCharacterById(shared)?.displayName)
+        assertEquals("Alex", target.database.personaDao().getPersonaById(shared)?.personaName)
+        target.database.characterDao().deleteCharacterById(shared)
+        assertEquals(listOf("other"), restored.observe().first().single().characters.map { it.characterId })
+        assertNotNull(target.database.personaDao().getPersonaById(shared))
+    }
+
+    @Test
     fun encryptedBackupPreservesChatWorldAndCampaignCoversIndependently() = runBlocking {
         val from=environment()
         val world=com.example.domain.repository.WorldRepository(from.database).createWorld("Cover test")

@@ -12,7 +12,8 @@ interface CharacterDao {
     @Query("SELECT * FROM characters WHERE characterId = :id")
     suspend fun getCharacterById(id: String): CharacterEntity?
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    // An existing identity keeps its collection memberships when replaced by JSON.
+    @Upsert
     suspend fun insertCharacter(character: CharacterEntity)
 
     /** New identities must never delete/recreate an existing Character row. */

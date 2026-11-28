@@ -12,7 +12,8 @@ interface PersonaDao {
     @Query("SELECT * FROM personas WHERE personaId = :id")
     suspend fun getPersonaById(id: String): PersonaEntity?
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    // An existing identity keeps its collection memberships when replaced by JSON.
+    @Upsert
     suspend fun insertPersona(persona: PersonaEntity)
 
     @Update

@@ -41,13 +41,23 @@ fun CharactersScreen(
     profileImageRepository: ProfileImageRepository? = null,
     modifier: Modifier = Modifier,
     libraryHeader: (@Composable () -> Unit)? = null,
+    collectionsRepository: com.example.domain.repository.IdentityCollectionRepository? = null,
     onCharacterSelected: (String) -> Unit
 ) {
     val characters by repository.getAllCharacters().collectAsState(initial = emptyList())
     var query by rememberSaveable { mutableStateOf("") }
     var gallery by rememberSaveable { mutableStateOf(true) }
-    val visible = if (libraryHeader == null || query.isBlank()) characters
-        else remember(characters, query) { characters.filter { query.matchesLibraryQuery(it.displayName, it.characterName, *it.aliases.toTypedArray()) } }
+    val collections = observeCollections(collectionsRepository)
+    val collectionKind = com.example.data.model.CollectionIdentityKind.CHARACTER
+    var collectionId by rememberSaveable { mutableStateOf<String?>(null) }
+    val collection = collections.firstOrNull { it.collection.collectionId == collectionId }
+    val visible = if (libraryHeader == null) characters else remember(characters, query, collection, collections) {
+        characters.filter {
+            (collection == null || collection.contains(collectionKind, it.characterId)) &&
+                query.matchesLibraryQuery(it.displayName, it.characterName, *it.aliases.toTypedArray(),
+                    *collections.labelsFor(collectionKind, it.characterId).toTypedArray())
+        }
+    }
     val coroutineScope = rememberCoroutineScope()
     
     var showImportOptions by remember { mutableStateOf(false) }
@@ -193,7 +203,10 @@ fun CharactersScreen(
                 libraryHeader()
                 LibrarySearch(query, { query = it }, "Search characters", "library_character_search")
                 LibraryNewAndImport("Character", onNew = { editingCharacter = null; showEditor = true }, onImport = { showImportOptions = true })
-                if (characters.isNotEmpty()) {
+                if (collectionsRepository != null) {
+                    LibraryCollectionActions(collections, collectionsRepository, collectionId, { collectionId = it },
+                        collectionKind, characters.map { it.storyIdentity() }, profileImageRepository, gallery, { gallery = !gallery })
+                } else if (characters.isNotEmpty()) {
                     TextButton(onClick = { gallery = !gallery }, modifier = Modifier.padding(start = 8.dp)) {
                         Text(if (gallery) "List view" else "Gallery view")
                     }
@@ -216,7 +229,7 @@ fun CharactersScreen(
         modifier = modifier.testTag("characters_screen"),
         containerColor = MaterialTheme.colorScheme.background
     ) { padding ->
-        if (visible.isEmpty() && query.isNotBlank() && libraryHeader != null) {
+        if (visible.isEmpty() && (query.isNotBlank() || collection != null) && libraryHeader != null) {
             Box(Modifier.fillMaxSize().padding(padding).padding(16.dp), contentAlignment = Alignment.Center) {
                 Text("No matching characters.")
             }
@@ -252,7 +265,7 @@ fun CharactersScreen(
             }
         } else if (libraryHeader != null && gallery) {
             LibraryIdentityGallery(
-                identities = visible.map { LibraryIdentity(it.characterId, it.displayName, it.characterName, it.isArchived) },
+                identities = visible.map { LibraryIdentity(it.characterId, it.displayName, it.characterName, it.isArchived, collections.labelsFor(collectionKind, it.characterId)) },
                 portraits = profileImageRepository, kind = ProfileImageKind.CHARACTER, type = "character",
                 modifier = Modifier.fillMaxSize().padding(padding).testTag("character_gallery"),
                 onEdit = { id -> visible.firstOrNull { it.characterId == id }?.let {
@@ -322,6 +335,8 @@ fun CharactersScreen(
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
+                                val labels = collections.labelsFor(collectionKind, character.characterId)
+                                if (labels.isNotEmpty()) CollectionLabels(labels)
                                 if (character.aliases.isNotEmpty()) {
                                     Spacer(modifier = Modifier.height(4.dp))
                                     Text(

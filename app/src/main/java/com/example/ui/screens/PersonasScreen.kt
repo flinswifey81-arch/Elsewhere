@@ -41,13 +41,23 @@ fun PersonasScreen(
     profileImageRepository: ProfileImageRepository? = null,
     modifier: Modifier = Modifier,
     libraryHeader: (@Composable () -> Unit)? = null,
+    collectionsRepository: com.example.domain.repository.IdentityCollectionRepository? = null,
     onPersonaSelected: (String) -> Unit
 ) {
     val personas by repository.getAllPersonas().collectAsState(initial = emptyList())
     var query by rememberSaveable { mutableStateOf("") }
     var gallery by rememberSaveable { mutableStateOf(true) }
-    val visible = if (libraryHeader == null || query.isBlank()) personas
-        else remember(personas, query) { personas.filter { query.matchesLibraryQuery(it.displayName, it.personaName, *it.aliases.toTypedArray()) } }
+    val collections = observeCollections(collectionsRepository)
+    val collectionKind = com.example.data.model.CollectionIdentityKind.PERSONA
+    var collectionId by rememberSaveable { mutableStateOf<String?>(null) }
+    val collection = collections.firstOrNull { it.collection.collectionId == collectionId }
+    val visible = if (libraryHeader == null) personas else remember(personas, query, collection, collections) {
+        personas.filter {
+            (collection == null || collection.contains(collectionKind, it.personaId)) &&
+                query.matchesLibraryQuery(it.displayName, it.personaName, *it.aliases.toTypedArray(),
+                    *collections.labelsFor(collectionKind, it.personaId).toTypedArray())
+        }
+    }
     val coroutineScope = rememberCoroutineScope()
     
     var showImportOptions by remember { mutableStateOf(false) }
@@ -192,7 +202,10 @@ fun PersonasScreen(
                 libraryHeader()
                 LibrarySearch(query, { query = it }, "Search personas", "library_persona_search")
                 LibraryNewAndImport("Persona", onNew = { editingPersona = null; showEditor = true }, onImport = { showImportOptions = true })
-                if (personas.isNotEmpty()) {
+                if (collectionsRepository != null) {
+                    LibraryCollectionActions(collections, collectionsRepository, collectionId, { collectionId = it },
+                        collectionKind, personas.map { it.storyIdentity() }, profileImageRepository, gallery, { gallery = !gallery })
+                } else if (personas.isNotEmpty()) {
                     TextButton(onClick = { gallery = !gallery }, modifier = Modifier.padding(start = 8.dp)) {
                         Text(if (gallery) "List view" else "Gallery view")
                     }
@@ -215,7 +228,7 @@ fun PersonasScreen(
         modifier = modifier.testTag("personas_screen"),
         containerColor = MaterialTheme.colorScheme.background
     ) { padding ->
-        if (visible.isEmpty() && query.isNotBlank() && libraryHeader != null) {
+        if (visible.isEmpty() && (query.isNotBlank() || collection != null) && libraryHeader != null) {
             Box(Modifier.fillMaxSize().padding(padding).padding(16.dp), contentAlignment = Alignment.Center) {
                 Text("No matching personas.")
             }
@@ -257,7 +270,7 @@ fun PersonasScreen(
             }
         } else if (libraryHeader != null && gallery) {
             LibraryIdentityGallery(
-                identities = visible.map { LibraryIdentity(it.personaId, it.displayName, it.personaName, it.isArchived) },
+                identities = visible.map { LibraryIdentity(it.personaId, it.displayName, it.personaName, it.isArchived, collections.labelsFor(collectionKind, it.personaId)) },
                 portraits = profileImageRepository, kind = ProfileImageKind.PERSONA, type = "persona",
                 modifier = Modifier.fillMaxSize().padding(padding).testTag("persona_gallery"),
                 onEdit = { id -> visible.firstOrNull { it.personaId == id }?.let {
@@ -327,6 +340,8 @@ fun PersonasScreen(
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
+                                val labels = collections.labelsFor(collectionKind, persona.personaId)
+                                if (labels.isNotEmpty()) CollectionLabels(labels)
                                 if (persona.aliases.isNotEmpty()) {
                                     Spacer(modifier = Modifier.height(4.dp))
                                     Text(

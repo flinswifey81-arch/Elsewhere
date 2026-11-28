@@ -32,6 +32,10 @@ fun ScenariosScreen(
     var editingId by rememberSaveable { mutableStateOf<String?>(null) }
     var draftJson by rememberSaveable { mutableStateOf(ScenarioCodec.encode(ScenarioDefinition())) }
     val pickerImages = container.profileImageRepository.takeIf { com.example.BuildConfig.BUILD_TYPE == "phoneIntegration" }
+    val collections = observeCollections(container.identityCollections)
+    val personaKind = com.example.data.model.CollectionIdentityKind.PERSONA
+    var collectionId by rememberSaveable { mutableStateOf<String?>(null) }
+    val personaCollection = collections.firstOrNull { it.collection.collectionId == collectionId }
     var editingPersonaPortrait by rememberSaveable { mutableStateOf<String?>(null) }
     var startingId by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedPersonaId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -89,7 +93,7 @@ fun ScenariosScreen(
                         if (d.publicDescription.isNotBlank()) Text(d.publicDescription)
                         if (d.tags.isNotBlank()) Text(d.tags, style = MaterialTheme.typography.labelMedium)
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button(onClick = { startingId = scenario.scenarioId; selectedPersonaId = null; selectedWorldId = initialWorldId; error = null }) { Text("New playthrough") }
+                            Button(onClick = { startingId = scenario.scenarioId; selectedPersonaId = null; collectionId = null; selectedWorldId = initialWorldId; error = null }) { Text("New playthrough") }
                             TextButton(onClick = { editingId = scenario.scenarioId; draftJson = scenario.definitionJson; error = null }) { Text("Edit") }
                         }
                     }
@@ -113,15 +117,24 @@ fun ScenariosScreen(
                 Text("The selected World contributes setting, cast and accepted continuity to narration.",
                     style = MaterialTheme.typography.bodySmall)
             }
-            LazyColumn(Modifier.heightIn(max = 320.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(personas, key = { it.personaId }) { persona ->
+            if (pickerImages != null) CollectionFilter(collections, collectionId, { collectionId = it })
+            val visiblePersonas = personas.filter { personaCollection?.contains(personaKind, it.personaId) != false }
+            if (personas.isNotEmpty() && visiblePersonas.isEmpty()) Text("No personas in this collection.")
+            LazyColumn(Modifier.heightIn(max = if (collections.isEmpty()) 320.dp else 230.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(visiblePersonas, key = { it.personaId }) { persona ->
                     if (pickerImages == null) {
                         SelectionCard(persona.displayName, selectedPersonaId == persona.personaId) { selectedPersonaId = persona.personaId }
                     } else {
                         StoryIdentityCard(persona.storyIdentity(), if (selectedPersonaId == persona.personaId) 0 else -1,
                             multiple = false, repository = pickerImages, kind = ProfileImageKind.PERSONA, grid = false,
-                            onSelect = { selectedPersonaId = persona.personaId }, onEdit = { editingPersonaPortrait = persona.personaId })
+                            onSelect = { selectedPersonaId = persona.personaId }, onEdit = { editingPersonaPortrait = persona.personaId },
+                            collectionLabels = collections.labelsFor(personaKind, persona.personaId))
                     }
+                }
+            }
+            if (personaCollection != null && selectedPersonaId != null && visiblePersonas.none { it.personaId == selectedPersonaId }) {
+                personas.firstOrNull { it.personaId == selectedPersonaId }?.let {
+                    Text("Selected: ${it.displayName}", style = MaterialTheme.typography.labelLarge)
                 }
             }
             if (personas.isEmpty()) TextButton(onClick = onPersonas) { Text("Create or import a persona") }

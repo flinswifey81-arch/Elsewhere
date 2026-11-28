@@ -19,6 +19,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
+import com.example.data.model.CollectionIdentityKind
+import com.example.data.model.IdentityCollection
 import com.example.data.model.CharacterEntity
 import com.example.data.model.PersonaEntity
 import com.example.domain.repository.ProfileImageKind
@@ -40,16 +42,21 @@ internal fun StoryIdentityPicker(
     repository: ProfileImageRepository,
     kind: ProfileImageKind,
     multiple: Boolean = false,
+    collections: List<IdentityCollection> = emptyList(),
     onSelect: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var query by rememberSaveable { mutableStateOf("") }
     var grid by rememberSaveable { mutableStateOf(false) }
     var editingId by rememberSaveable { mutableStateOf<String?>(null) }
-    val visible = remember(entries, query) {
-        val terms = query.trim().split(Regex("\\s+")).filter { it.isNotBlank() }
+    var collectionId by rememberSaveable { mutableStateOf<String?>(null) }
+    val collectionKind = if (kind == ProfileImageKind.CHARACTER) CollectionIdentityKind.CHARACTER else CollectionIdentityKind.PERSONA
+    val active = collections.firstOrNull { it.collection.collectionId == collectionId }
+    val visible = remember(entries, query, active, collections) {
         entries.filter { entry ->
-            terms.all { term -> (listOf(entry.name, entry.label) + entry.aliases).any { it.contains(term, ignoreCase = true) } }
+            (active == null || active.contains(collectionKind, entry.id)) &&
+                query.matchesLibraryQuery(entry.name, entry.label, *entry.aliases.toTypedArray(),
+                    *collections.labelsFor(collectionKind, entry.id).toTypedArray())
         }
     }
     Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -59,14 +66,16 @@ internal fun StoryIdentityPicker(
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             FilterChip(selected = !grid, onClick = { grid = false }, label = { Text("List") })
             FilterChip(selected = grid, onClick = { grid = true }, label = { Text("Grid") })
-            Text("${visible.size} shown", style = MaterialTheme.typography.labelMedium)
+            if (collections.isNotEmpty()) CollectionFilter(collections, collectionId, { collectionId = it }, Modifier.weight(1f))
+            else Text("${visible.size} shown", style = MaterialTheme.typography.labelMedium)
         }
         val list: @Composable (StoryIdentity) -> Unit = { entry ->
             StoryIdentityCard(entry, selectedIds.indexOf(entry.id), multiple, repository, kind, grid,
-                onSelect = { onSelect(entry.id) }, onEdit = { editingId = entry.id })
+                onSelect = { onSelect(entry.id) }, onEdit = { editingId = entry.id },
+                collectionLabels = collections.labelsFor(collectionKind, entry.id))
         }
         if (visible.isEmpty()) {
-            Text("No profiles match your search.", modifier = Modifier.weight(1f))
+            Text(if (active == null) "No profiles match your search." else "No matching profiles in this collection.", modifier = Modifier.weight(1f))
         } else if (grid) {
             LazyVerticalGrid(columns = GridCells.Adaptive(144.dp), modifier = Modifier.weight(1f),
                 horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -114,7 +123,8 @@ internal fun StoryIdentityCard(
     kind: ProfileImageKind,
     grid: Boolean,
     onSelect: () -> Unit,
-    onEdit: () -> Unit
+    onEdit: () -> Unit,
+    collectionLabels: List<String> = emptyList()
 ) {
     val isSelected = index >= 0
     val portrait: @Composable () -> Unit = {
@@ -124,6 +134,7 @@ internal fun StoryIdentityCard(
     val labels: @Composable () -> Unit = {
         Text(entry.name, style = MaterialTheme.typography.titleMedium)
         if (entry.label != entry.name) Text(entry.label, style = MaterialTheme.typography.bodyMedium)
+        if (collectionLabels.isNotEmpty()) CollectionLabels(collectionLabels)
         if (isSelected) Text(if (multiple) "Selected · ${index + 1}" else "Selected", style = MaterialTheme.typography.labelMedium)
     }
     val edit: @Composable () -> Unit = {

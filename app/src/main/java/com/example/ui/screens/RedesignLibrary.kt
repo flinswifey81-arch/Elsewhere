@@ -69,11 +69,11 @@ internal fun RedesignLibrary(container: AppContainer, onChatNpcs: () -> Unit) {
         when (tab) {
             LibraryTab.CHARACTERS -> CharactersScreen(
                 repository = container.characterRepository, profileImageRepository = container.profileImageRepository,
-                libraryHeader = header, onCharacterSelected = {}
+                libraryHeader = header, collectionsRepository = container.identityCollections, onCharacterSelected = {}
             )
             LibraryTab.PERSONAS -> PersonasScreen(
                 repository = container.personaRepository, profileImageRepository = container.profileImageRepository,
-                libraryHeader = header, onPersonaSelected = {}
+                libraryHeader = header, collectionsRepository = container.identityCollections, onPersonaSelected = {}
             )
             LibraryTab.LOREBOOKS -> container.lorebookRepository?.let {
                 LorebooksScreen(repository = it, libraryHeader = header)
@@ -120,7 +120,8 @@ internal fun String.matchesLibraryQuery(vararg fields: String): Boolean {
     return words.all { token -> fields.any { it.contains(token, ignoreCase = true) } }
 }
 
-internal data class LibraryIdentity(val id: String, val label: String, val name: String, val archived: Boolean)
+internal data class LibraryIdentity(val id: String, val label: String, val name: String, val archived: Boolean,
+    val collectionLabels: List<String> = emptyList())
 
 @Composable
 internal fun LibraryIdentityGallery(
@@ -165,6 +166,7 @@ internal fun LibraryIdentityGallery(
                 Column(Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, bottom = 12.dp)) {
                     Text(identity.label, style = MaterialTheme.typography.titleMedium)
                     if (identity.label != identity.name) Text(identity.name, style = MaterialTheme.typography.bodySmall)
+                    if (identity.collectionLabels.isNotEmpty()) CollectionLabels(identity.collectionLabels)
                     if (identity.archived) Text("Archived", style = MaterialTheme.typography.labelSmall)
                 }
             }

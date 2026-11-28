@@ -7,7 +7,7 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.example.data.model.*
 
-const val APP_DATABASE_VERSION = 27
+const val APP_DATABASE_VERSION = 28
 
 @Database(
     entities = [
@@ -54,7 +54,10 @@ const val APP_DATABASE_VERSION = 27
         CampaignChapterEntity::class,
         CampaignJournalEntryEntity::class,
         CampaignContinuityItemEntity::class,
-        CampaignMemoryShareEntity::class
+        CampaignMemoryShareEntity::class,
+        IdentityCollectionEntity::class,
+        IdentityCollectionCharacterEntity::class,
+        IdentityCollectionPersonaEntity::class
     ],
     version = APP_DATABASE_VERSION,
     exportSchema = false
@@ -76,7 +79,34 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun worldDao(): WorldDao
     abstract fun campaignDao(): CampaignDao
 
+    abstract fun identityCollectionDao(): IdentityCollectionDao
+
     companion object {
+        /** Local Library organization only: neither profiles nor stories are rewritten. */
+        val MIGRATION_27_28 = object : Migration(27, 28) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE TABLE identity_collections (collectionId TEXT NOT NULL PRIMARY KEY, label TEXT NOT NULL)")
+                db.execSQL("""
+                    CREATE TABLE identity_collection_characters (
+                        collectionId TEXT NOT NULL, characterId TEXT NOT NULL,
+                        PRIMARY KEY(collectionId, characterId),
+                        FOREIGN KEY(collectionId) REFERENCES identity_collections(collectionId) ON UPDATE NO ACTION ON DELETE CASCADE,
+                        FOREIGN KEY(characterId) REFERENCES characters(characterId) ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE INDEX index_identity_collection_characters_characterId ON identity_collection_characters(characterId)")
+                db.execSQL("""
+                    CREATE TABLE identity_collection_personas (
+                        collectionId TEXT NOT NULL, personaId TEXT NOT NULL,
+                        PRIMARY KEY(collectionId, personaId),
+                        FOREIGN KEY(collectionId) REFERENCES identity_collections(collectionId) ON UPDATE NO ACTION ON DELETE CASCADE,
+                        FOREIGN KEY(personaId) REFERENCES personas(personaId) ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE INDEX index_identity_collection_personas_personaId ON identity_collection_personas(personaId)")
+            }
+        }
+
         /** Add the Solo cast preference without changing existing chats or their Spotlight. */
         val MIGRATION_26_27 = object : Migration(26, 27) {
             override fun migrate(db: SupportSQLiteDatabase) {

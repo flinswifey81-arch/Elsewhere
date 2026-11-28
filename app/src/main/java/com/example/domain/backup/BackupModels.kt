@@ -99,7 +99,10 @@ data class BackupPayload(
     // v24: optional private arcs, promises, threads and relationship progress.
     val campaignContinuityItems: List<CampaignContinuityItemEntity> = emptyList(),
     // v25: explicit, source-linked Campaign memory approvals.
-    val campaignMemoryShares: List<CampaignMemoryShareEntity> = emptyList()
+    val campaignMemoryShares: List<CampaignMemoryShareEntity> = emptyList(),
+    val identityCollections: List<IdentityCollectionEntity> = emptyList(),
+    val collectionCharacters: List<IdentityCollectionCharacterEntity> = emptyList(),
+    val collectionPersonas: List<IdentityCollectionPersonaEntity> = emptyList()
 )
 
 data class BackupPreview(

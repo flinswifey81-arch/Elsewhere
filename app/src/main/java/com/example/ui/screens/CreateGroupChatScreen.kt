@@ -34,9 +34,11 @@ fun CreateGroupChatScreen(
     onChatCreated: (String) -> Unit,
     onNavigateBack: () -> Unit,
     modifier: Modifier = Modifier,
-    redesignImages: ProfileImageRepository? = null
+    redesignImages: ProfileImageRepository? = null,
+    collectionsRepository: com.example.domain.repository.IdentityCollectionRepository? = null
 ) {
     val coroutineScope = rememberCoroutineScope()
+    val collections = observeCollections(collectionsRepository)
     val personas by personaRepository.getAllPersonas().collectAsState(initial = emptyList())
     val characters by characterRepository.getAllCharacters().collectAsState(initial = emptyList())
 
@@ -79,7 +81,7 @@ fun CreateGroupChatScreen(
                                 entries = personas.map { it.storyIdentity() },
                                 selectedIds = listOfNotNull(selectedPersonaId),
                                 repository = redesignImages,
-                                kind = ProfileImageKind.PERSONA,
+                                kind = ProfileImageKind.PERSONA, collections = collections,
                                 onSelect = { id -> selectedPersonaId = id },
                                 modifier = Modifier.weight(1f)
                             ) }
@@ -111,7 +113,7 @@ fun CreateGroupChatScreen(
                                 entries = characters.map { it.storyIdentity() },
                                 selectedIds = selectedCharacters.toList(),
                                 repository = redesignImages,
-                                kind = ProfileImageKind.CHARACTER,
+                                kind = ProfileImageKind.CHARACTER, collections = collections,
                                 multiple = true,
                                 onSelect = { id ->
                                     toggleCharacter(id)

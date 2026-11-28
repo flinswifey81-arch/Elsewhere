@@ -32,6 +32,7 @@ jobs:
             --tests 'com.example.ProfileImageRepositoryTest' --tests 'com.example.SoloGreetingPickerUiTest' \
             --tests 'com.example.ManualCharacterTest' --tests 'com.example.ManualPersonaTest' \
             --tests 'com.example.NpcLibraryPortraitTest' --tests 'com.example.SoloSpotlightControlsTest' \
+            --tests 'com.example.AppDatabaseMigrationTest.migrationFrom27To28OpensExistingRoomDatabaseAndKeepsStory' \
             --tests 'com.example.AppDatabaseMigrationTest.migrationFrom26To27KeepsExistingSettingsAndDefaultsToSpotlight' \
             --tests 'com.example.ChatDetailGenerationTest.naturalSoloCastAcceptsNpcOnlyReplyWithoutReassigningPriorSpotlightHistory' \
             --tests 'com.example.WorldArchiveAdditiveRestorerTest.npcPortraitSurvivesAsNewDossierImageWithoutTouchingOtherArt' \
