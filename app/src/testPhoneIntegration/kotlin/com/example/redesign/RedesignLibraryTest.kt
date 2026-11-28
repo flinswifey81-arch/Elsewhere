@@ -62,7 +62,11 @@ class RedesignLibraryTest {
         compose.onNodeWithText("Chat NPCs").performClick()
         awaitTag("npc_bank_chat_picker")
         compose.onNodeWithTag("bottom_nav_library").performClick()
-        compose.onNodeWithTag("hub_characters").performClick()
+        awaitTag("library_npc_directory")
+        compose.onNodeWithTag("hub_characters").performScrollTo().performClick()
+        // Returning to a tab creates a fresh Room collector. Wait for the real
+        // resource, so a temporarily empty list cannot masquerade as a reset.
+        awaitTag("character_item_river")
         compose.onNodeWithTag("character_list").assertExists()
         compose.onNodeWithTag("character_item_street").assertDoesNotExist()
     }
