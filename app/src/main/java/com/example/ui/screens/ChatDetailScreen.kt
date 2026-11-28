@@ -101,7 +101,8 @@ fun ChatDetailScreen(
     onNavigateToStoryMemories: () -> Unit = {},
     onNavigateToNpcBank: () -> Unit = {},
     onNavigateToScenarioSessionEditor: () -> Unit = {},
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onNavigateToPhone: (() -> Unit)? = null
 ) {
     // Navigation ordinarily destroys a screen-scoped ViewModel on exit. Use one application-
     // owned store per chat so switching chats cannot cancel a pending provider response.
@@ -211,11 +212,6 @@ fun ChatDetailScreen(
     }
 
     var showChatMenu by remember { mutableStateOf(false) }
-    var showPersonaPhone by androidx.compose.runtime.saveable.rememberSaveable(chatId) { mutableStateOf(false) }
-    val storyPhone = appContainer.storyPhone
-    if (showPersonaPhone && storyPhone != null) {
-        com.example.phone.StoryPhoneDialog(chatId, appContainer, storyPhone) { showPersonaPhone = false }
-    }
     var showHistorySearch by rememberSaveable(chatId) { mutableStateOf(false) }
     var showWackConfirm by remember { mutableStateOf(false) }
     val imagePicker = rememberLauncherForActivityResult(
@@ -403,11 +399,11 @@ fun ChatDetailScreen(
                             Icon(Icons.Filled.MoreVert, contentDescription = "Chat navigation and actions")
                         }
                         DropdownMenu(expanded = showChatMenu, onDismissRequest = { showChatMenu = false }) {
-                            if (storyPhone != null) DropdownMenuItem(
+                            if (onNavigateToPhone != null) DropdownMenuItem(
                                 text = { Text("Persona’s Phone") },
                                 leadingIcon = { Icon(Icons.Filled.Smartphone, contentDescription = null) },
                                 modifier = Modifier.testTag("open_persona_phone"),
-                                onClick = { showChatMenu = false; showPersonaPhone = true }
+                                onClick = { showChatMenu = false; onNavigateToPhone() }
                             )
                             DropdownMenuItem(
                                 text = { Text("Context Inspector") },
@@ -1171,7 +1167,7 @@ internal fun AutoScrollingChatColumn(
     listState: LazyListState = rememberLazyListState(),
     content: LazyListScope.() -> Unit
 ) {
-    var initialScrollComplete by remember(conversationKey) { mutableStateOf(false) }
+    var initialScrollComplete by rememberSaveable(conversationKey) { mutableStateOf(false) }
     var followStreaming by remember(conversationKey) { mutableStateOf(false) }
     val isUserDragging by listState.interactionSource.collectIsDraggedAsState()
     val nearBottomThresholdPx = with(LocalDensity.current) { 72.dp.roundToPx() }

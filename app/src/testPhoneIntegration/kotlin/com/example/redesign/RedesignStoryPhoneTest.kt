@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -57,7 +58,12 @@ class RedesignStoryPhoneTest {
             app.chatRepository.insertChatSettings(settings.copy(useGlobalEngineDefaults = false, selectedModelId = "fake/override"))
             checkNotNull(app.pulseModelSettings).saveModel("fake/pulse")
             val phone = checkNotNull(app.storyPhone)
-            val pack = """{"format":"elsewhere.world-pulse.feed-pack","version":1,"name":"Workshop Demo","platforms":[{"id":"board","name":"Community Board","style":"forum"}],"accounts":[{"id":"board","platformId":"board","handle":"board","displayName":"Board Regular","role":"Mechanic"}],"starterState":{"publicEvents":[{"id":"workshop","visibility":"public","summary":"A workshop was announced."}],"posts":[]}}"""
+            val finalPost = "Last bulletin: the full final sentence must be visible above the bottom edge."
+            val filler = (1..9).joinToString(",") { index ->
+                val body = if (index == 9) finalPost else "Garage bulletin $index. " + "Workshop details are still being posted. ".repeat(6)
+                """{"id":"post-$index","accountId":"board","kind":"ambient","text":"$body"}"""
+            }
+            val pack = """{"format":"elsewhere.world-pulse.feed-pack","version":1,"name":"Workshop Demo","platforms":[{"id":"board","name":"Community Board","style":"forum"}],"accounts":[{"id":"board","platformId":"board","handle":"board","displayName":"Board Regular","role":"Mechanic"}],"starterState":{"publicEvents":[{"id":"workshop","visibility":"public","summary":"A workshop was announced."}],"posts":[$filler]}}"""
             phone.importReviewedPack(phone.previewFeedPack(StoryPhoneActions.Target(chat, persona), pack.toByteArray()), true)
             character
         }
@@ -87,6 +93,16 @@ class RedesignStoryPhoneTest {
         }
         assertEquals("fake/pulse", sent.single().second.modelId)
         assertFalse(sent.single().first.any { "Secret opening scene." in it.content })
+        val feed = compose.onNodeWithTag("phone_pulse_feeds")
+        val last = "Last bulletin: the full final sentence must be visible above the bottom edge."
+        compose.onNodeWithTag("bottom_nav_library").assertDoesNotExist()
+        feed.performTouchInput { swipeUp() }
+        feed.performScrollToNode(hasText(last))
+        val lastBounds = compose.onNodeWithText(last, useUnmergedTree = true).getUnclippedBoundsInRoot()
+        val feedBounds = feed.getUnclippedBoundsInRoot()
+        assertTrue("The entire last post body must fit in the feed viewport", lastBounds.bottom <= feedBounds.bottom)
+        assertTrue(lastBounds.top >= feedBounds.top)
+
         compose.onNodeWithContentDescription("Back on the phone").performClick()
         compose.onNodeWithTag("phone_texting").performClick()
         compose.onNodeWithTag("phone_contact_character:$lead").performClick()

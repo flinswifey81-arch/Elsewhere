@@ -107,7 +107,7 @@ fun ElsewhereApp(
                 unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
                 indicatorColor = if (isLightPalette) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.secondaryContainer
             )
-            NavigationBar(
+            if (activeRoute != "persona_phone/{chatId}") NavigationBar(
                 containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
                 contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
                 tonalElevation = 3.dp
@@ -497,7 +497,19 @@ fun ElsewhereApp(
                         navController.navigate("chat_scenario_editor/${Uri.encode(chatId)}")
                     },
                     onNavigateToSettings = { navController.navigate("chat_settings/$chatId") },
+                    onNavigateToPhone = if (container.storyPhone != null) {
+                        { navController.navigate("persona_phone/${Uri.encode(chatId)}") { launchSingleTop = true } }
+                    } else null
                 )
+            }
+            composable(
+                "persona_phone/{chatId}",
+                arguments = listOf(navArgument("chatId") { type = NavType.StringType })
+            ) { entry ->
+                val phone = container.storyPhone
+                if (phone != null) com.example.phone.StoryPhoneScreen(
+                    entry.arguments?.getString("chatId").orEmpty(), container, phone
+                ) { navController.popBackStack() }
             }
             composable(
                 "chat_scenario_editor/{chatId}",

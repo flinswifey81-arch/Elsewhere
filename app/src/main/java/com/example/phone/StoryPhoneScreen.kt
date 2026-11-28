@@ -1,5 +1,6 @@
 package com.example.phone
 
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
@@ -17,12 +18,11 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import com.example.di.AppContainer
 import com.example.phonelab.PulseFeedPack
 import com.example.phonelab.systems.ContactRole
@@ -48,7 +48,7 @@ private suspend fun <T> attemptPhone(block: suspend () -> T): Result<T> = try {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun StoryPhoneDialog(chatId: String, app: AppContainer, phone: StoryPhoneActions, onClose: () -> Unit) {
+internal fun StoryPhoneScreen(chatId: String, app: AppContainer, phone: StoryPhoneActions, onClose: () -> Unit) {
     var section by rememberSaveable { mutableStateOf("home") }
     var contactId by rememberSaveable { mutableStateOf<String?>(null) }
     var personaId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -75,79 +75,75 @@ internal fun StoryPhoneDialog(chatId: String, app: AppContainer, phone: StoryPho
         else if (section != "home") section = "home"
         else onClose()
     }
-    Dialog(
-        onDismissRequest = ::back,
-        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)
-    ) {
-        Surface(Modifier.fillMaxSize().testTag("persona_phone"), color = MaterialTheme.colorScheme.background) {
-            Scaffold(
-                modifier = Modifier.fillMaxSize().safeDrawingPadding().imePadding(),
-                contentWindowInsets = WindowInsets(0, 0, 0, 0),
-                topBar = {
-                    TopAppBar(
-                        title = { Text(contact?.name ?: when (section) {
-                            "texts" -> "Texting"
-                            "pulse" -> "World Pulse"
-                            else -> "Persona’s Phone"
-                        }) },
-                        navigationIcon = {
-                            IconButton(onClick = ::back) {
-                                Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back on the phone")
-                            }
-                        },
-                        actions = {
-                            IconButton(onClick = onClose, modifier = Modifier.testTag("phone_return_story")) {
-                                Icon(Icons.Default.Close, "Return to Story")
-                            }
-                        },
-                        windowInsets = WindowInsets(0, 0, 0, 0)
-                    )
-                }
-            ) { padding ->
-                Box(Modifier.fillMaxSize().padding(padding)) {
-                    when {
-                        candidates == null || (target != null && loaded == null) ->
-                            CircularProgressIndicator(Modifier.align(Alignment.Center))
-                        candidates.isNullOrEmpty() -> PhoneNotice("Add a Persona to this story to open their phone.")
-                        persona == null -> Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text("Whose phone are you opening?", style = MaterialTheme.typography.titleMedium)
-                            candidates.orEmpty().forEach { (id, name) ->
-                                OutlinedButton(onClick = { personaId = id }) { Text(name) }
-                            }
+    BackHandler { back() }
+    Surface(Modifier.fillMaxSize().testTag("persona_phone"), color = MaterialTheme.colorScheme.background) {
+        Scaffold(
+            modifier = Modifier.fillMaxSize().imePadding(),
+            contentWindowInsets = WindowInsets(0, 0, 0, 0),
+            topBar = {
+                TopAppBar(
+                    title = { Text(contact?.name ?: when (section) {
+                        "texts" -> "Texting"
+                        "pulse" -> "World Pulse"
+                        else -> "Persona’s Phone"
+                    }) },
+                    navigationIcon = {
+                        IconButton(onClick = ::back) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back on the phone")
                         }
-                        target == null -> Unit
-                        inbox == null -> PhoneNotice(loaded?.exceptionOrNull()?.message ?: "This phone isn't available.")
-                        contact != null -> drafts.SaveableStateProvider("${target.personaId}:${contact.id}") {
-                            PhoneThread(target, contact, phone, replyEngine)
+                    },
+                    actions = {
+                        IconButton(onClick = onClose, modifier = Modifier.testTag("phone_return_story")) {
+                            Icon(Icons.Default.Close, "Return to Story")
                         }
-                        section == "texts" -> LazyColumn(contentPadding = PaddingValues(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            if (inbox.contacts.isEmpty()) item { PhoneNotice("No story characters are available to text yet.") }
-                            items(inbox.contacts, key = { it.id }) { row ->
-                                Card(onClick = { contactId = row.id }, border = elsewhereCardBorder(),
-                                    modifier = Modifier.fillMaxWidth().testTag("phone_contact_${row.id}")) {
-                                    Column(Modifier.padding(16.dp)) {
-                                        Text(row.name, style = MaterialTheme.typography.titleMedium)
-                                        val description = if (row.role == ContactRole.LEAD) "Story Character" else "NPC"
-                                        Text(listOfNotNull(description, row.introducedIn).joinToString(" · "),
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    }
+                    },
+                    windowInsets = WindowInsets(0, 0, 0, 0)
+                )
+            }
+        ) { padding ->
+            Box(Modifier.fillMaxSize().padding(padding).clipToBounds()) {
+                when {
+                    candidates == null || (target != null && loaded == null) ->
+                        CircularProgressIndicator(Modifier.align(Alignment.Center))
+                    candidates.isNullOrEmpty() -> PhoneNotice("Add a Persona to this story to open their phone.")
+                    persona == null -> Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("Whose phone are you opening?", style = MaterialTheme.typography.titleMedium)
+                        candidates.orEmpty().forEach { (id, name) ->
+                            OutlinedButton(onClick = { personaId = id }) { Text(name) }
+                        }
+                    }
+                    target == null -> Unit
+                    inbox == null -> PhoneNotice(loaded?.exceptionOrNull()?.message ?: "This phone isn't available.")
+                    contact != null -> drafts.SaveableStateProvider("${target.personaId}:${contact.id}") {
+                        PhoneThread(target, contact, phone, replyEngine)
+                    }
+                    section == "texts" -> LazyColumn(contentPadding = PaddingValues(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        if (inbox.contacts.isEmpty()) item { PhoneNotice("No story characters are available to text yet.") }
+                        items(inbox.contacts, key = { it.id }) { row ->
+                            Card(onClick = { contactId = row.id }, border = elsewhereCardBorder(),
+                                modifier = Modifier.fillMaxWidth().testTag("phone_contact_${row.id}")) {
+                                Column(Modifier.padding(16.dp)) {
+                                    Text(row.name, style = MaterialTheme.typography.titleMedium)
+                                    val description = if (row.role == ContactRole.LEAD) "Story Character" else "NPC"
+                                    Text(listOfNotNull(description, row.introducedIn).joinToString(" · "),
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                             }
                         }
-                        section == "pulse" -> PhonePulse(target, phone, app.pulseModelSettings, app.modelProvider)
-                        else -> Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                            Text(persona.second, style = MaterialTheme.typography.headlineMedium)
-                            Text("Inside this playthrough", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            FilledTonalButton(
-                                onClick = { section = "texts" },
-                                modifier = Modifier.fillMaxWidth().testTag("phone_texting")
-                            ) { Icon(Icons.Default.ChatBubbleOutline, null); Spacer(Modifier.width(8.dp)); Text("Texting") }
-                            FilledTonalButton(
-                                onClick = { section = "pulse" },
-                                modifier = Modifier.fillMaxWidth().testTag("phone_world_pulse")
-                            ) { Icon(Icons.Default.Public, null); Spacer(Modifier.width(8.dp)); Text("World Pulse") }
-                        }
+                    }
+                    section == "pulse" -> PhonePulse(target, phone, app.pulseModelSettings, app.modelProvider)
+                    else -> Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text(persona.second, style = MaterialTheme.typography.headlineMedium)
+                        Text("Inside this playthrough", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        FilledTonalButton(
+                            onClick = { section = "texts" },
+                            modifier = Modifier.fillMaxWidth().testTag("phone_texting")
+                        ) { Icon(Icons.Default.ChatBubbleOutline, null); Spacer(Modifier.width(8.dp)); Text("Texting") }
+                        FilledTonalButton(
+                            onClick = { section = "pulse" },
+                            modifier = Modifier.fillMaxWidth().testTag("phone_world_pulse")
+                        ) { Icon(Icons.Default.Public, null); Spacer(Modifier.width(8.dp)); Text("World Pulse") }
                     }
                 }
             }
@@ -320,7 +316,8 @@ private fun PhonePulse(
             }.onSuccess { previewFile(it) }.onFailure { notice = it.message ?: "Could not read the selected file." }
         }
     }
-    LazyColumn(Modifier.fillMaxSize().testTag("phone_pulse_feeds"), contentPadding = PaddingValues(16.dp),
+    LazyColumn(Modifier.fillMaxSize().testTag("phone_pulse_feeds"),
+        contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
             Button(onClick = { notice = null; showImport = true }) { Text("Import Feed Pack") }
