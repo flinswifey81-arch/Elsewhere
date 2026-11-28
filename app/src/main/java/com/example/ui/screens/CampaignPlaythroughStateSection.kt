@@ -6,7 +6,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -91,10 +94,10 @@ internal fun CampaignPlaythroughStateSection(
             }
         ) { Text("Record state") }
 
-        if (editing) AlertDialog(
-            onDismissRequest = { if (!busy) editing = false },
-            title = { Text("State in Episode ${episode.ordinal}") },
-            text = {
+        if (editing) {
+            val title = "State in Episode ${episode.ordinal}"
+            val dismiss = { if (!busy) editing = false }
+            val form: @Composable () -> Unit = {
                 Column(
                     modifier = Modifier.fillMaxWidth().heightIn(max = 360.dp).verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -137,8 +140,8 @@ internal fun CampaignPlaythroughStateSection(
                         Text("Use in Scenario narration. The full entry is used when it fits the selected model. Chat shows a notice if entries do not fit. This does not give characters that knowledge.")
                     }
                 }
-            },
-            confirmButton = {
+            }
+            val save: @Composable () -> Unit = {
                 TextButton(
                     modifier = Modifier.testTag("save_campaign_playthrough_state"),
                     enabled = !busy && subject.isNotBlank() && (existing || value.isNotBlank()),
@@ -146,8 +149,34 @@ internal fun CampaignPlaythroughStateSection(
                         onSave(episode.chapterId, field, subject, value, shareWithNarrator) { editing = false }
                     }
                 ) { Text(if (value.isBlank()) "Clear value" else "Save") }
-            },
-            dismissButton = { TextButton(onClick = { editing = false }) { Text("Cancel") } }
-        )
+            }
+            val cancel: @Composable () -> Unit = { TextButton(onClick = dismiss, enabled = !busy) { Text("Cancel") } }
+            if (com.example.BuildConfig.BUILD_TYPE == "phoneIntegration") {
+                Dialog(
+                    onDismissRequest = dismiss,
+                    properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)
+                ) {
+                    Box(Modifier.fillMaxSize().safeDrawingPadding().padding(24.dp), contentAlignment = Alignment.Center) {
+                        Surface(
+                            modifier = Modifier.widthIn(max = 460.dp).fillMaxWidth(),
+                            shape = MaterialTheme.shapes.extraLarge,
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh
+                        ) {
+                            Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                Text(title, style = MaterialTheme.typography.headlineSmall)
+                                Box(Modifier.weight(1f, fill = false)) { form() }
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                                    cancel()
+                                    save()
+                                }
+                            }
+                        }
+                    }
+                }
+            } else {
+                AlertDialog(onDismissRequest = dismiss, title = { Text(title) }, text = form,
+                    confirmButton = save, dismissButton = cancel)
+            }
+        }
     }
 }
