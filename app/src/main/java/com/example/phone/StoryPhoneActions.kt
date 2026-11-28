@@ -1,9 +1,12 @@
 package com.example.phone
 
 import android.content.Context
+import org.json.JSONArray
+import org.json.JSONObject
 import androidx.room.withTransaction
 import com.example.data.AppDatabase
 import com.example.data.model.WorldContinuityEventEntity
+import com.example.data.model.CampaignContinuityItemEntity
 import com.example.phonelab.PulseImportStore
 import com.example.phonelab.PulseRefreshPlanner
 import com.example.phonelab.systems.*
@@ -26,7 +29,7 @@ class StoryPhoneActions(private val database: AppDatabase, context: Context) : A
     data class SceneContext(val participantMemory: List<String>, val playthroughLore: List<String>)
     data class PendingText internal constructor(
         val target: Target, val contactId: String, val messageId: String, val timestamp: Long,
-        val request: PhoneTextRequest, internal val binding: String
+        val request: PhoneTextRequest, internal val binding: String, internal val portrayal: String
     )
 
     class FeedPreview internal constructor(
@@ -56,7 +59,33 @@ class StoryPhoneActions(private val database: AppDatabase, context: Context) : A
         val state=resolve(target)
         val thread=register(state,contactId)
         phone.savePersonaText(thread,messageId,state.ordinal,text,timestamp)
-        PendingText(target,contactId,messageId,timestamp,phone.prepareReply(thread,state.ordinal,messageId),state.chapterId)
+        prepareExistingReply(state, target, contactId, messageId, timestamp)
+    }
+
+    suspend fun retryText(target: Target, contactId: String, pendingId: String): PendingText = local {
+        val state = resolve(target)
+        val current = phone.history(state.thread(contactId), state.ordinal, 1).singleOrNull()
+        require(current != null && current.id == pendingId && current.speaker == Speaker.PERSONA && current.chapter == state.ordinal) {
+            "This text can't be retried from this chapter."
+        }
+        prepareExistingReply(state, target, contactId, pendingId, current.timestamp)
+    }
+
+    private suspend fun prepareExistingReply(
+        state: Resolved, target: Target, contactId: String, messageId: String, timestamp: Long
+    ): PendingText {
+        val thread = state.thread(contactId)
+        val portrayal = when {
+            contactId.startsWith("character:") -> database.characterDao().getCharacterById(contactId.substringAfter(':'))?.let {
+                listOf("Name: ${it.characterName}", it.personalityJson, it.voiceJson)
+            }
+            contactId.startsWith("npc:") -> database.npcDao().getDossier(contactId.substringAfter(':'))?.let {
+                listOf("Name: ${it.displayName}", it.role, it.personality)
+            }
+            else -> null
+        }.orEmpty().filterNotNull().filter(String::isNotBlank).joinToString("\n").take(2400)
+        return PendingText(target, contactId, messageId, timestamp, phone.prepareReply(thread,state.ordinal,messageId),
+            state.chapterId, portrayal)
     }
 
     /** For mock/testing or a future explicitly invoked provider adapter; never writes a Persona reply. */
@@ -74,6 +103,24 @@ class StoryPhoneActions(private val database: AppDatabase, context: Context) : A
         val state=resolve(target)
         val thread=state.thread(contactId)
         phone.saveApproved(thread,approvedId,state.ordinal,destination,reviewedText,selectedIds)
+    }
+
+    /** Stores the reviewed note on this playthrough's Campaign, not a narrator-wide or World prompt. */
+    suspend fun saveCampaignNote(target: Target, contactId: String, carryId: String, title: String): String = local {
+        require(title.isNotBlank() && title.length <= 160) { "Use a title of 1 to 160 characters." }
+        val state = resolve(target)
+        val source = requireNotNull(phone.playthroughNote(state.thread(contactId), carryId, state.ordinal)) {
+            "Select a reviewed note from this thread."
+        }
+        val itemId = "phone-note-" + digest(listOf(state.scope.worldId,state.scope.campaignId,state.scope.personaId,contactId,carryId))
+        database.withTransaction {
+            val dao = database.campaignDao()
+            if (dao.getContinuityItem(itemId) == null) dao.insertContinuityItem(CampaignContinuityItemEntity(
+                itemId = itemId, campaignId = state.scope.campaignId, openedChapterId = state.chapterId,
+                itemType = "DISCOVERY", title = title, details = source.approvedText
+            ))
+        }
+        itemId
     }
 
     suspend fun pendingCanonDraftIds(target: Target, contactId: String): List<String> = local {
@@ -129,6 +176,45 @@ class StoryPhoneActions(private val database: AppDatabase, context: Context) : A
         val state=resolve(target)
         PulseRefreshPlanner(storeFor(state)).prepareManualRefresh(state.scope.worldId,state.scope.campaignId,starter,platform,events)
     }
+
+    data class FeedReply(val byline: String, val kind: String, val text: String)
+    data class FeedPost(val id: String, val byline: String, val kind: String, val text: String, val replies: List<FeedReply>)
+    data class FeedChannel(val id: String, val name: String, val posts: List<FeedPost>)
+    data class FeedPack(val id: String, val name: String, val channels: List<FeedChannel>)
+
+    /** Display only the selected campaign's reviewed starter. World-only templates have no posts. */
+    suspend fun feed(target: Target): List<FeedPack> = local {
+        val state = resolve(target)
+        val store = storeFor(state)
+        val templates = store.templates(state.scope.worldId)
+        val starters = store.campaignStarters(state.scope.worldId, state.scope.campaignId)
+        val pure = templates.filterKeys { id -> starters.values.none { it.templateId == id } }
+            .map { (id, template) -> Triple(id, template, null) }
+        val withPosts = starters.mapNotNull { (id, starter) ->
+            templates[starter.templateId]?.let { Triple(id, it, starter.stateJson) }
+        }
+        (withPosts + pure).map { (id, template, starter) ->
+            val config = JSONObject(template)
+            val accounts = config.getJSONArray("accounts").objects().associateBy { it.getString("id") }
+            val posts = starter?.let { JSONObject(it).getJSONArray("posts").objects() }.orEmpty()
+            fun byline(account: JSONObject) = "${account.getString("displayName")} · @" + account.getString("handle").removePrefix("@")
+            FeedPack(id, config.getString("name"), config.getJSONArray("platforms").objects().map { platform ->
+                val platformId = platform.getString("id")
+                FeedChannel(platformId, platform.getString("name"), posts.mapNotNull { post ->
+                    val owner = accounts[post.getString("accountId")]?.takeIf { it.getString("platformId") == platformId }
+                        ?: return@mapNotNull null
+                    FeedPost(post.getString("id"), byline(owner), post.getString("kind"), post.getString("text"),
+                        post.optJSONArray("replies")?.objects().orEmpty().mapNotNull { reply ->
+                            accounts[reply.getString("accountId")]?.let { author ->
+                                FeedReply(byline(author), reply.getString("kind"), reply.getString("text"))
+                            }
+                        })
+                })
+            })
+        }
+    }
+
+    private fun JSONArray.objects(): List<JSONObject> = List(length()) { getJSONObject(it) }
 
     private suspend fun resolve(target: Target): Resolved = database.withTransaction {
         val chats=database.chatDao()

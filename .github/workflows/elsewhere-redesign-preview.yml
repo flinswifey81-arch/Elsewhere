@@ -47,22 +47,43 @@ jobs:
                   for f in test.findall("failure") + test.findall("error"):
                       print(test.get("name"), f.get("message"), (f.text or "")[:2400])
           PYTEST
-      - name: Build and verify isolated APK identity
+      - name: Build Elsewhere Test with its dedicated testing signer
+        env:
+          LAB_KEYSTORE_BASE64: ${{ secrets.ELSEWHERE_TEST_KEYSTORE_BASE64 }}
+          ELSEWHERE_TEST_KEYSTORE_PATH: ${{ runner.temp }}/elsewhere-test-lab.jks
+          ELSEWHERE_TEST_STORE_PASSWORD: ${{ secrets.ELSEWHERE_TEST_STORE_PASSWORD }}
+          ELSEWHERE_TEST_KEY_ALIAS: ${{ secrets.ELSEWHERE_TEST_KEY_ALIAS }}
+          ELSEWHERE_TEST_KEY_PASSWORD: ${{ secrets.ELSEWHERE_TEST_KEY_PASSWORD }}
         run: |
           set -euo pipefail
+          for value in LAB_KEYSTORE_BASE64 ELSEWHERE_TEST_STORE_PASSWORD ELSEWHERE_TEST_KEY_ALIAS ELSEWHERE_TEST_KEY_PASSWORD; do
+            if [ -z "${!value}" ]; then
+              echo "::error::Missing Elsewhere testing signer secret: $value. No unsigned or ephemeral-signed APK will be delivered."
+              exit 1
+            fi
+          done
+          trap 'rm -f "$ELSEWHERE_TEST_KEYSTORE_PATH"' EXIT
+          umask 077
+          printf '%s' "$LAB_KEYSTORE_BASE64" | base64 --decode > "$ELSEWHERE_TEST_KEYSTORE_PATH"
+          unset LAB_KEYSTORE_BASE64
+          export ELSEWHERE_LAB_VERSION_CODE="$((1000 + GITHUB_RUN_NUMBER))"
           bash ./gradlew :app:assemblePhoneIntegration --no-daemon --no-configuration-cache
           apk="$(find app/build/outputs/apk/phoneIntegration -maxdepth 1 -name '*.apk' | head -1)"
           test -s "$apk"
           bt="$ANDROID_HOME/build-tools/36.0.0"
           "$bt/aapt" dump badging "$apk" > "$RUNNER_TEMP/redesign-badging"
-          grep -F "package: name='com.aistudio.elsewhere.abwzy.test.phoneintegration'" "$RUNNER_TEMP/redesign-badging"
+          grep -F "package: name='com.aistudio.elsewhere.abwzy.test.lab' versionCode='$ELSEWHERE_LAB_VERSION_CODE'" "$RUNNER_TEMP/redesign-badging"
           grep -F 'application-debuggable' "$RUNNER_TEMP/redesign-badging"
-          "$bt/apksigner" verify --print-certs "$apk"
-          cp "$apk" Elsewhere-Redesign-Lab-debug.apk
+          "$bt/apksigner" verify --print-certs "$apk" > "$RUNNER_TEMP/elsewhere-installed-signer"
+          keytool -exportcert -keystore "$ELSEWHERE_TEST_KEYSTORE_PATH" -alias "$ELSEWHERE_TEST_KEY_ALIAS" \
+            -storepass:env ELSEWHERE_TEST_STORE_PASSWORD > "$RUNNER_TEMP/elsewhere-lab-cert.der"
+          signer="$(sha256sum "$RUNNER_TEMP/elsewhere-lab-cert.der" | cut -d ' ' -f 1)"
+          grep -Fx "Signer #1 certificate SHA-256 digest: $signer" "$RUNNER_TEMP/elsewhere-installed-signer"
+          cp "$apk" Elsewhere-Test.apk
       - uses: actions/upload-artifact@v4
         with:
-          name: Elsewhere-Redesign-Lab-Preview
-          path: Elsewhere-Redesign-Lab-debug.apk
+          name: Elsewhere-Test-APK
+          path: Elsewhere-Test.apk
           if-no-files-found: error
           retention-days: 14
       - uses: actions/upload-artifact@v4

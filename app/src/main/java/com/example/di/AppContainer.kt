@@ -30,6 +30,7 @@ import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 
 interface AppContainer {
+    val storyPhone: com.example.phone.StoryPhoneActions? get() = null
     val retainedChatViewModelStores: RetainedChatViewModelStores? get() = null
     val generationNotifications: AndroidGenerationNotifications? get() = null
     val scenarioRepository: com.example.domain.repository.ScenarioRepository? get() = null
@@ -117,6 +118,12 @@ class DefaultAppContainer(private val context: Context) : AppContainer {
             context, database, messageAttachmentRepository, profileImageRepository,
             worldArchiveRestorer, dataCoordinator
         )
+    }
+
+    override val storyPhone: com.example.phone.StoryPhoneActions? by lazy {
+        if (com.example.BuildConfig.BUILD_TYPE == "phoneIntegration") {
+            com.example.phone.StoryPhoneActions(database, context)
+        } else null
     }
 
     override val scenarioRepository by lazy { com.example.domain.repository.ScenarioRepository(database, dataCoordinator) }

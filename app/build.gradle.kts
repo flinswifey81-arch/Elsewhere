@@ -82,9 +82,14 @@ android {
     }
     create("phoneIntegration") {
       initWith(getByName("debug"))
-      applicationIdSuffix = ".test.phoneintegration"
-      versionNameSuffix = "-phone-integration"
+      applicationIdSuffix = ".test.lab"
+      versionNameSuffix = "-test-lab"
       matchingFallbacks += listOf("debug")
+      buildConfigField(
+        "String", "BACKUP_IMPORT_SOURCE_APPLICATION_ID",
+        "\"$legacyApplicationId.test.phoneintegration\""
+      )
+      signingConfigs.findByName("testing")?.let { signingConfig = it }
     }
     create("worldsPreview") {
       initWith(getByName("sandbox"))
@@ -131,6 +136,10 @@ androidComponents {
   beforeVariants(selector().withBuildType("sandbox")) { variantBuilder ->
     (variantBuilder as com.android.build.api.variant.HasUnitTestBuilder).enableUnitTest = true
   }
+  onVariants(selector().withBuildType("phoneIntegration")) { variant ->
+    val testVersion = providers.environmentVariable("ELSEWHERE_LAB_VERSION_CODE").orNull?.toIntOrNull()
+    if (testVersion != null) variant.outputs.forEach { it.versionCode.set(testVersion) }
+  }
   onVariants(selector().withBuildType("sandbox")) { variant ->
     // Compress/extract sandbox native libraries; leave production APK packaging unchanged.
     variant.packaging.jniLibs.useLegacyPackaging.set(true)
@@ -154,7 +163,7 @@ tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
 // Some unused dependencies are commented out below instead of being removed.
 // This makes it easy to add them back in the future if needed.
 dependencies {
-  add("phoneIntegrationImplementation", project(":phone-core"))
+  implementation(project(":phone-core"))
   add("phoneIntegrationImplementation", libs.androidx.compose.ui.test.manifest)
   implementation(platform(libs.androidx.compose.bom))
   // implementation(libs.accompanist.permissions)

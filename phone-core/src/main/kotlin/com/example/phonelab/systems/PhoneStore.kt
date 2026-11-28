@@ -108,6 +108,11 @@ class PhoneStore(context: Context) :
         }
     }
 
+    fun playthroughNote(key: ThreadKey, carryId: String, cutoff: Int): PhoneCarry? =
+        readableDatabase.inTransaction {
+            carry(key, carryId)?.takeIf { it.destination == Destination.PLAYTHROUGH_LORE && it.chapter <= cutoff }
+        }
+
     fun pendingWorldDrafts(key: ThreadKey, cutoff: Int): List<PhoneCarry> = readableDatabase.inTransaction {
         queryList(
             "SELECT id FROM phone_carry WHERE $THREAD AND dest='WORLD_CANON_DRAFT' AND chapter<=? ORDER BY chapter,rowid",

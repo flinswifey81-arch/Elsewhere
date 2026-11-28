@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.Bookmarks
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Smartphone
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Settings
@@ -210,6 +211,11 @@ fun ChatDetailScreen(
     }
 
     var showChatMenu by remember { mutableStateOf(false) }
+    var showPersonaPhone by androidx.compose.runtime.saveable.rememberSaveable(chatId) { mutableStateOf(false) }
+    val storyPhone = appContainer.storyPhone
+    if (showPersonaPhone && storyPhone != null) {
+        com.example.phone.StoryPhoneDialog(chatId, appContainer, storyPhone) { showPersonaPhone = false }
+    }
     var showHistorySearch by rememberSaveable(chatId) { mutableStateOf(false) }
     var showWackConfirm by remember { mutableStateOf(false) }
     val imagePicker = rememberLauncherForActivityResult(
@@ -397,6 +403,12 @@ fun ChatDetailScreen(
                             Icon(Icons.Filled.MoreVert, contentDescription = "Chat navigation and actions")
                         }
                         DropdownMenu(expanded = showChatMenu, onDismissRequest = { showChatMenu = false }) {
+                            if (storyPhone != null) DropdownMenuItem(
+                                text = { Text("Persona’s Phone") },
+                                leadingIcon = { Icon(Icons.Filled.Smartphone, contentDescription = null) },
+                                modifier = Modifier.testTag("open_persona_phone"),
+                                onClick = { showChatMenu = false; showPersonaPhone = true }
+                            )
                             DropdownMenuItem(
                                 text = { Text("Context Inspector") },
                                 leadingIcon = { Icon(Icons.Filled.Info, contentDescription = null) },
