@@ -51,6 +51,7 @@ fun CharactersScreen(
     val collectionKind = com.example.data.model.CollectionIdentityKind.CHARACTER
     var collectionId by rememberSaveable { mutableStateOf<String?>(null) }
     val collection = collections.firstOrNull { it.collection.collectionId == collectionId }
+    var editingCollectionId by rememberSaveable { mutableStateOf<String?>(null) }
     val visible = if (libraryHeader == null) characters else remember(characters, query, collection, collections) {
         characters.filter {
             (collection == null || collection.contains(collectionKind, it.characterId)) &&
@@ -197,6 +198,15 @@ fun CharactersScreen(
         return
     }
 
+    if (collectionsRepository != null) editingCollectionId?.let { id ->
+        val existing = collections.firstOrNull { it.collection.collectionId == id }
+        if (id.isEmpty() || existing != null) androidx.compose.runtime.key(id) {
+            CollectionEditor(collectionsRepository, existing, collectionKind, characters.map { it.storyIdentity() },
+                profileImageRepository, onClose = { editingCollectionId = null },
+                onDeleted = { collectionId = null; editingCollectionId = null })
+        }
+    }
+
     Scaffold(
         topBar = {
             if (libraryHeader != null) Column {
@@ -204,8 +214,9 @@ fun CharactersScreen(
                 LibrarySearch(query, { query = it }, "Search characters", "library_character_search")
                 LibraryNewAndImport("Character", onNew = { editingCharacter = null; showEditor = true }, onImport = { showImportOptions = true })
                 if (collectionsRepository != null) {
-                    LibraryCollectionActions(collections, collectionsRepository, collectionId, { collectionId = it },
-                        collectionKind, characters.map { it.storyIdentity() }, profileImageRepository, gallery, { gallery = !gallery })
+                    LibraryCollectionActions(collections, collectionId, { collectionId = it },
+                        onEdit = { editingCollectionId = collection?.collection?.collectionId ?: "" },
+                        gallery = gallery, onToggleGallery = { gallery = !gallery })
                 } else if (characters.isNotEmpty()) {
                     TextButton(onClick = { gallery = !gallery }, modifier = Modifier.padding(start = 8.dp)) {
                         Text(if (gallery) "List view" else "Gallery view")

@@ -60,38 +60,25 @@ internal fun CollectionFilter(
 @Composable
 internal fun LibraryCollectionActions(
     collections: List<IdentityCollection>,
-    repository: IdentityCollectionRepository,
     collectionId: String?,
     onSelect: (String?) -> Unit,
-    kind: CollectionIdentityKind,
-    entries: List<StoryIdentity>,
-    portraits: ProfileImageRepository?,
+    onEdit: () -> Unit,
     gallery: Boolean,
     onToggleGallery: () -> Unit
 ) {
-    var editing by rememberSaveable { mutableStateOf<String?>(null) }
     val active = collections.firstOrNull { it.collection.collectionId == collectionId }
     Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(4.dp),
         verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.weight(1f)) { CollectionFilter(collections, collectionId, onSelect, Modifier.fillMaxWidth()) }
-        TextButton(onClick = { editing = active?.collection?.collectionId ?: "" }) {
+        TextButton(onClick = onEdit) {
             Text(if (active == null) "New collection" else "Edit collection")
         }
-        TextButton(onClick = onToggleGallery) { Text(if (gallery) "List" else "Gallery") }
-    }
-    editing?.let { id ->
-        val existing = collections.firstOrNull { it.collection.collectionId == id }
-        if (id.isEmpty() || existing != null) {
-            key(id) {
-                CollectionEditor(repository, existing, kind, entries, portraits, onClose = { editing = null },
-                    onDeleted = { onSelect(null); editing = null })
-            }
-        }
+        TextButton(onClick = onToggleGallery) { Text(if (gallery) "List view" else "Gallery view") }
     }
 }
 
 @Composable
-private fun CollectionEditor(
+internal fun CollectionEditor(
     repository: IdentityCollectionRepository,
     collection: IdentityCollection?,
     kind: CollectionIdentityKind,
@@ -130,7 +117,7 @@ private fun CollectionEditor(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 OutlinedTextField(label, { if (it.length <= 80) label = it }, singleLine = true,
-                    enabled = !busy, label = { Text("Collection name") })
+                    enabled = !busy, label = { Text("Collection name") }, modifier = Modifier.testTag("collection_name"))
                 Text("Choose $noun. A profile can be in more than one collection.",
                     style = MaterialTheme.typography.bodySmall)
                 if (entries.isNotEmpty()) OutlinedTextField(query, { query = it }, singleLine = true,

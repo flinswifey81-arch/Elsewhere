@@ -51,6 +51,7 @@ fun PersonasScreen(
     val collectionKind = com.example.data.model.CollectionIdentityKind.PERSONA
     var collectionId by rememberSaveable { mutableStateOf<String?>(null) }
     val collection = collections.firstOrNull { it.collection.collectionId == collectionId }
+    var editingCollectionId by rememberSaveable { mutableStateOf<String?>(null) }
     val visible = if (libraryHeader == null) personas else remember(personas, query, collection, collections) {
         personas.filter {
             (collection == null || collection.contains(collectionKind, it.personaId)) &&
@@ -196,6 +197,15 @@ fun PersonasScreen(
         return
     }
 
+    if (collectionsRepository != null) editingCollectionId?.let { id ->
+        val existing = collections.firstOrNull { it.collection.collectionId == id }
+        if (id.isEmpty() || existing != null) androidx.compose.runtime.key(id) {
+            CollectionEditor(collectionsRepository, existing, collectionKind, personas.map { it.storyIdentity() },
+                profileImageRepository, onClose = { editingCollectionId = null },
+                onDeleted = { collectionId = null; editingCollectionId = null })
+        }
+    }
+
     Scaffold(
         topBar = {
             if (libraryHeader != null) Column {
@@ -203,8 +213,9 @@ fun PersonasScreen(
                 LibrarySearch(query, { query = it }, "Search personas", "library_persona_search")
                 LibraryNewAndImport("Persona", onNew = { editingPersona = null; showEditor = true }, onImport = { showImportOptions = true })
                 if (collectionsRepository != null) {
-                    LibraryCollectionActions(collections, collectionsRepository, collectionId, { collectionId = it },
-                        collectionKind, personas.map { it.storyIdentity() }, profileImageRepository, gallery, { gallery = !gallery })
+                    LibraryCollectionActions(collections, collectionId, { collectionId = it },
+                        onEdit = { editingCollectionId = collection?.collection?.collectionId ?: "" },
+                        gallery = gallery, onToggleGallery = { gallery = !gallery })
                 } else if (personas.isNotEmpty()) {
                     TextButton(onClick = { gallery = !gallery }, modifier = Modifier.padding(start = 8.dp)) {
                         Text(if (gallery) "List view" else "Gallery view")
