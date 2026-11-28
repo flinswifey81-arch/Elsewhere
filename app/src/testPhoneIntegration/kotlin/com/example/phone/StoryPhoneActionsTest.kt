@@ -7,6 +7,7 @@ import com.example.data.AppDatabase
 import com.example.data.model.*
 import com.example.domain.repository.CampaignRepository
 import com.example.domain.repository.WorldRepository
+import com.example.phonelab.PulseGeneratedBatch
 import com.example.phonelab.systems.ContactRole
 import com.example.phonelab.systems.Destination
 import kotlinx.coroutines.runBlocking
@@ -101,6 +102,17 @@ class StoryPhoneActionsTest {
                 val request=phone.manualFeedPreview(first,checkNotNull(imported.starterId),"garage",listOf("workshop"))
                 assertEquals("A public workshop is on the calendar.", request.events.single().summary)
                 assertFalse(request.toString().contains("Private line"))
+                val pendingBatch = phone.preparePulse(first, imported.starterId!!, "garage", listOf("workshop"))
+                val localBatch = """{"posts":[{"accountId":"shop","eventId":"workshop","kind":"reaction","text":"See everyone at the workshop."}]}"""
+                val generated = PulseGeneratedBatch.parse(localBatch, pendingBatch.request)
+                assertTrue(runCatching { PulseGeneratedBatch.parse(localBatch.replace("workshop", "secret"), pendingBatch.request) }.isFailure)
+                assertEquals(listOf("Local rumor"), phone.feed(first).single().channels.single().posts.map { it.text })
+                assertEquals(1, phone.publishPulse(pendingBatch, generated))
+                assertEquals(0, phone.publishPulse(pendingBatch, generated))
+                assertEquals(listOf("See everyone at the workshop.", "Local rumor"),
+                    phone.feed(first).single().channels.single().posts.map { it.text })
+                assertTrue(phone.feed(alt).single().channels.single().posts.isEmpty())
+
                 assertTrue(runCatching { phone.manualFeedPreview(alt,checkNotNull(imported.starterId),"garage",listOf("workshop")) }.isFailure)
             }
         } finally { db.close() }

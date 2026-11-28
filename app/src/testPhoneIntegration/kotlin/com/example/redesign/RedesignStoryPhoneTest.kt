@@ -8,6 +8,7 @@ import com.example.data.model.ManualPersonaFields
 import com.example.di.AppContainer
 import com.example.di.DefaultAppContainer
 import com.example.domain.provider.*
+import com.example.phone.StoryPhoneActions
 import com.example.ui.navigation.ElsewhereApp
 import com.example.ui.theme.AppTheme
 import kotlinx.coroutines.flow.flowOf
@@ -37,7 +38,10 @@ class RedesignStoryPhoneTest {
                 override suspend fun getEndpoints(modelId: String) = emptyList<ProviderEndpoint>()
                 override fun streamResponse(messages: List<RoleplayMessage>, options: GenerationOptions): kotlinx.coroutines.flow.Flow<StreamEvent> {
                     sent.add(messages to options)
-                    return flowOf(StreamEvent.Content("Meet me in the garage."), StreamEvent.Done(null))
+                    val response = if (options.modelId == "fake/pulse")
+                        """{"posts":[{"accountId":"board","eventId":"workshop","kind":"reaction","text":"I’ll come to the workshop."}]}"""
+                    else "Meet me in the garage."
+                    return flowOf(StreamEvent.Content(response), StreamEvent.Done(null))
                 }
             }
         }
@@ -51,6 +55,10 @@ class RedesignStoryPhoneTest {
             app.chatRepository.saveEngineDefaults(EngineDefaultsEntity(selectedModelId = "fake/global"))
             val settings = checkNotNull(app.chatRepository.getChatSettings(chat))
             app.chatRepository.insertChatSettings(settings.copy(useGlobalEngineDefaults = false, selectedModelId = "fake/override"))
+            checkNotNull(app.pulseModelSettings).saveModel("fake/pulse")
+            val phone = checkNotNull(app.storyPhone)
+            val pack = """{"format":"elsewhere.world-pulse.feed-pack","version":1,"name":"Workshop Demo","platforms":[{"id":"board","name":"Community Board","style":"forum"}],"accounts":[{"id":"board","platformId":"board","handle":"board","displayName":"Board Regular","role":"Mechanic"}],"starterState":{"publicEvents":[{"id":"workshop","visibility":"public","summary":"A workshop was announced."}],"posts":[]}}"""
+            phone.importReviewedPack(phone.previewFeedPack(StoryPhoneActions.Target(chat, persona), pack.toByteArray()), true)
             character
         }
         compose.setContent { AppTheme { ElsewhereApp(container = container) } }
@@ -65,6 +73,20 @@ class RedesignStoryPhoneTest {
         compose.onNodeWithTag("phone_world_pulse").performClick()
         awaitTag("phone_pulse_feeds")
         assertEquals(0, sent.size)
+        awaitTag("pulse_refresh")
+        compose.onNodeWithTag("pulse_refresh").performClick()
+        compose.onNodeWithTag("pulse_event_workshop").performClick()
+        compose.waitUntil(10000) {
+            compose.onAllNodes(hasTestTag("pulse_generate") and isEnabled()).fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithTag("pulse_generate").performClick()
+        awaitTag("pulse_publish")
+        compose.onNodeWithTag("pulse_publish").performClick()
+        compose.waitUntil(10000) {
+            compose.onAllNodesWithText("I’ll come to the workshop.").fetchSemanticsNodes().isNotEmpty()
+        }
+        assertEquals("fake/pulse", sent.single().second.modelId)
+        assertFalse(sent.single().first.any { "Secret opening scene." in it.content })
         compose.onNodeWithContentDescription("Back on the phone").performClick()
         compose.onNodeWithTag("phone_texting").performClick()
         compose.onNodeWithTag("phone_contact_character:$lead").performClick()
@@ -74,7 +96,8 @@ class RedesignStoryPhoneTest {
         compose.onNodeWithTag("phone_text_composer").performTextInput("Where are you?")
         compose.onNodeWithText("Send").performClick()
         compose.waitUntil(10000) { compose.onAllNodesWithText("Meet me in the garage.").fetchSemanticsNodes().isNotEmpty() }
-        val (messages, options) = sent.single()
+        assertEquals(listOf("fake/pulse", "fake/override"), sent.map { it.second.modelId })
+        val (messages, options) = sent.last()
         assertEquals("fake/override", options.modelId)
         assertEquals("Where are you?", messages.last().content)
         assertFalse(messages.any { "Secret opening scene." in it.content })

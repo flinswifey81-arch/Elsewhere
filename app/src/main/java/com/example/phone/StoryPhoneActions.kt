@@ -8,6 +8,7 @@ import com.example.data.AppDatabase
 import com.example.data.model.WorldContinuityEventEntity
 import com.example.data.model.CampaignContinuityItemEntity
 import com.example.phonelab.PulseImportStore
+import com.example.phonelab.PulseGeneratedPost
 import com.example.phonelab.PulseRefreshPlanner
 import com.example.phonelab.systems.*
 import kotlinx.coroutines.Dispatchers
@@ -177,10 +178,35 @@ class StoryPhoneActions(private val database: AppDatabase, context: Context) : A
         PulseRefreshPlanner(storeFor(state)).prepareManualRefresh(state.scope.worldId,state.scope.campaignId,starter,platform,events)
     }
 
+    class PendingPulse internal constructor(
+        internal val target: Target, internal val world: String, internal val campaign: String,
+        internal val chapter: String, internal val starter: String, internal val platform: String,
+        val request: PulseRefreshPlanner.RequestPreview
+    )
+
+    suspend fun preparePulse(target: Target, starter: String, platform: String, events: List<String>): PendingPulse = local {
+        val state = resolve(target)
+        val world = state.scope.worldId
+        val campaign = state.scope.campaignId
+        PendingPulse(target, world, campaign, state.chapterId, starter, platform,
+            PulseRefreshPlanner(storeFor(state)).prepareManualRefresh(world, campaign, starter, platform, events))
+    }
+
+    suspend fun publishPulse(pending: PendingPulse, posts: List<PulseGeneratedPost>): Int = local {
+        val state = resolve(pending.target)
+        require(state.scope.worldId == pending.world && state.scope.campaignId == pending.campaign &&
+            state.chapterId == pending.chapter) { "The playthrough changed. Open the feed and start a new preview." }
+        storeFor(state).publishReviewedBatch(pending.world, pending.campaign, pending.starter, pending.platform,
+            pending.request.events.map { it.id }.toSet(), pending.request.maxPosts, posts)
+    }
+
     data class FeedReply(val byline: String, val kind: String, val text: String)
     data class FeedPost(val id: String, val byline: String, val kind: String, val text: String, val replies: List<FeedReply>)
     data class FeedChannel(val id: String, val name: String, val posts: List<FeedPost>)
-    data class FeedPack(val id: String, val name: String, val channels: List<FeedChannel>)
+    data class FeedPack(
+        val id: String, val name: String, val channels: List<FeedChannel>,
+        val publicEvents: List<PulseRefreshPlanner.PublicEvent> = emptyList()
+    )
 
     /** Display only the selected campaign's reviewed starter. World-only templates have no posts. */
     suspend fun feed(target: Target): List<FeedPack> = local {
@@ -196,11 +222,22 @@ class StoryPhoneActions(private val database: AppDatabase, context: Context) : A
         (withPosts + pure).map { (id, template, starter) ->
             val config = JSONObject(template)
             val accounts = config.getJSONArray("accounts").objects().associateBy { it.getString("id") }
-            val posts = starter?.let { JSONObject(it).getJSONArray("posts").objects() }.orEmpty()
+            val starterObject = starter?.let(::JSONObject)
+            val posts = starterObject?.getJSONArray("posts")?.objects().orEmpty()
+            val events = starterObject?.getJSONArray("publicEvents")?.objects().orEmpty()
+                .filter { it.getString("visibility") == "public" }
+                .map { PulseRefreshPlanner.PublicEvent(it.getString("id"), it.getString("summary")) }
+            val generated = if (starter == null) emptyList() else
+                store.publishedPosts(state.scope.worldId, state.scope.campaignId, id)
             fun byline(account: JSONObject) = "${account.getString("displayName")} · @" + account.getString("handle").removePrefix("@")
             FeedPack(id, config.getString("name"), config.getJSONArray("platforms").objects().map { platform ->
                 val platformId = platform.getString("id")
-                FeedChannel(platformId, platform.getString("name"), posts.mapNotNull { post ->
+                val generatedHere = generated.asReversed().mapNotNull { post ->
+                    val owner = accounts[post.accountId]?.takeIf { it.getString("platformId") == platformId }
+                        ?: return@mapNotNull null
+                    FeedPost(post.id, byline(owner), post.kind, post.text, emptyList())
+                }
+                FeedChannel(platformId, platform.getString("name"), generatedHere + posts.mapNotNull { post ->
                     val owner = accounts[post.getString("accountId")]?.takeIf { it.getString("platformId") == platformId }
                         ?: return@mapNotNull null
                     FeedPost(post.getString("id"), byline(owner), post.getString("kind"), post.getString("text"),
@@ -210,7 +247,7 @@ class StoryPhoneActions(private val database: AppDatabase, context: Context) : A
                             }
                         })
                 })
-            })
+            }, events)
         }
     }
 

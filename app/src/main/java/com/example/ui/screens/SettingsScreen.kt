@@ -55,7 +55,8 @@ fun SettingsScreen(
     chatRepository: ChatRepository? = null,
     modelProvider: ModelProvider? = null,
     backupRepository: BackupRepository? = null,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    pulseModelSettings: com.example.phone.PulseModelSettings? = null
 ) {
     val coroutineScope = rememberCoroutineScope()
     var apiKey by remember { mutableStateOf("") }
@@ -224,8 +225,9 @@ fun SettingsScreen(
                             }
                         }
                     }
-                    SettingsTab.ENGINE -> item {
-                        chatRepository?.let { EngineDefaultsCard(it, modelProvider) }
+                    SettingsTab.ENGINE -> {
+                        item { chatRepository?.let { EngineDefaultsCard(it, modelProvider) } }
+                        if (pulseModelSettings != null) item { PulseModelCard(pulseModelSettings, modelProvider) }
                     }
                     SettingsTab.BACKUP -> item {
                         backupRepository?.let { BackupRestoreSettingsCard(it) }

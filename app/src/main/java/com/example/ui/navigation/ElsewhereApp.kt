@@ -270,7 +270,8 @@ fun ElsewhereApp(
                     appearanceRepository = container.appearanceRepository,
                     chatRepository = container.chatRepository,
                     modelProvider = container.modelProvider,
-                    backupRepository = container.backupRepository
+                    backupRepository = container.backupRepository,
+                    pulseModelSettings = container.pulseModelSettings
                 ) 
             }
             

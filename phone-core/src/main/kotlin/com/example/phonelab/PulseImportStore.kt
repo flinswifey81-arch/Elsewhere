@@ -87,6 +87,51 @@ class PulseImportStore(private val directory: Path, private val membership: Memb
             }
         }
 
+    data class PublishedPost(val id: String, val accountId: String, val eventId: String, val kind: String, val text: String)
+
+    /** Revalidate against the selected campaign's current starter inside the file lock. */
+    fun publishReviewedBatch(worldId: String, campaignId: String, starterId: String, platformId: String,
+                             selectedEvents: Set<String>, maxPosts: Int, candidates: List<PulseGeneratedPost>): Int =
+        access(worldId, campaignId) { path, contents ->
+            val row = section(section(section(contents, "campaigns"), campaignId), starterId)
+            val templateId = row["templateId"] as? String ?: error("This starter is no longer in the playthrough.")
+            val config = section(contents, "templates")[templateId] as? String ?: error("World template is missing.")
+            val starter = row["stateJson"] as? String ?: error("Starter data is missing.")
+            val platformExists = objectsIn(config, "platforms").any { it["id"] == platformId }
+            require(platformExists) { "The selected platform is no longer available." }
+            val accounts = objectsIn(config, "accounts").filter { it["platformId"] == platformId }.mapNotNull { it["id"] as? String }.toSet()
+            val publicEvents = objectsIn(starter, "publicEvents").filter { it["visibility"] == "public" }
+                .mapNotNull { it["id"] as? String }.toSet()
+            require(maxPosts in 1..8 && candidates.size in 1..maxPosts && selectedEvents.size in 1..8 &&
+                publicEvents.containsAll(selectedEvents)) { "Review a valid batch of selected public events." }
+            val published = section(row, "generated")
+            val oldSize = published.size
+            for (p in candidates) {
+                require(p.accountId in accounts && p.eventId in selectedEvents &&
+                    p.kind in setOf("reaction", "rumor") && p.text.isNotBlank() &&
+                    p.text.length <= 1200 && '\u0000' !in p.text) { "Invalid post for this feed." }
+                val id = "generated-" + pulseDigest(PulseJson.canonical(listOf(p.accountId, p.eventId, p.kind, p.text)))
+                published.putIfAbsent(id, mapOf("accountId" to p.accountId, "eventId" to p.eventId, "kind" to p.kind, "text" to p.text))
+            }
+            val added = published.size - oldSize
+            if (added != 0) write(path, contents)
+            added
+        }
+
+    fun publishedPosts(worldId: String, campaignId: String, starterId: String): List<PublishedPost> =
+        access(worldId, campaignId) { _, contents ->
+            val row = section(section(section(contents, "campaigns"), campaignId), starterId)
+            section(row, "generated").map { (id, raw) ->
+                require(raw is Map<*, *>) { "Stored generated post is invalid." }
+                PublishedPost(id, raw["accountId"] as String, raw["eventId"] as String,
+                    raw["kind"] as String, raw["text"] as String)
+            }
+        }
+
+    private fun objectsIn(json: String, key: String): List<Map<*, *>> =
+        ((PulseJson.parse(json) as? Map<*, *>)?.get(key) as? List<*>).orEmpty()
+            .map { it as? Map<*, *> ?: error("Invalid stored Feed Pack record.") }
+
     /** Remove only this campaign's seeds before erasing its membership. */
     fun deleteCampaignStarters(worldId: String, campaignId: String): Boolean =
         access(worldId, campaignId) { path, contents ->

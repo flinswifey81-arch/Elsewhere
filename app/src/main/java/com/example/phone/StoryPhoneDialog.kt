@@ -135,7 +135,7 @@ internal fun StoryPhoneDialog(chatId: String, app: AppContainer, phone: StoryPho
                                 }
                             }
                         }
-                        section == "pulse" -> PhonePulse(target, phone)
+                        section == "pulse" -> PhonePulse(target, phone, app.pulseModelSettings, app.modelProvider)
                         else -> Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                             Text(persona.second, style = MaterialTheme.typography.headlineMedium)
                             Text("Inside this playthrough", color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -281,13 +281,17 @@ private fun PhoneReview(message: PhoneMessage, onClose: () -> Unit, onSave: susp
 }
 
 @Composable
-private fun PhonePulse(target: StoryPhoneActions.Target, phone: StoryPhoneActions) {
+private fun PhonePulse(
+    target: StoryPhoneActions.Target, phone: StoryPhoneActions, model: PulseModelSettings?,
+    provider: com.example.domain.provider.ModelProvider
+) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     var feed by remember { mutableStateOf<List<StoryPhoneActions.FeedPack>>(emptyList()) }
     var notice by remember { mutableStateOf<String?>(null) }
     var revision by remember { mutableIntStateOf(0) }
     var showImport by remember { mutableStateOf(false) }
+    var showRefresh by remember { mutableStateOf(false) }
     var pasted by remember { mutableStateOf("") }
     var preview by remember { mutableStateOf<StoryPhoneActions.FeedPreview?>(null) }
     var includePosts by remember { mutableStateOf(false) }
@@ -320,7 +324,12 @@ private fun PhonePulse(target: StoryPhoneActions.Target, phone: StoryPhoneAction
         verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
             Button(onClick = { notice = null; showImport = true }) { Text("Import Feed Pack") }
-            Text("Imported posts only. AI feed refresh is not available in this build.",
+            if (model != null && pack?.publicEvents?.isNotEmpty() == true && channel != null) {
+                OutlinedButton(onClick = { showRefresh = true }, modifier = Modifier.testTag("pulse_refresh")) {
+                    Text("Generate feed preview")
+                }
+            }
+            Text("New posts are generated only when you ask. Review them before adding them to this playthrough.",
                 color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
         }
         if (notice != null) item { PhoneNotice(notice.orEmpty()) }
@@ -355,6 +364,15 @@ private fun PhonePulse(target: StoryPhoneActions.Target, phone: StoryPhoneAction
                 }
             }
         }
+    }
+    if (showRefresh && model != null && pack != null && channel != null) {
+        PulseRefreshDialog(target, pack, channel, phone, model, provider,
+            onClose = { showRefresh = false },
+            onPublished = { added ->
+                showRefresh = false
+                revision++
+                notice = if (added == 0) "Those posts are already in this feed." else "Added $added posts to this playthrough."
+            })
     }
     if (showImport) AlertDialog(
         onDismissRequest = { showImport = false },
