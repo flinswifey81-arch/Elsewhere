@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -111,50 +112,59 @@ internal fun CollectionEditor(
             finally { busy = false }
         }
     }
-    AlertDialog(
-        onDismissRequest = { if (!busy) onClose() },
-        title = { Text(if (collection == null) "New collection" else "Edit collection") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                OutlinedTextField(label, { if (it.length <= 80) label = it }, singleLine = true,
-                    enabled = !busy, label = { Text("Collection name") }, modifier = Modifier.testTag("collection_name"))
-                Text("Choose $noun. A profile can be in more than one collection.",
-                    style = MaterialTheme.typography.bodySmall)
-                if (entries.isNotEmpty()) OutlinedTextField(query, { query = it }, singleLine = true,
-                    label = { Text("Filter $noun") })
-                if (visible.isEmpty()) Text(if (entries.isEmpty()) "No $noun yet." else "No matching $noun.")
-                val changedIds = changes.toSet()
-                LazyColumn(Modifier.heightIn(max = 240.dp)) {
-                    items(visible, key = { it.id }) { entry ->
-                        val checked = (entry.id in members) xor (entry.id in changedIds)
-                        Row(Modifier.fillMaxWidth().testTag("collection_member_${entry.id}").toggleable(checked, enabled = !busy, role = Role.Checkbox) {
-                            changes = ArrayList(if (entry.id in changedIds) changes - entry.id else changes + entry.id)
-                        }.padding(vertical = 5.dp), horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically) {
-                            ProfileImageAvatar(portraits, profileImageKind, entry.id, entry.label, 36.dp)
-                            Column(Modifier.weight(1f)) {
-                                Text(entry.label, style = MaterialTheme.typography.bodyMedium)
-                                if (entry.label != entry.name) Text(entry.name, style = MaterialTheme.typography.bodySmall)
-                            }
-                            Checkbox(checked, onCheckedChange = null)
-                        }
-                    }
-                }
-                if (collection != null) TextButton(enabled = !busy, onClick = { confirming = true }) {
-                    Text("Delete collection", color = MaterialTheme.colorScheme.error)
-                }
-                failure?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+    BackHandler { if (!busy) onClose() }
+    Column(
+        Modifier.fillMaxSize().imePadding().padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Text(if (collection == null) "New collection" else "Edit collection",
+            style = MaterialTheme.typography.headlineSmall)
+        OutlinedTextField(label, { if (it.length <= 80) label = it }, singleLine = true,
+            enabled = !busy, label = { Text("Collection name") },
+            modifier = Modifier.fillMaxWidth().testTag("collection_name"))
+        Text("Choose $noun. A profile can be in more than one collection.",
+            style = MaterialTheme.typography.bodySmall)
+        if (entries.isNotEmpty()) OutlinedTextField(query, { query = it }, singleLine = true,
+            label = { Text("Filter $noun") }, modifier = Modifier.fillMaxWidth())
+        val changedIds = changes.toSet()
+        LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
+            if (visible.isEmpty()) item {
+                Text(if (entries.isEmpty()) "No $noun yet." else "No matching $noun.")
             }
-        },
-        confirmButton = {
-            TextButton(enabled = !busy && label.isNotBlank(), onClick = {
+            items(visible, key = { it.id }) { entry ->
+                val checked = (entry.id in members) xor (entry.id in changedIds)
+                Row(Modifier.fillMaxWidth().testTag("collection_member_${entry.id}")
+                    .toggleable(checked, enabled = !busy, role = Role.Checkbox) {
+                        changes = ArrayList(if (entry.id in changedIds) changes - entry.id else changes + entry.id)
+                    }.padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    ProfileImageAvatar(portraits, profileImageKind, entry.id, entry.label, 36.dp)
+                    Column(Modifier.weight(1f)) {
+                        Text(entry.label, style = MaterialTheme.typography.bodyMedium)
+                        if (entry.label != entry.name) Text(entry.name, style = MaterialTheme.typography.bodySmall)
+                    }
+                    Checkbox(checked, onCheckedChange = null)
+                }
+            }
+        }
+        failure?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End,
+            verticalAlignment = Alignment.CenterVertically) {
+            if (collection != null) {
+                TextButton(enabled = !busy, onClick = { confirming = true }) {
+                    Text("Delete", color = MaterialTheme.colorScheme.error)
+                }
+                Spacer(Modifier.weight(1f))
+            }
+            TextButton(enabled = !busy, onClick = onClose) { Text("Cancel") }
+            Button(enabled = !busy && label.isNotBlank(), onClick = {
                 val added = changes.filterNot { it in members }.toSet()
                 val removed = changes.filter { it in members }.toSet()
                 write({ repository.save(collection?.collection?.collectionId, label, kind, added, removed) }, onClose)
             }) { Text("Save collection") }
-        },
-        dismissButton = { TextButton(enabled = !busy, onClick = onClose) { Text("Cancel") } }
-    )
+        }
+    }
     if (confirming && collection != null) AlertDialog(
         onDismissRequest = { confirming = false },
         title = { Text("Delete ${collection.collection.label}?") },

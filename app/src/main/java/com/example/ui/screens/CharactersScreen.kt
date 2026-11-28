@@ -200,10 +200,13 @@ fun CharactersScreen(
 
     if (collectionsRepository != null) editingCollectionId?.let { id ->
         val existing = collections.firstOrNull { it.collection.collectionId == id }
-        if (id.isEmpty() || existing != null) androidx.compose.runtime.key(id) {
+        if (id.isEmpty() || existing != null) {
+            androidx.compose.runtime.key(id) {
             CollectionEditor(collectionsRepository, existing, collectionKind, characters.map { it.storyIdentity() },
                 profileImageRepository, onClose = { editingCollectionId = null },
                 onDeleted = { collectionId = null; editingCollectionId = null })
+            }
+            return
         }
     }
 
