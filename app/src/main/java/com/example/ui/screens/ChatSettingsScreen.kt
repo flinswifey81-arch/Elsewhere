@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import com.example.ui.components.ResourceTextField
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -159,14 +160,14 @@ fun ChatSettingsScreen(
                     LaunchedEffect(uiState.settings?.narratorInstructions) {
                         narratorInstructions = uiState.settings?.narratorInstructions.orEmpty()
                     }
-                    OutlinedTextField(
+                    ResourceTextField(
                         value = narratorInstructions,
                         onValueChange = { if (it.length <= 4000) narratorInstructions = it },
-                        label = { Text("Narrator instructions") },
+                        label = "Narrator instructions",
                         supportingText = { Text("${narratorInstructions.length}/4000") },
                         minLines = 3,
                         modifier = Modifier.fillMaxWidth(),
-                        colors = elsewhereTextFieldColors()
+                        maxLength = 4_000
                     )
                     Button(
                         onClick = { viewModel.onNarratorInstructionsChanged(narratorInstructions) },

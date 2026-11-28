@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import com.example.ui.components.ResourceTextField
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
@@ -228,13 +229,14 @@ fun StoryMemoriesScreen(
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("Only this chat stores this record. Knowledge must be assigned explicitly before a Character may recall it. No extra model call is made here.",
                     style = MaterialTheme.typography.bodySmall)
-                OutlinedTextField(
+                ResourceTextField(
                     draft, { draft = it.take(12_000) },
-                    label = { Text("What should Elsewhere remember?") },
+                    label = "What should Elsewhere remember?",
                     modifier = Modifier.fillMaxWidth().heightIn(min = 130.dp),
                     minLines = 3,
                     supportingText = { Text("${draft.length} / 12,000") },
-                    enabled = !working
+                    enabled = !working,
+                    maxLength = 12_000
                 )
                 if (editing == null) Box {
                     OutlinedButton(onClick = { selectingClaim = true }, enabled = !working) {
@@ -359,14 +361,15 @@ fun StoryMemoriesScreen(
                         Text("Earlier state (kept in history): ${prior.memory.content}",
                             style = MaterialTheme.typography.bodySmall)
                     }
-                    OutlinedTextField(
+                    ResourceTextField(
                         modifier = Modifier.testTag("relationship_state_input"),
                         value = relationshipText,
                         onValueChange = { relationshipText = it.take(12_000) },
-                        label = { Text(if (creatingPromise) "What was promised?" else "How has this relationship changed?") },
+                        label = if (creatingPromise) "What was promised?" else "How has this relationship changed?",
                         minLines = 3,
                         supportingText = { Text("${relationshipText.length} / 12,000") },
-                        enabled = !working
+                        enabled = !working,
+                        maxLength = 12_000
                     )
                     if (participantChoices.size < 2) Text(
                         "Add two Character/Persona participants to this chat first.",
@@ -441,13 +444,14 @@ fun StoryMemoriesScreen(
                             }
                         }
                     }
-                    OutlinedTextField(
+                    ResourceTextField(
                         value = outcomeDetails,
                         onValueChange = { outcomeDetails = it.take(4_000) },
-                        label = { Text("What happened?") },
+                        label = "What happened?",
                         minLines = 3,
                         supportingText = { Text("${outcomeDetails.length} / 4,000") },
-                        enabled = !working
+                        enabled = !working,
+                        maxLength = 4_000
                     )
                 }
             },
@@ -536,13 +540,14 @@ fun StoryMemoriesScreen(
                             style = MaterialTheme.typography.bodySmall
                         )
                     }
-                    OutlinedTextField(
+                    ResourceTextField(
                         value = reviewDraft,
                         onValueChange = { reviewDraft = it.take(12_000) },
-                        label = { Text("Approved wording") },
+                        label = "Approved wording",
                         modifier = Modifier.fillMaxWidth(),
                         minLines = 2,
-                        enabled = !working && canApprove
+                        enabled = !working && canApprove,
+                        maxLength = 12_000
                     )
                     Box {
                         OutlinedButton(
@@ -727,13 +732,14 @@ fun StoryMemoriesScreen(
                             color = MaterialTheme.colorScheme.error
                         )
                     }
-                    OutlinedTextField(
+                    ResourceTextField(
                         value = perspectiveNote,
                         onValueChange = { perspectiveNote = it.take(2_000) },
-                        label = { Text("Player note (optional, never sent to model)") },
+                        label = "Player note (optional, never sent to model)",
                         enabled = !working && perspectiveCharacterId != null,
                         minLines = 2,
-                        supportingText = { Text("${perspectiveNote.length} / 2,000") }
+                        supportingText = { Text("${perspectiveNote.length} / 2,000") },
+                        maxLength = 2_000
                     )
                     if (perspectiveHistory.isNotEmpty()) {
                         HorizontalDivider()

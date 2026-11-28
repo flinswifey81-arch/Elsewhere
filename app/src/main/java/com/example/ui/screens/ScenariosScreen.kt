@@ -280,6 +280,10 @@ internal fun ScenarioEditor(definition: ScenarioDefinition, onChange: (ScenarioD
 
 @Composable
 private fun ScenarioField(label: String, value: String, onChange: (String) -> Unit) {
+    if (label !in setOf("Scenario Title", "Display / Card Title", "NPC Name", "Categories", "Tags")) {
+        ResourceTextField(value, onChange, label, minLines = 1, maxLines = 12)
+        return
+    }
     OutlinedTextField(value, onChange, label = { Text(label) }, modifier = Modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.medium, colors = elsewhereTextFieldColors(), maxLines = 12)
 }

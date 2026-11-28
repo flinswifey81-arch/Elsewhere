@@ -2,6 +2,7 @@ package com.example.ui.screens
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import com.example.ui.components.ResourceTextField
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -827,7 +828,11 @@ private fun NpcEditorDialog(
 }
 
 @Composable
-private fun NpcField(label: String, value: String, onValueChange: (String) -> Unit) {
+private fun NpcField(label: String, value: String, maxLength: Int? = 4000, onValueChange: (String) -> Unit) {
+    if (label != "Display name" && !label.startsWith("Aliases")) {
+        ResourceTextField(value, onValueChange, label, minLines = 1, maxLines = Int.MAX_VALUE, maxLength = maxLength)
+        return
+    }
     OutlinedTextField(
         value = value,
         onValueChange = onValueChange,

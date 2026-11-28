@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import com.example.ui.components.ResourceTextField
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -113,14 +114,15 @@ internal fun CampaignPlaythroughStateSection(
                         label = { Text("Person, place, or thread") },
                         modifier = Modifier.testTag("campaign_playthrough_subject")
                     )
-                    OutlinedTextField(
+                    ResourceTextField(
                         value = value, onValueChange = { value = it.take(12_000) },
-                        label = { Text("What is true now?") },
+                        label = "What is true now?",
                         supportingText = if (existing) {
                             { Text("Leave blank to clear this value from this episode onward.") }
                         } else null,
                         minLines = 2,
-                        modifier = Modifier.testTag("campaign_playthrough_value")
+                        modifier = Modifier.testTag("campaign_playthrough_value"),
+                        maxLength = 12_000
                     )
                     Row {
                         Checkbox(

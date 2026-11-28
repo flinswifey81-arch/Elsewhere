@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import com.example.ui.components.ResourceTextField
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -391,13 +392,11 @@ private fun ManualPersonaEditor(
                     colors = elsewhereTextFieldColors(),
                     modifier = Modifier.fillMaxWidth().testTag("persona_field_Name")
                 )
-                OutlinedTextField(
+                ResourceTextField(
                     value = fields.backstoryInstructions,
                     onValueChange = { fields = fields.copy(backstoryInstructions = it) },
-                    label = { Text("Backstory / Persona Instructions") },
+                    label = "Backstory / Persona Instructions",
                     minLines = 6,
-                    shape = MaterialTheme.shapes.medium,
-                    colors = elsewhereTextFieldColors(),
                     modifier = Modifier.fillMaxWidth().weight(1f).testTag("persona_field_Backstory / Persona Instructions")
                 )
             }

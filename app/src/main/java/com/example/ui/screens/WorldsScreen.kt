@@ -2,6 +2,7 @@ package com.example.ui.screens
 
 import com.example.domain.repository.ProfileImageKind
 import com.example.domain.repository.ProfileImageRepository
+import com.example.ui.components.ResourceTextField
 import com.example.ui.components.CoverActions
 import com.example.ui.components.CoverArtwork
 import android.net.Uri
@@ -340,9 +341,11 @@ fun WorldsScreen(
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(chapterEditTitle, { chapterEditTitle = it.take(200) },
                         label = { Text("Chapter title") })
-                    OutlinedTextField(chapterEditRecap, { chapterEditRecap = it.take(12_000) },
-                        label = { Text("Private recap") }, minLines = 3, maxLines = 8,
-                        modifier = Modifier.testTag("campaign_chapter_recap"))
+                    ResourceTextField(chapterEditRecap, { chapterEditRecap = it.take(12_000) },
+                        label = "Private recap", minLines = 3, maxLines = 8,
+                        modifier = Modifier.testTag("campaign_chapter_recap"),
+                        maxLength = 12_000
+                    )
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Checkbox(checked = chapterEditComplete, onCheckedChange = { chapterEditComplete = it })
                         Text("Chapter complete")
@@ -391,13 +394,14 @@ fun WorldsScreen(
                     label = { Text("Title") },
                     modifier = Modifier.testTag("campaign_journal_title")
                 )
-                OutlinedTextField(
+                ResourceTextField(
                     value = journalDraftBody,
                     onValueChange = { journalDraftBody = it.take(12_000) },
-                    label = { Text(if (journalDraftType == "CHECKPOINT") "Checkpoint notes" else "Journal entry") },
+                    label = if (journalDraftType == "CHECKPOINT") "Checkpoint notes" else "Journal entry",
                     minLines = 3,
                     maxLines = 8,
-                    modifier = Modifier.testTag("campaign_journal_body")
+                    modifier = Modifier.testTag("campaign_journal_body"),
+                    maxLength = 12_000
                 )
             }
         },
@@ -517,14 +521,13 @@ fun WorldsScreen(
                     label = { Text("Arc or thread title") },
                     modifier = Modifier.testTag("campaign_continuity_title")
                 )
-                OutlinedTextField(
+                ResourceTextField(
                     value = continuityDraftDetails,
                     onValueChange = { continuityDraftDetails = it.take(12_000) },
-                    label = {
-                        Text(if (continuityDraftType == "ARC") "Arc summary" else "What is ongoing?")
-                    },
+                    label = if (continuityDraftType == "ARC") "Arc summary" else "What is ongoing?",
                     minLines = 3, maxLines = 8,
-                    modifier = Modifier.testTag("campaign_continuity_details")
+                    modifier = Modifier.testTag("campaign_continuity_details"),
+                    maxLength = 12_000
                 )
                 if (continuityEditTarget == null) {
                     Box {
@@ -553,14 +556,13 @@ fun WorldsScreen(
                 }
                 if (continuityEditTarget != null) {
                     if (continuityDraftComplete) {
-                        OutlinedTextField(
+                        ResourceTextField(
                             value = continuityDraftResolution,
                             onValueChange = { continuityDraftResolution = it.take(12_000) },
-                            label = {
-                                Text(if (continuityDraftType == "ARC") "Arc ending" else "How was this resolved?")
-                            },
+                            label = if (continuityDraftType == "ARC") "Arc ending" else "How was this resolved?",
                             minLines = 2, maxLines = 6,
-                            modifier = Modifier.testTag("campaign_continuity_resolution")
+                            modifier = Modifier.testTag("campaign_continuity_resolution"),
+                            maxLength = 12_000
                         )
                         Box {
                             OutlinedButton(onClick = { continuityCloseChapterPickerOpen = true }) {
@@ -674,13 +676,14 @@ fun WorldsScreen(
                             label = { Text("Reviewed World event title") },
                             modifier = Modifier.testTag("world_draft_from_campaign_title")
                         )
-                        OutlinedTextField(
+                        ResourceTextField(
                             value = worldDraftReviewedFacts,
                             onValueChange = { worldDraftReviewedFacts = it.take(12_000) },
-                            label = { Text("Facts to propose for World review") },
+                            label = "Facts to propose for World review",
                             minLines = 3,
                             maxLines = 8,
-                            modifier = Modifier.testTag("world_draft_from_campaign_facts")
+                            modifier = Modifier.testTag("world_draft_from_campaign_facts"),
+                            maxLength = 12_000
                         )
                     }
                 },
@@ -1341,6 +1344,10 @@ internal fun WorldEventDialog(
 
 @Composable
 private fun WorldField(label: String, value: String, single: Boolean = false, onChange: (String) -> Unit) {
+    if (!single) {
+        ResourceTextField(value, onChange, label, minLines = 1, maxLines = 8)
+        return
+    }
     OutlinedTextField(value, onChange, label = { Text(label) }, modifier = Modifier.fillMaxWidth(),
         singleLine = single, maxLines = if (single) 1 else 8, colors = elsewhereTextFieldColors())
 }

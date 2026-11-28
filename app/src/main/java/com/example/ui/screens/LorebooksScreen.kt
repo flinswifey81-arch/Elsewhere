@@ -3,6 +3,7 @@ package com.example.ui.screens
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import com.example.ui.components.ResourceTextField
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -763,13 +764,12 @@ private fun LorebookEntryEditorDialog(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Canon is the reusable baseline. This does not automatically change Current.")
-                    OutlinedTextField(
+                    ResourceTextField(
                         value = canonCandidate,
                         onValueChange = { canonCandidate = it },
-                        label = { Text("New Canon content") },
+                        label = "New Canon content",
                         minLines = 5,
-                        modifier = Modifier.fillMaxWidth().testTag("new_lore_entry_canon"),
-                        colors = elsewhereTextFieldColors()
+                        modifier = Modifier.fillMaxWidth().testTag("new_lore_entry_canon")
                     )
                 }
             },
@@ -802,8 +802,8 @@ private fun LorebookEntryEditorDialog(
                     }
                 }
                 if (activationMode == "keyword") {
-                    OutlinedTextField(keys, { keys = it }, label = { Text("Keywords (one per line)") }, modifier = Modifier.fillMaxWidth(), minLines = 3, colors = elsewhereTextFieldColors())
-                    OutlinedTextField(secondaryKeys, { secondaryKeys = it }, label = { Text("Additional keywords (one per line)") }, modifier = Modifier.fillMaxWidth(), minLines = 2, colors = elsewhereTextFieldColors())
+                    ResourceTextField(keys, { keys = it }, label = "Keywords (one per line)", modifier = Modifier.fillMaxWidth(), minLines = 3)
+                    ResourceTextField(secondaryKeys, { secondaryKeys = it }, label = "Additional keywords (one per line)", modifier = Modifier.fillMaxWidth(), minLines = 2)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         FilterChip(selected = matchMode == "any", onClick = { matchMode = "any" }, label = { Text("Match any") })
                         FilterChip(selected = matchMode == "all", onClick = { matchMode = "all" }, label = { Text("Match all") })
@@ -814,9 +814,9 @@ private fun LorebookEntryEditorDialog(
                 HorizontalDivider()
                 Text("Canon baseline", style = MaterialTheme.typography.titleSmall)
                 if (isNew) {
-                    OutlinedTextField(canonContent, { canonContent = it }, label = { Text("Canon content") }, modifier = Modifier.fillMaxWidth().testTag("lore_entry_canon"), minLines = 5, colors = elsewhereTextFieldColors())
+                    ResourceTextField(canonContent, { canonContent = it }, label = "Canon content", modifier = Modifier.fillMaxWidth().testTag("lore_entry_canon"), minLines = 5)
                 } else {
-                    OutlinedTextField(canonContent, {}, readOnly = true, label = { Text("Canon content") }, modifier = Modifier.fillMaxWidth(), minLines = 4, colors = elsewhereTextFieldColors())
+                    ResourceTextField(canonContent, {}, readOnly = true, label = "Canon content", modifier = Modifier.fillMaxWidth(), minLines = 4)
                     OutlinedButton(
                         onClick = { canonCandidate = canonContent; showCanonUpdate = true },
                         enabled = !canonLocked,
@@ -825,13 +825,12 @@ private fun LorebookEntryEditorDialog(
                 }
                 LabeledSwitch("Canon locked", canonLocked, "lore_entry_canon_locked") { canonLocked = it }
                 Text("Current content", style = MaterialTheme.typography.titleSmall)
-                OutlinedTextField(
+                ResourceTextField(
                     currentContent,
                     { currentContent = it; resetPerformed = false },
-                    label = { Text("Current content sent when active") },
+                    label = "Current content sent when active",
                     modifier = Modifier.fillMaxWidth().testTag("lore_entry_current"),
-                    minLines = 5,
-                    colors = elsewhereTextFieldColors()
+                    minLines = 5
                 )
                 OutlinedButton(onClick = { showResetConfirm = true }, modifier = Modifier.fillMaxWidth().testTag("reset_lore_entry_current")) { Text("Reset Current to Canon") }
                 Text("Injection", style = MaterialTheme.typography.titleSmall)
@@ -850,8 +849,8 @@ private fun LorebookEntryEditorDialog(
                     colors = elsewhereTextFieldColors()
                 )
                 Text("Position: lore (the only supported v1 position)", style = MaterialTheme.typography.bodySmall)
-                OutlinedTextField(tags, { tags = it }, label = { Text("Tags (one per line; private metadata)") }, modifier = Modifier.fillMaxWidth(), minLines = 2, colors = elsewhereTextFieldColors())
-                OutlinedTextField(notes, { notes = it }, label = { Text("Private notes (never sent to the model)") }, modifier = Modifier.fillMaxWidth(), minLines = 3, colors = elsewhereTextFieldColors())
+                ResourceTextField(tags, { tags = it }, label = "Tags (one per line; private metadata)", modifier = Modifier.fillMaxWidth(), minLines = 2)
+                ResourceTextField(notes, { notes = it }, label = "Private notes (never sent to the model)", modifier = Modifier.fillMaxWidth(), minLines = 3)
             }
         },
         confirmButton = {

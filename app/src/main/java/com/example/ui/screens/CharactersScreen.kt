@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import com.example.ui.components.ResourceTextField
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -362,7 +363,7 @@ private fun ManualCharacterEditor(
         containerColor = MaterialTheme.colorScheme.background
     ) { padding ->
         LazyColumn(
-            modifier = Modifier.fillMaxSize().padding(padding),
+            modifier = Modifier.fillMaxSize().padding(padding).testTag("character_editor_fields"),
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
@@ -438,6 +439,11 @@ private fun CharacterTextField(
     onValueChange: (String) -> Unit,
     singleLine: Boolean = false
 ) {
+    if (!singleLine) {
+        ResourceTextField(value, onValueChange, label,
+            modifier = Modifier.fillMaxWidth().testTag("character_field_$label"), minLines = 3, maxLines = Int.MAX_VALUE)
+        return
+    }
     OutlinedTextField(
         value = value,
         onValueChange = onValueChange,
