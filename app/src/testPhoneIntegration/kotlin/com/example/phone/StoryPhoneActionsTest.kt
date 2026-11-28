@@ -68,6 +68,12 @@ class StoryPhoneActionsTest {
                 phone.saveSelected(first,"character:lead","memory",listOf("out","in"),"Meet at eight.",Destination.STORY_MEMORY)
                 phone.saveSelected(first,"npc:mechanic","lore",listOf("in"),"The garage has an open workshop.",Destination.PLAYTHROUGH_LORE)
                 phone.saveSelected(first,"npc:mechanic","candidate",listOf("in"),"There is a public garage.",Destination.WORLD_CANON_DRAFT)
+                val note=phone.saveCampaignNote(first,"npc:mechanic","lore","Workshop")
+                assertEquals(note,phone.saveCampaignNote(first,"npc:mechanic","lore","Workshop"))
+                val persistedNote = db.campaignDao().getContinuityItem(note)!!
+                assertEquals(shared.campaignId, persistedNote.campaignId)
+                assertEquals("The garage has an open workshop.", persistedNote.details)
+                assertEquals("", persistedNote.resolution)
                 val draft=phone.queueWorldReview(first,"npc:mechanic","candidate","Garage")
                 assertEquals(draft,phone.queueWorldReview(first,"npc:mechanic","candidate","Garage"))
                 val stored=db.worldDao().getEvent(draft)!!
@@ -88,6 +94,10 @@ class StoryPhoneActionsTest {
                 assertTrue(runCatching { phone.storeContactReply(old,"stale","Too late",7L) }.isFailure)
                 val preview=phone.previewFeedPack(first, pack.toByteArray())
                 val imported=phone.importReviewedPack(preview,true)
+                val visible = phone.feed(first).single()
+                assertEquals("Garage Board", visible.channels.single().name)
+                assertEquals(listOf("Local rumor"), visible.channels.single().posts.map { it.text })
+                assertTrue(phone.feed(alt).single().channels.single().posts.isEmpty())
                 val request=phone.manualFeedPreview(first,checkNotNull(imported.starterId),"garage",listOf("workshop"))
                 assertEquals("A public workshop is on the calendar.", request.events.single().summary)
                 assertFalse(request.toString().contains("Private line"))
@@ -96,6 +106,6 @@ class StoryPhoneActionsTest {
         } finally { db.close() }
     }
     private companion object {
-        val pack="""{"format":"elsewhere.world-pulse.feed-pack","version":1,"name":"Garage","platforms":[{"id":"garage","name":"Garage Board","style":"forum"}],"accounts":[],"starterState":{"publicEvents":[{"id":"workshop","visibility":"public","summary":"A public workshop is on the calendar."}],"posts":[]}}"""
+        val pack="""{"format":"elsewhere.world-pulse.feed-pack","version":1,"name":"Garage","platforms":[{"id":"garage","name":"Garage Board","style":"forum"}],"accounts":[{"id":"shop","platformId":"garage","handle":"theshop","displayName":"The Shop","role":"Business"}],"starterState":{"publicEvents":[{"id":"workshop","visibility":"public","summary":"A public workshop is on the calendar."}],"posts":[{"id":"tip","accountId":"shop","kind":"rumor","text":"Local rumor"}]}}"""
     }
 }

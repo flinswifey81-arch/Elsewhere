@@ -41,7 +41,7 @@ class RedesignStoryPhoneTest {
                 }
             }
         }
-        val (story, lead) = runBlocking {
+        val lead = runBlocking {
             val world = app.worldRepository.createWorld("Two timelines")
             val campaign = app.campaignRepository.createCampaign(world.worldId, "Night shifts")
             val character = app.characterRepository.createManualCharacter(ManualCharacterFields(name = "Alex"))
@@ -51,9 +51,11 @@ class RedesignStoryPhoneTest {
             app.chatRepository.saveEngineDefaults(EngineDefaultsEntity(selectedModelId = "fake/global"))
             val settings = checkNotNull(app.chatRepository.getChatSettings(chat))
             app.chatRepository.insertChatSettings(settings.copy(useGlobalEngineDefaults = false, selectedModelId = "fake/override"))
-            chat to character
+            character
         }
-        compose.setContent { AppTheme { ElsewhereApp(container = container, requestedChatId = story) } }
+        compose.setContent { AppTheme { ElsewhereApp(container = container) } }
+        awaitTag("home_continue_story")
+        compose.onNodeWithTag("home_continue_story").performClick()
         compose.waitUntil(10000) {
             compose.onAllNodesWithContentDescription("Chat navigation and actions").fetchSemanticsNodes().isNotEmpty()
         }
