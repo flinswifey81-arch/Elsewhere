@@ -57,7 +57,8 @@ class RedesignLongTextTest {
         form.performScrollToNode(hasTestTag(greetingTag))
         val preview = compose.onNodeWithTag(greetingTag)
         // The 170+ line field must not push the next field beyond a whole screen.
-        assertTrue(preview.getUnclippedBoundsInRoot().height <= 170.dp)
+        val bounds = preview.getUnclippedBoundsInRoot()
+        assertTrue(bounds.bottom - bounds.top <= 170.dp)
         preview.performClick()
         val body = compose.onNodeWithTag("long_text_body")
         assertEquals(original, body.fetchSemanticsNode().config[SemanticsProperties.EditableText].text)
