@@ -40,7 +40,7 @@ class RedesignStoryPhoneTest {
                 override fun streamResponse(messages: List<RoleplayMessage>, options: GenerationOptions): kotlinx.coroutines.flow.Flow<StreamEvent> {
                     sent.add(messages to options)
                     val response = if (options.modelId == "fake/pulse")
-                        """{"posts":[{"accountId":"board","eventId":"workshop","kind":"reaction","text":"I’ll come to the workshop."}]}"""
+                        "```json\n" + """{"posts":[{"accountId":"board","eventId":"workshop","kind":"reaction","text":"I’ll come to the workshop."}]}""" + "\n```"
                     else "Meet me in the garage."
                     return flowOf(StreamEvent.Content(response), StreamEvent.Done(null))
                 }

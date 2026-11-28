@@ -11,7 +11,9 @@ class PulseReplyEngineTest {
     @Test fun explicitModelAndSelectedEventsOnlyWithNoFallback() = runBlocking {
         val requests = mutableListOf<Pair<List<RoleplayMessage>, GenerationOptions>>()
         val result = """{"posts":[{"accountId":"garage","eventId":"meet","kind":"rumor","text":"I heard someone might bring coffee."}]}"""
-        var reply: List<StreamEvent> = listOf(StreamEvent.Content(result), StreamEvent.Done(null))
+        var reply: List<StreamEvent> = listOf(
+            StreamEvent.Content("```json\n"), StreamEvent.Content(result), StreamEvent.Content("\n```"), StreamEvent.Done(null)
+        )
         val provider = object : ModelProvider {
             override suspend fun getModels() = emptyList<OpenRouterModel>()
             override suspend fun getEndpoints(modelId: String) = emptyList<ProviderEndpoint>()
@@ -31,8 +33,11 @@ class PulseReplyEngineTest {
         assertFalse(options.routing.allowFallback)
         assertEquals(listOf(Role.SYSTEM, Role.USER), messages.map { it.role })
         assertTrue(messages.last().content.contains("The meeting was publicly announced."))
+        reply = listOf(StreamEvent.Content("Here are your posts: $result"), StreamEvent.Done(null))
+        val error = runCatching { engine.generate("example/cheap-pulse", preview) }.exceptionOrNull()
+        assertTrue(error?.message?.contains("Nothing was added") == true)
         reply = listOf(StreamEvent.Error(IllegalArgumentException("Unavailable")))
         assertTrue(runCatching { engine.generate("example/missing", preview) }.isFailure)
-        assertEquals(listOf("example/cheap-pulse", "example/missing"), requests.map { it.second.modelId })
+        assertEquals(listOf("example/cheap-pulse", "example/cheap-pulse", "example/missing"), requests.map { it.second.modelId })
     }
 }
