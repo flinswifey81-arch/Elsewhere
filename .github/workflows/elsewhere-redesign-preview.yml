@@ -35,7 +35,7 @@ jobs:
             --tests 'com.example.AppDatabaseMigrationTest.migrationFrom26To27KeepsExistingSettingsAndDefaultsToSpotlight' \
             --tests 'com.example.ChatDetailGenerationTest.naturalSoloCastAcceptsNpcOnlyReplyWithoutReassigningPriorSpotlightHistory' \
             --tests 'com.example.WorldArchiveAdditiveRestorerTest.npcPortraitSurvivesAsNewDossierImageWithoutTouchingOtherArt' \
-            --tests 'com.example.domain.backup.BackupRepositoryTest'
+            --tests 'com.example.domain.backup.BackupRepositoryTest' --tests 'com.example.ScenarioModeTest'
       - name: Print failing preview cases
         if: failure()
         run: |

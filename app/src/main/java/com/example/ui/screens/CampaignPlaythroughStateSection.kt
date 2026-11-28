@@ -8,6 +8,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.data.model.CampaignChapterEntity
 import com.example.data.model.CampaignContinuityItemEntity
@@ -62,7 +63,9 @@ internal fun CampaignPlaythroughStateSection(
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Column(Modifier.weight(1f)) {
                     Text("${rowField.label} · ${row.title}", style = MaterialTheme.typography.labelLarge)
-                    Text(row.details, style = MaterialTheme.typography.bodySmall)
+                    Text(row.details, style = MaterialTheme.typography.bodySmall,
+                        maxLines = if (com.example.BuildConfig.BUILD_TYPE == "phoneIntegration") 3 else Int.MAX_VALUE,
+                        overflow = TextOverflow.Ellipsis)
                 }
                 TextButton(enabled = !busy, onClick = {
                     field = rowField
@@ -130,7 +133,7 @@ internal fun CampaignPlaythroughStateSection(
                             onCheckedChange = { shareWithNarrator = it },
                             enabled = !busy && value.isNotBlank()
                         )
-                        Text("Use in Scenario narration. A copy of this value is sent with new turns; it does not become any character's knowledge.")
+                        Text("Use in Scenario narration. The full entry is used when it fits the selected model. Chat shows a notice if entries do not fit. This does not give characters that knowledge.")
                     }
                 }
             },
