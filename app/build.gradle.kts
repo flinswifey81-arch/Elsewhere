@@ -89,7 +89,8 @@ android {
         "String", "BACKUP_IMPORT_SOURCE_APPLICATION_ID",
         "\"$legacyApplicationId.test.phoneintegration\""
       )
-      signingConfigs.findByName("testing")?.let { signingConfig = it }
+      if (System.getenv("ELSEWHERE_LAB_UNSIGNED") == "1") signingConfig = null
+      else signingConfigs.findByName("testing")?.let { signingConfig = it }
     }
     create("worldsPreview") {
       initWith(getByName("sandbox"))
