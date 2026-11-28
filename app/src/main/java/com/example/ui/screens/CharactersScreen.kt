@@ -2,6 +2,7 @@ package com.example.ui.screens
 
 import com.example.ui.components.ResourceTextField
 import androidx.compose.foundation.layout.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -39,9 +40,14 @@ fun CharactersScreen(
     repository: CharacterRepository,
     profileImageRepository: ProfileImageRepository? = null,
     modifier: Modifier = Modifier,
+    libraryHeader: (@Composable () -> Unit)? = null,
     onCharacterSelected: (String) -> Unit
 ) {
     val characters by repository.getAllCharacters().collectAsState(initial = emptyList())
+    var query by rememberSaveable { mutableStateOf("") }
+    var gallery by rememberSaveable { mutableStateOf(true) }
+    val visible = if (libraryHeader == null || query.isBlank()) characters
+        else remember(characters, query) { characters.filter { query.matchesLibraryQuery(it.displayName, it.characterName, *it.aliases.toTypedArray()) } }
     val coroutineScope = rememberCoroutineScope()
     
     var showImportOptions by remember { mutableStateOf(false) }
@@ -183,13 +189,22 @@ fun CharactersScreen(
 
     Scaffold(
         topBar = {
-            CenterAlignedTopAppBar(
+            if (libraryHeader != null) Column {
+                libraryHeader()
+                LibrarySearch(query, { query = it }, "Search characters", "library_character_search")
+                LibraryNewAndImport("Character", onNew = { editingCharacter = null; showEditor = true }, onImport = { showImportOptions = true })
+                if (characters.isNotEmpty()) {
+                    TextButton(onClick = { gallery = !gallery }, modifier = Modifier.padding(start = 8.dp)) {
+                        Text(if (gallery) "List view" else "Gallery view")
+                    }
+                }
+            } else CenterAlignedTopAppBar(
                 title = { Text("Characters", style = MaterialTheme.typography.titleLarge) },
                 colors = elsewhereTopAppBarColors()
             )
         },
         floatingActionButton = {
-            ProfileLibraryActions(
+            if (libraryHeader == null) ProfileLibraryActions(
                 profileType = "Character",
                 onNew = {
                     editingCharacter = null
@@ -201,7 +216,11 @@ fun CharactersScreen(
         modifier = modifier.testTag("characters_screen"),
         containerColor = MaterialTheme.colorScheme.background
     ) { padding ->
-        if (characters.isEmpty()) {
+        if (visible.isEmpty() && query.isNotBlank() && libraryHeader != null) {
+            Box(Modifier.fillMaxSize().padding(padding).padding(16.dp), contentAlignment = Alignment.Center) {
+                Text("No matching characters.")
+            }
+        } else if (characters.isEmpty()) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -218,7 +237,7 @@ fun CharactersScreen(
                         title = "Your library is empty.",
                         message = "Create a Character or import a character card (JSON) to start."
                     )
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (libraryHeader == null) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(onClick = {
                             editingCharacter = null
                             showEditor = true
@@ -231,18 +250,32 @@ fun CharactersScreen(
                     }
                 }
             }
+        } else if (libraryHeader != null && gallery) {
+            LibraryIdentityGallery(
+                identities = visible.map { LibraryIdentity(it.characterId, it.displayName, it.characterName, it.isArchived) },
+                portraits = profileImageRepository, kind = ProfileImageKind.CHARACTER, type = "character",
+                modifier = Modifier.fillMaxSize().padding(padding).testTag("character_gallery"),
+                onEdit = { id -> visible.firstOrNull { it.characterId == id }?.let {
+                    editingCharacter = it
+                    showEditor = true
+                } },
+                onDelete = { id -> characterPendingDeletion = visible.firstOrNull { it.characterId == id } }
+            )
         } else {
             LazyColumn(
                 modifier = Modifier.fillMaxSize().padding(padding).testTag("character_list"),
                 contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 96.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                items(characters) { character ->
+                items(visible, key = { it.characterId }) { character ->
                     Card(
                         modifier = Modifier
                             .fillMaxWidth()
                             .testTag("character_item_${character.characterId}"),
-                        onClick = { onCharacterSelected(character.characterId) },
+                        onClick = {
+                            if (libraryHeader == null) onCharacterSelected(character.characterId)
+                            else { editingCharacter = character; showEditor = true }
+                        },
                         shape = RoundedCornerShape(16.dp),
                         colors = CardDefaults.cardColors(
                             containerColor = MaterialTheme.colorScheme.surfaceContainerLow
@@ -255,7 +288,7 @@ fun CharactersScreen(
                                 kind = ProfileImageKind.CHARACTER,
                                 profileId = character.characterId,
                                 displayName = character.displayName,
-                                size = 48.dp
+                                size = if (libraryHeader != null) 62.dp else 48.dp
                             )
                             Spacer(modifier = Modifier.width(16.dp))
                             Column(modifier = Modifier.weight(1f)) {

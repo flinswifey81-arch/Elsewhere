@@ -2,6 +2,7 @@ package com.example.ui.screens
 
 import com.example.ui.components.ResourceTextField
 import androidx.compose.foundation.layout.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -39,9 +40,14 @@ fun PersonasScreen(
     repository: PersonaRepository,
     profileImageRepository: ProfileImageRepository? = null,
     modifier: Modifier = Modifier,
+    libraryHeader: (@Composable () -> Unit)? = null,
     onPersonaSelected: (String) -> Unit
 ) {
     val personas by repository.getAllPersonas().collectAsState(initial = emptyList())
+    var query by rememberSaveable { mutableStateOf("") }
+    var gallery by rememberSaveable { mutableStateOf(true) }
+    val visible = if (libraryHeader == null || query.isBlank()) personas
+        else remember(personas, query) { personas.filter { query.matchesLibraryQuery(it.displayName, it.personaName, *it.aliases.toTypedArray()) } }
     val coroutineScope = rememberCoroutineScope()
     
     var showImportOptions by remember { mutableStateOf(false) }
@@ -182,13 +188,22 @@ fun PersonasScreen(
 
     Scaffold(
         topBar = {
-            CenterAlignedTopAppBar(
+            if (libraryHeader != null) Column {
+                libraryHeader()
+                LibrarySearch(query, { query = it }, "Search personas", "library_persona_search")
+                LibraryNewAndImport("Persona", onNew = { editingPersona = null; showEditor = true }, onImport = { showImportOptions = true })
+                if (personas.isNotEmpty()) {
+                    TextButton(onClick = { gallery = !gallery }, modifier = Modifier.padding(start = 8.dp)) {
+                        Text(if (gallery) "List view" else "Gallery view")
+                    }
+                }
+            } else CenterAlignedTopAppBar(
                 title = { Text("Personas", style = MaterialTheme.typography.titleLarge) },
                 colors = elsewhereTopAppBarColors()
             )
         },
         floatingActionButton = {
-            ProfileLibraryActions(
+            if (libraryHeader == null) ProfileLibraryActions(
                 profileType = "Persona",
                 onNew = {
                     editingPersona = null
@@ -200,7 +215,11 @@ fun PersonasScreen(
         modifier = modifier.testTag("personas_screen"),
         containerColor = MaterialTheme.colorScheme.background
     ) { padding ->
-        if (personas.isEmpty()) {
+        if (visible.isEmpty() && query.isNotBlank() && libraryHeader != null) {
+            Box(Modifier.fillMaxSize().padding(padding).padding(16.dp), contentAlignment = Alignment.Center) {
+                Text("No matching personas.")
+            }
+        } else if (personas.isEmpty()) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -217,7 +236,7 @@ fun PersonasScreen(
                         title = "Your library is empty.",
                         message = "Create a Persona or import a persona (JSON) to start."
                     )
-                    Button(
+                    if (libraryHeader == null) Button(
                         onClick = {
                             editingPersona = null
                             showEditor = true
@@ -226,7 +245,7 @@ fun PersonasScreen(
                     ) {
                         Text("New Persona", color = MaterialTheme.colorScheme.onSecondary)
                     }
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (libraryHeader == null) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(onClick = { showImportOptions = true }) {
                             Text("Choose JSON Files")
                         }
@@ -236,18 +255,32 @@ fun PersonasScreen(
                     }
                 }
             }
+        } else if (libraryHeader != null && gallery) {
+            LibraryIdentityGallery(
+                identities = visible.map { LibraryIdentity(it.personaId, it.displayName, it.personaName, it.isArchived) },
+                portraits = profileImageRepository, kind = ProfileImageKind.PERSONA, type = "persona",
+                modifier = Modifier.fillMaxSize().padding(padding).testTag("persona_gallery"),
+                onEdit = { id -> visible.firstOrNull { it.personaId == id }?.let {
+                    editingPersona = it
+                    showEditor = true
+                } },
+                onDelete = { id -> personaPendingDeletion = visible.firstOrNull { it.personaId == id } }
+            )
         } else {
             LazyColumn(
                 modifier = Modifier.fillMaxSize().padding(padding).testTag("persona_list"),
                 contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 96.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                items(personas) { persona ->
+                items(visible, key = { it.personaId }) { persona ->
                     Card(
                         modifier = Modifier
                             .fillMaxWidth()
                             .testTag("persona_item_${persona.personaId}"),
-                        onClick = { onPersonaSelected(persona.personaId) },
+                        onClick = {
+                            if (libraryHeader == null) onPersonaSelected(persona.personaId)
+                            else { editingPersona = persona; showEditor = true }
+                        },
                         shape = RoundedCornerShape(16.dp),
                         colors = CardDefaults.cardColors(
                             containerColor = MaterialTheme.colorScheme.surfaceContainerLow
@@ -260,7 +293,7 @@ fun PersonasScreen(
                                 kind = ProfileImageKind.PERSONA,
                                 profileId = persona.personaId,
                                 displayName = persona.displayName,
-                                size = 48.dp
+                                size = if (libraryHeader != null) 62.dp else 48.dp
                             )
                             Spacer(modifier = Modifier.width(16.dp))
                             Column(modifier = Modifier.weight(1f)) {

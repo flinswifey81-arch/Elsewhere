@@ -106,6 +106,15 @@ class NpcRepository(
 
     fun observeLibraryBanks(): Flow<List<NpcLibraryBankEntity>> = dao.observeLibraryBanks()
 
+    fun observeLibraryDirectory(): Flow<List<NpcLibraryBank>> =
+        dao.observeLibraryBanks().map {
+            database.withTransaction {
+                val byBank = dao.getAllLibraryEntries().groupBy(NpcLibraryEntryEntity::bankId)
+                dao.getLibraryBanks().map { bank -> NpcLibraryBank(bank, byBank[bank.bankId].orEmpty()) }
+            }
+        }
+
+
     fun observeReusableCharacters(): Flow<List<CharacterEntity>> =
         database.characterDao().getAllCharacters()
 

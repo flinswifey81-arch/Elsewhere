@@ -49,7 +49,7 @@ class RedesignLongTextTest {
         compose.setContent { AppTheme { ElsewhereApp(container = app) } }
         compose.onNodeWithTag("bottom_nav_library").performClick()
         compose.onNodeWithTag("hub_characters").performClick()
-        val editTag = "edit_character_$id"
+        val editTag = "character_item_$id"
         awaitTag(editTag)
         compose.onNodeWithTag(editTag).performClick()
         val greetingTag = "open_long_text_Initial Message"

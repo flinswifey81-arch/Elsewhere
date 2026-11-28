@@ -166,7 +166,9 @@ fun ElsewhereApp(
                 )
             }
             composable(Screen.Library.route) {
-                LibraryHubScreen(
+                if (BuildConfig.BUILD_TYPE == "phoneIntegration") {
+                    RedesignLibrary(container) { navController.navigate("npc_bank_picker") }
+                } else LibraryHubScreen(
                     onCharacters = { navController.navigate(Screen.Characters.route) },
                     onPersonas = { navController.navigate(Screen.Personas.route) },
                     onLorebooks = { navController.navigate(Screen.Lorebooks.route) },

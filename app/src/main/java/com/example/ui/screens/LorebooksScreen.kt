@@ -5,6 +5,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import com.example.ui.components.ResourceTextField
 import androidx.compose.foundation.layout.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -47,9 +48,13 @@ import java.io.ByteArrayOutputStream
 @Composable
 fun LorebooksScreen(
     repository: LorebookRepository,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    libraryHeader: (@Composable () -> Unit)? = null
 ) {
     val books by repository.observeLorebooks().collectAsState(initial = emptyList())
+    var query by rememberSaveable { mutableStateOf("") }
+    val visible = if (libraryHeader == null || query.isBlank()) books
+        else remember(books, query) { books.filter { query.matchesLibraryQuery(it.name, it.description) } }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var editingDefinition by remember { mutableStateOf<LorebookWithEntries?>(null) }
@@ -489,13 +494,17 @@ fun LorebooksScreen(
 
     Scaffold(
         topBar = {
-            CenterAlignedTopAppBar(
+            if (libraryHeader != null) Column {
+                libraryHeader()
+                LibrarySearch(query, { query = it }, "Search books", "library_lorebook_search")
+                LibraryNewAndImport("Lorebook", onNew = { editingDefinition = repository.newLorebook() }, onImport = { showImportOptions = true })
+            } else CenterAlignedTopAppBar(
                 title = { Text("Lorebooks") },
                 colors = elsewhereTopAppBarColors()
             )
         },
         floatingActionButton = {
-            ProfileLibraryActions(
+            if (libraryHeader == null) ProfileLibraryActions(
                 profileType = "Lorebook",
                 onNew = { editingDefinition = repository.newLorebook() },
                 onImport = { showImportOptions = true }
@@ -504,7 +513,11 @@ fun LorebooksScreen(
         modifier = modifier.testTag("lorebooks_screen"),
         containerColor = MaterialTheme.colorScheme.background
     ) { padding ->
-        if (books.isEmpty() && !loadingEditor) {
+        if (visible.isEmpty() && query.isNotBlank() && libraryHeader != null) {
+            Box(Modifier.fillMaxSize().padding(padding).padding(16.dp), contentAlignment = Alignment.Center) {
+                Text("No matching books.")
+            }
+        } else if (books.isEmpty() && !loadingEditor) {
             Box(Modifier.fillMaxSize().padding(padding).padding(32.dp), contentAlignment = Alignment.Center) {
                 ElsewhereEmptyState(
                     icon = Icons.Default.MenuBook,
@@ -518,7 +531,7 @@ fun LorebooksScreen(
                 contentPadding = PaddingValues(16.dp, 16.dp, 16.dp, 120.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                items(books, key = { it.lorebookId }) { book ->
+                items(visible, key = { it.lorebookId }) { book ->
                     Card(
                         modifier = Modifier.fillMaxWidth().testTag("lorebook_item_${book.lorebookId}"),
                         border = elsewhereCardBorder(),
