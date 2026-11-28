@@ -1,6 +1,9 @@
 package com.example.redesign
 
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
@@ -31,7 +34,7 @@ class RedesignContinuityEditorTest {
     @get:Rule val compose = createComposeRule()
 
     @Test fun completePlaythroughFactCanBeViewedChangedAndSavedToTheSameEpisode() {
-        val original = "A".repeat(11_988) + "\nFinal line!"
+        val original = "The archive smelled of paper and salt.\n".repeat(350).take(11_988) + "\nFinal line!"
         val edited = original.replace("Final line!", "Final late!")
         assertEquals(12_000, original.length)
         assertEquals(12_000, edited.length)
@@ -53,7 +56,7 @@ class RedesignContinuityEditorTest {
             AppTheme {
                 val facts by repo.observeContinuityItems(id).collectAsState(emptyList())
                 val scope = rememberCoroutineScope()
-                Column {
+                Column(Modifier.fillMaxSize()) {
                     CampaignPlaythroughStateSection(id, listOf(chapter), facts, false) { episode, field, subject, text, share, saved ->
                         scope.launch {
                             repo.setPlaythroughState(id, episode, field, subject, text, share)
@@ -64,7 +67,7 @@ class RedesignContinuityEditorTest {
             }
         }
         compose.waitUntil(10_000) { compose.onAllNodesWithText("Change").fetchSemanticsNodes().isNotEmpty() }
-        compose.onNodeWithText("Change").performClick()
+        compose.onNodeWithText("Change").performSemanticsAction(SemanticsActions.OnClick)
         compose.onNodeWithTag("open_long_text_What is true now?").performClick()
         val body = compose.onNodeWithTag("long_text_body")
         assertEquals(original, body.fetchSemanticsNode().config[SemanticsProperties.EditableText].text)

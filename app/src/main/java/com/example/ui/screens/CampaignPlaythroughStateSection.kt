@@ -63,9 +63,10 @@ internal fun CampaignPlaythroughStateSection(
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Column(Modifier.weight(1f)) {
                     Text("${rowField.label} · ${row.title}", style = MaterialTheme.typography.labelLarge)
-                    Text(row.details, style = MaterialTheme.typography.bodySmall,
-                        maxLines = if (com.example.BuildConfig.BUILD_TYPE == "phoneIntegration") 3 else Int.MAX_VALUE,
-                        overflow = TextOverflow.Ellipsis)
+                    val compact = com.example.BuildConfig.BUILD_TYPE == "phoneIntegration"
+                    val preview = if (compact && row.details.length > 420) row.details.take(420) + "…" else row.details
+                    Text(preview, style = MaterialTheme.typography.bodySmall,
+                        maxLines = if (compact) 3 else Int.MAX_VALUE, overflow = TextOverflow.Ellipsis)
                 }
                 TextButton(enabled = !busy, onClick = {
                     field = rowField
@@ -95,7 +96,7 @@ internal fun CampaignPlaythroughStateSection(
             title = { Text("State in Episode ${episode.ordinal}") },
             text = {
                 Column(
-                    modifier = Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 360.dp).verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Box {
